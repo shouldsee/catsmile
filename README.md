@@ -1,1 +1,1 @@
-CATSMILE: A (cat)alogue of Statistical Machine Learning Error Functions
+CATSMILE: A CATalogue of Statistical Machine Learning Error Functions
