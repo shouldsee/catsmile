@@ -1,1 +1,1 @@
-CATSMILE: A (cat)alogue of Statistical MachIne Learning Examples 
+CATSMILE: A CATalogue of Statistical Machine Learning Error Functions
