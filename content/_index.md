@@ -1,5 +1,5 @@
 ---
-title: "8001: CATEMILE项目简介"
+title: "CATSMILE"
 ---
 我们的目标是，让天下没有难建的模型！
 
