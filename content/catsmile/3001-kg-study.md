@@ -16,6 +16,7 @@ Tool for searching related papers:
 
 - Ke 2016, Unsupervised Neural Hidden Markov Models https://arxiv.org/pdf/1609.09007.pdf
 - PCFG: Compound Probabilistic Context-Free Grammarsfor Grammar Induction. https://aclanthology.org/P19-1228.pdf
+- Viterbi and BW revisited https://nlp.stanford.edu/courses/lsa352/lsa352.lec7.6up.pdf
 
 ## Unsupervised Knowledge Graph
 

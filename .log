@@ -1,0 +1,22 @@
+Start building sites … 
+hugo v0.95.0-9F2E76AF+extended linux/amd64 BuildDate=2022-03-16T14:20:19Z VendorInfo=gohugoio
+
+                   | EN  
+-------------------+-----
+  Pages            | 18  
+  Paginator pages  |  0  
+  Non-page files   |  0  
+  Static files     | 59  
+  Processed images |  0  
+  Aliases          |  0  
+  Sitemaps         |  1  
+  Cleaned          |  0  
+
+Built in 46 ms
+Watching for changes in /catsmile/{archetypes,content,themes}
+Watching for config changes in /catsmile/config.toml, /catsmile/themes/hugo-theme-relearn/config.toml
+Environment: "development"
+Serving pages from memory
+Running in Fast Render Mode. For full rebuilds on change: hugo server --disableFastRender
+Web Server is available at http://localhost:80/ (bind address 10.60.108.246)
+Press Ctrl+C to stop
