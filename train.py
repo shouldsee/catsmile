@@ -21,131 +21,174 @@ from pprint import pprint
 import shutil
 from tqdm import tqdm
 
-CUDA = 1
-batch_size = 60
-dataset = EnglishToGermanDataset(CUDA=CUDA)
-dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
-dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 # device = torch.device('cuda:0' if CUDA else 'cpu')
 
+from Model import cross_entropy
+
+from Model import ExtractionAndMarkovTemplateMatching
+from Model import MixtureOfHMM
+from Model import ExtractionAndCNNTemplateMatching
+from Model import SentenceAsRegression
+from Model import RNNWithSigmoid
+from Model import RNNWithSampling
+from Model import RNNWithMixture
+from Model import RNNWithMixtureMultipleVector
 
 
 
+def parse_checkpoint(sys,):
+    if '--auto' in sys.argv:
+        LOAD_GET_AUTO = 1
+    else:
+        LOAD_GET_AUTO = 0
 
+    os.makedirs('Checkpoints') if not os.path.exists('Checkpoints') else None
 
-class MixtureOfHMM(nn.Module):
-    def __init__(self, graph_dim,embed_dim,mixture_count,state_count,device):
-        super().__init__()
-        # graph_dim = english_vocab_len
-        self.device = device
-        self.embed = nn.Embedding(graph_dim,embed_dim).to(self.device)
-        # self.vocab = nn.Linear(graph_dim,embed_dim).to(self.device)
-        self.vocab = nn.Linear(embed_dim,graph_dim,).to(self.device)
-        self.mixture_count = mixture_count
-        self.state_count = state_count
+    if LOAD_GET_AUTO:
+        res = glob.glob('Checkpoints/*pkl')
+        getLoad = lambda x:int(x.replace('Checkpoints/Checkpoint','').split('.')[0])
+        res = sorted(res,key=getLoad)[-1]
+        LOAD= getLoad(res)
+    else:
+        LOAD = '-1'
 
-        x = nn.Linear(state_count,state_count*mixture_count).to(self.device)
-        self.init_dist = nn.Parameter(x.bias.reshape((1,mixture_count,state_count)))
-        self.transition= nn.Parameter(x.weight.reshape((1,mixture_count,state_count,state_count)))
-        x = nn.Linear(embed_dim*state_count,mixture_count).to(self.device)
-        self.state_vect= nn.Parameter(x.weight.reshape((1,mixture_count,state_count,embed_dim)))
-        # self.emission  = nn.Linear(state_count**2,mixture_count).to(self.device)
-        # print(self.transition.shape)
-        # self.init_dist
+    if '--LOAD' in sys.argv:
+        LOAD = sys.argv[sys.argv.index('--LOAD')+1]
+        # LOAD = int(LOAD)
+    return LOAD
 
-    def log_prob(self,x):
-        x0 = x
-        xx = self.embed(x)
-        zs = torch.tensor([],requires_grad=True)
-        z = torch.log_softmax(self.init_dist[:,:,:,None]/2.,dim=2)
-        logtransition = torch.log_softmax(self.transition/2.,2)
-        emit = torch.log_softmax(self.vocab(0*self.state_vect+xx.mean(1)[:,None,None]),dim=-1)
-        # emit = torch.log_softmax(self.vocab(self.state_vect)/2.,dim=-1)
-        # state_vect = xx
-        # import pdb; pdb.set_trace()
-        for i in range(x.shape[1]):
-            # xxx = ( xx[:,i:i+1,:])
-            z = torch.logsumexp(logtransition + z,dim=2)[:,:,:,None]
-            x = torch.cat([x0[:,None,i:i+1,None] for _ in range(self.mixture_count)],dim=1)
-            x = torch.cat([x for _ in range(self.state_count)],dim=2)
-            x = torch.gather(emit+(0*x),index=x,dim=-1)
-            z = x + z
-        # x.shape[1]
-            # [0][:,0:])
-        z = z/1./(i+1)
-        # print(z[0,:,0,:])
-        # print(z[0,0,:,:])
-        # print(z[0,:,0,:])
-        # print(self.transition[0])
-        # z = torch.logsumexp(z,dim=2)
-        # z = torch.logsumexp(1*z,dim=1)
-        z = torch.logsumexp(z,dim=(1,2))
-        # z =  z.max(dim=(2))[0].max(dim=1)[0]
-            # log_emit = x
-            # z = log_emit +
-        # torch.logsumexp(self.transition * self.alpha,dim=)
-        # torch.log(torch.sum(torch.exp()))/
-        # z = x
-        # import pdb; pdb.set_trace()
-        return z
-
-    def decode(self,z):
-        y = z
-        return y
-
-    def sample(self,size):
-        torch.random()
-
-def cross_entropy(targ,pred):
-    return
 
 class Config(object):
     def __init__(self):
         return
-conf = Config()
 
-conf.criterion = cross_entropy
-conf.embed_dim = 25
-conf.mixture_count = 10
-conf.state_count = 10
-conf.device =  torch.device('cuda:0' if CUDA else 'cpu')
-conf.num_epoch = 1000
-model = MixtureOfHMM(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+CUDA = 1
+def init_conf(CUDA):
+    conf = Config()
+    conf.criterion = cross_entropy
+    conf.embed_dim = 50
+    conf.mixture_count = 30
+    conf.state_count = 150
+    conf.device =  torch.device('cuda:0' if CUDA else 'cpu')
+    conf.num_epoch = 1000
+    # model = MixtureOfHMM(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
 
-conf.learning_rate = 0.001
+    conf.learning_rate = 0.001
+    conf.SAVE_INTERVAL = 10
+    conf.batch_size = 60
+    conf.tsi_max = 10
 
-params = list(model.parameters())
-print(dict(model.named_parameters()).keys())
-#### using Adam with high learning_rate is catastrophic
-optimizer = torch.optim.Adagrad( params, lr=conf.learning_rate)
+    conf.dataset = dataset = EnglishToGermanDataset(CUDA=CUDA)
+    conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
+    # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
+    # conf.model = model = ExtractionAndMarkovTemplateMatching(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    conf.model = model = ExtractionAndCNNTemplateMatching(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    # conf.model = model = SentenceAsRegression(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count, embed_dim=conf.embed_dim, device=conf.device)
+    # conf.model = model = RNNWithSigmoid(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    # conf.model = model = RNNWithMixture(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    conf.model = model = RNNWithMixtureMultipleVector(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+        state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    # conf.model = model = RNNWithSampling(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+
+
+    params = list(model.parameters())
+    print(dict(model.named_parameters()).keys())
+    #### using Adam with high learning_rate is catastrophic
+    conf.optimizer = torch.optim.Adagrad( params, lr=conf.learning_rate)
+    return conf
 
 def main():
-    for epoch in range(conf.num_epoch):
+    CUDA = 1
+    conf = init_conf(CUDA)
+    model = conf.model
+    dataset = conf.dataset
+    dataset
+    CKPT = parse_checkpoint(sys,)
+    if(CKPT!='-1'):
+        epoch = CKPT
+        # res = glob.glob(os.path.join("Checkpoints",f"{conf.model.__class__.__name__}_{CKPT}_*.pkl"))
+        res = glob.glob(os.path.join("Checkpoints",f"{conf.model.__class__.__name__}_{epoch}*.pkl"))
+        assert len(res)==1,['Which one to choose?',res]
+        print(f'[LOADING]{res[0]}')
+
+        # fn = res[0]        checkpoint   = torch.load(os.path.join("Checkpoints","Checkpoint"+str(LOAD)+".pkl"))
+        checkpoint   = torch.load(res[0])
+        test_losses  = checkpoint["test_losses"]
+        train_losses = checkpoint["train_losses"]
+        epoch        = checkpoint["epoch"]
+        x            = checkpoint["model"]
+        # import pdb; pdb.set_trace()
+        xx = {}
+        for k,v in x.items():
+            if k in dict(model.named_parameters()):
+                xx[k] = v
+            else:
+                pass
+                # print(k)
+        x = xx
+        STRICT_LOAD = '--nostrict' not in sys.argv
+        model.load_state_dict(x,strict=STRICT_LOAD)
+        # optimizer.load_state_dict(checkpoint["optimizer"])
+    else:
+        test_losses = []
+        train_losses = []
+        epoch = -1
+
+
+    loss_test_mean = 0
+    for _epoch in range(conf.num_epoch):
+        epoch += 1
         loss_train_sum = 0
         loss_test_sum = 0
 
+
+        if(epoch % conf.SAVE_INTERVAL ==0):
+            target_filename = os.path.join("Checkpoints",f"{conf.model.__class__.__name__}_{epoch}_{loss_test_mean:.5f}.pkl")
+            torch.save({
+                "model"       :conf.model.state_dict(),
+                "optimizer"   :conf.optimizer.state_dict(),
+                "epoch"       :epoch,
+                "train_losses":train_losses,
+                "test_losses" :test_losses
+            },target_filename)
+            linkFile = __file__+'.curr.ckpt.pkl'
+            # os.unlink(linkFile) if os.path.exists(linkFile) else None
+            # os.link(target_filename,linkFile)
+            shutil.copy2(target_filename,linkFile+'.temp')
+            shutil.move(linkFile+'.temp',linkFile)
+            # loss = cross_entropy(x,y)
+
         model.eval()
         dataset.test()
-        conf.tsi_max = 10
-        for tsi,item in enumerate(dataloader_test):
+        for tsi,item in enumerate(conf.dataloader):
             x = item['english']
-            loss =  -model.log_prob(x).mean()
+            zi   = item['index']
+            # print(zi.min())
+            loss =  -model.log_prob(zi,x).mean()
             loss_test_sum +=  float(loss.item())
             if tsi==conf.tsi_max:
                 break
                 # print(tsi)
 
+        model.zero_grad()
         model.train()
         dataset.train()
-        for tri,item in enumerate(tqdm(dataloader)):
-            x = item['english']
+        for tri,item in enumerate(tqdm(conf.dataloader)):
+            x    = item['english']
+            zi   = item['index']
+            # print(zi.min())
             # z = model.encode(x)
             # y = model.decode(z)
-            loss =  -model.log_prob(x).mean()
+            gradloss =  -model.log_prob_grad(zi,x).mean()
+            loss =  -model.log_prob(zi,x).mean()
             # loss.mean()
             loss_train_sum += float(loss.item())
             loss.backward()
-            optimizer.step()
+            conf.optimizer.step()
             # break
 
 
@@ -154,6 +197,9 @@ def main():
         print(f'Epoch: {epoch}')
         print(f'Training Loss: {loss_train_mean}')
         print(f'Testing Loss: {loss_test_mean}')
-            # loss = cross_entropy(x,y)
+
+        train_losses.append(loss_train_mean)
+        test_losses.append(loss_test_mean)
+
 if __name__=='__main__':
     main()
