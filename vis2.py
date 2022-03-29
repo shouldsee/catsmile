@@ -18,8 +18,8 @@ def main():
 
     from tqdm import tqdm
     model = conf.model
-    print(list(dict(xx['model']).keys()))
-
+    # print(list(dict(xx['model'])))
+    for k,v in dict(xx['model']).items():     print(k);print(  (100*v.reshape(-1)[:10]).long())
 
     self = model
 
@@ -30,18 +30,49 @@ def main():
 
     n_sample=100
     # traj = torch.cat([model.sample_trajectory(model.latent[item['index'],:],conf.dataset.min_len, n_sample) for item in it],dim=0)
-
     item = it[0]
     # traj,lp = model.sample_trajectory(model.latent[item['index'],:],conf.dataset.min_len, n_sample);trajm = traj.mean(2)
     print('[TRYING]')
-    traj = model.sample_trajectory(model.latent[list(range(200))+list(range(100)),:],conf.dataset.min_len, );trajm = traj
+    traj = model.sample_trajectory(model.latent[list(range(0,50))+list(range(800,850)),:],conf.dataset.min_len, );trajm = traj
+    tokens = model.sample_tokens(model.latent[list(range(0,50))+list(range(800,850)),:],conf.dataset.min_len, );
+    i = 0
+    print()
+
+    n_sample = 20
+    xp = tokens.softmax(-1)[:,None].repeat((1,n_sample,1,1))
+    xpc = xp.cumsum(-1)
+    val,which = (torch.rand(xp.shape[:-1])[:,:,:,None]<xpc).max(-1)
+    sample = which
+    for xx in  sample[4][2]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
+    for xx in  sample[4][3]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
+    print()
+
+    for xx in  tokens.argmax(-1)[25]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
+    print()
+
+    def pdr(i):
+        for xx in  tokens.argmax(-1)[i]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
+        print()
+    def ptr(i):
+        for xx in  conf.dataset.english_sentences_train[i]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
+        print()
+
     # print((traj[0][:,:10]*10).long())
     i = 0; print((trajm[i][:,:10]*10).long())
+    i = 49; print((trajm[i][:,:10]*10).long())
+    i = 50; print((trajm[i][:,:10]*10).long())
+    i = 52; print((trajm[i][:,:10]*10).long())
+    i = 51; print((trajm[i][:,:10]*10).long())
     i = 1; print((trajm[i][:,:10]*10).long())
+    i = 0; print((trajm[i][:,:10]*10).long())
+
     lat = model.latent
     lat[0]
-    print((model.latent[[0,1,801,802],:10]*10).long())
-    assert 0
+    i=0; [ptr(i),pdr(i)]
+    i=1; [ptr(i),pdr(i)]
+    for i in range(10): [ptr(i),pdr(i)]
+
+    print((model.latent[[0,1,801,802],:10]*100).long())
     loss = torch.cat([model.log_prob(item['index'],item['english']) for item in it],dim=0)
     # clup = torch.cat([model.log_prob(item['english']) for item in tqdm(conf.dataloader)],dim=0)
     # clup = torch.cat(clup,dim=0)[:,:,0]

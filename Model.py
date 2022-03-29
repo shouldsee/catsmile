@@ -126,13 +126,244 @@ class RNNWithSigmoid(nn.Module):
     log_prob_grad = log_prob
 
 
-class RNNWithMixtureMultipleVector(nn.Module):
+
+class RNNWithMarkovNet(nn.Module):
+    '''
+    Use a markov transfer function to model RNN transfer.
+    Model sentence as a transfer of attention
+    '''
+    def __init__(self, device, graph_dim,embed_dim,mixture_count,state_count,total_length,min_len):
+        super().__init__()
+        # state_count = 5
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        x = nn.Linear(embed_dim*state_count*4,total_length).to(self.device)
+        self.latent     = nn.Parameter(x.weight)
+        self.transition = nn.Linear(embed_dim,embed_dim*mixture_count).to(self.device)
+        self.anchor = nn.Linear(embed_dim,mixture_count).to(self.device)
+        self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.n_step     = min_len
+        self.extractor = nn.Linear(embed_dim,1).to(self.device)
+
+    def sample_tokens(self,z,n_step):
+        zs = self.sample_trajectory(z,n_step)
+        ys = self.vocab(zs).log_softmax(-1)
+        return ys
+
+    def sample_trajectory(self,z,n_step):
+        z = z.reshape((4,len(z),self.state_count,self.embed_dim))
+        xq,xk,xv,xi = z
+        # xtran = xq.transpose(2,1).matmul(xk).softmax(1)
+        xtran = (xq.matmul(xk.transpose(2,1))/self.embed_dim**0.5).softmax(1)
+        att = xi[:,:,:1].softmax(1).transpose(2,1)
+        zs = torch.tensor([],requires_grad=True).to(self.device)
+        for i in range(n_step):
+            emit = att.matmul(xv)
+
+            # z    = z / (0.00001 + z.std(-1,keepdims=True)) *0.113
+            # ext  = self.extractor(z).transpose(2,1).softmax(-1)
+            # emit = ext.matmul(z)
+            # import pdb; pdb.set_trace()
+            # .matmul(z)
+            zs = torch.cat([zs,emit],dim=1)
+            att = att.matmul(xtran)
+            # import pdb; pdb.set_trace()
+
+            # mixed = self.transition(z).reshape((len(z), self.state_count,self.mixture_count, self.embed_dim,))
+
+            # att = self.anchor(z).softmax(-1)
+            # dz = (att[:,:,:,None] * mixed).sum(-2)
+            # z = z+dz
+        return zs
+
+    def log_prob(self,zi,y):
+        z = self.latent[zi]
+        ys = self.sample_tokens(z,self.n_step)
+        yp = torch.gather(ys,index=y[:,:,None],dim=-1)[:,:,0]
+        # import pdb; pdb.set_trace()
+        return yp
+    log_prob_grad = log_prob
+
+
+class RNNWithTransformer(nn.Module):
     '''
     Use multiple vectors instead of 1
     '''
     def __init__(self, device, graph_dim,embed_dim,mixture_count,state_count,total_length,min_len):
         super().__init__()
         state_count = 5
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        x = nn.Linear(embed_dim*state_count,total_length).to(self.device)
+        self.latent     = nn.Parameter(x.weight)
+        self.transition = nn.Linear(embed_dim,embed_dim*mixture_count).to(self.device)
+        self.qmat = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.kmat = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.vmat = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.anchor = nn.Linear(embed_dim,mixture_count).to(self.device)
+        self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.n_step     = min_len
+        self.extractor = nn.Linear(embed_dim,1).to(self.device)
+
+    def sample_tokens(self,z,n_step):
+        zs = self.sample_trajectory(z,n_step)
+        ys = self.vocab(zs).log_softmax(-1)
+        return ys
+
+    def sample_trajectory(self,z,n_step):
+        z = z.reshape((len(z),self.state_count,self.embed_dim,))
+        zs = torch.tensor([],requires_grad=True).to(self.device)
+        for i in range(n_step):
+            z    = z / (0.00001 + z.std(-1,keepdims=True)) * 0.113
+            xz = torch.cat([z,torch.ones((len(z),1,self.embed_dim)).to(self.device)],dim=1)
+            xk = self.kmat(xz)
+            xq = self.qmat(xz)
+            xv = self.vmat(xz)
+            att = xq.matmul(xk.transpose(2,1))[:,:,:-1].softmax(-1)
+            dz  = att.matmul(xv[:,:-1])
+            z = z+dz[:,:-1]
+
+            # ext  = self.extractor(z).transpose(2,1).softmax(-1)
+            # emit = ext.matmul(z)
+            # import pdb; pdb.set_trace()
+            # .matmul(z)
+            emit = dz[:,-1:]
+            zs = torch.cat([zs,emit],dim=1)
+            # mixed = self.transition(z).reshape((len(z), self.state_count,self.mixture_count, self.embed_dim,))
+
+            # att = self.anchor(z).softmax(-1)
+            # dz = (att[:,:,:,None] * mixed).sum(-2)
+
+            # z = z+dz
+        return zs
+
+    def log_prob(self,zi,y):
+        z = self.latent[zi]
+        ys = self.sample_tokens(z,self.n_step)
+        yp = torch.gather(ys,index=y[:,:,None],dim=-1)[:,:,0]
+        # import pdb; pdb.set_trace()
+        return yp
+    log_prob_grad = log_prob
+
+
+class RNNWithParellelVector(nn.Module):
+    '''
+    Use multiple vectors instead of 1
+    '''
+    def __init__(self, device, graph_dim,embed_dim,mixture_count,state_count,total_length,min_len):
+        super().__init__()
+        # state_count = 5
+        state_count = 15
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        x = nn.Linear(embed_dim*state_count,total_length).to(self.device)
+        self.latent     = nn.Parameter(x.weight)
+        self.transition = nn.Linear(embed_dim,embed_dim*mixture_count).to(self.device)
+        self.anchor = nn.Linear(embed_dim,mixture_count).to(self.device)
+        self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.n_step     = min_len
+        self.extractor = nn.Linear(embed_dim,1).to(self.device)
+
+    def sample_tokens(self,z,n_step):
+        zs = self.sample_trajectory(z,n_step)
+        ys = self.vocab(zs).log_softmax(-1)
+        return ys
+
+    def sample_trajectory(self,z,n_step):
+        z = z.reshape((len(z),self.state_count,self.embed_dim,))
+        return z
+
+    def log_prob(self,zi,y):
+        z = self.latent[zi]
+        ys = self.sample_tokens(z,self.n_step)
+        yp = torch.gather(ys,index=y[:,:,None],dim=-1)[:,:,0]
+        # import pdb; pdb.set_trace()
+        return yp
+    log_prob_grad = log_prob
+
+# class RNNWithMixtureMultipleVector(nn.Module):
+class RNNWithMovingAttention(nn.Module):
+    '''
+    Use multiple vectors instead of 1
+    '''
+    def __init__(self, device, graph_dim,embed_dim,mixture_count,state_count,total_length,min_len):
+        super().__init__()
+        # state_count = 5
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        x = nn.Linear(embed_dim*state_count,total_length).to(self.device)
+        self.latent     = nn.Parameter(x.weight)
+        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.anchor     = nn.Linear(embed_dim,mixture_count).to(self.device)
+        self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.n_step     = min_len
+        self.extractor = nn.Linear(embed_dim,1).to(self.device)
+
+    def sample_tokens(self,z,n_step):
+        zs = self.sample_trajectory(z,n_step)
+        ys = self.vocab(zs).log_softmax(-1)
+        return ys
+
+    def sample_trajectory(self,z,n_step):
+        mixed = z.reshape((len(z),self.state_count,self.embed_dim,))
+        zs = torch.tensor([],requires_grad=True).to(self.device)
+        z = mixed[:,0:1,:]*0+1
+        # z = mixed[:,0:1,:]
+        # z = torch.ones()
+        mixed = mixed * 100
+        # mixed   = mixed / (0.00001 + z.std(-1,keepdims=True))  *0.113
+        for i in range(n_step):
+            z    = z / (0.00001 + z.std(-1,keepdims=True))  *0.113
+            att  = z.matmul(mixed.transpose(2,1)).softmax(-1)
+            emit = att.matmul(mixed)
+
+            # import pdb; pdb.set_trace()
+            zs = torch.cat([zs,emit],dim=1)
+            z = z + self.transition(z)
+            # mixed = self.transition(z).reshape((len(z), self.state_count,self.mixture_count, self.embed_dim,))
+
+            # att = self.anchor(z).softmax(-1)
+            # dz = (att[:,:,:,None] * mixed).sum(-2)
+
+            # z = z+dz
+        return zs
+
+    def log_prob(self,zi,y):
+        z = self.latent[zi]
+        ys = self.sample_tokens(z,self.n_step)
+        yp = torch.gather(ys,index=y[:,:,None],dim=-1)[:,:,0]
+        # import pdb; pdb.set_trace()
+        return yp
+    log_prob_grad = log_prob
+
+
+class RNNWithMixtureMultipleVector(nn.Module):
+    '''
+    Use multiple vectors instead of 1
+    '''
+    def __init__(self, device, graph_dim,embed_dim,mixture_count,state_count,total_length,min_len):
+        super().__init__()
+        # state_count = 5
         self.device = device
         self.total_length = total_length
         self.min_len = min_len

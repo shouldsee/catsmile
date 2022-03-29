@@ -32,6 +32,11 @@ from Model import SentenceAsRegression
 from Model import RNNWithSigmoid
 from Model import RNNWithSampling
 from Model import RNNWithMixture
+from Model import RNNWithTransformer
+from Model import RNNWithParellelVector
+from Model import RNNWithMarkovNet
+from Model import RNNWithMovingAttention
+
 from Model import RNNWithMixtureMultipleVector
 
 
@@ -68,7 +73,7 @@ def init_conf(CUDA):
     conf.criterion = cross_entropy
     conf.embed_dim = 50
     conf.mixture_count = 30
-    conf.state_count = 150
+    conf.state_count = 10
     conf.device =  torch.device('cuda:0' if CUDA else 'cpu')
     conf.num_epoch = 1000
     # model = MixtureOfHMM(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
@@ -89,8 +94,18 @@ def init_conf(CUDA):
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
     # conf.model = model = RNNWithMixture(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
-    conf.model = model = RNNWithMixtureMultipleVector(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    '990 3.58'
+    # conf.model = model = RNNWithTransformer(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    # conf.model = model = RNNWithMixtureMultipleVector(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    # conf.model = model = RNNWithMarkovNet(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    conf.model = model = RNNWithMovingAttention(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    # conf.model = model = RNNWithParellelVector(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+
     # conf.model = model = RNNWithSampling(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
 
@@ -132,6 +147,7 @@ def main():
         x = xx
         STRICT_LOAD = '--nostrict' not in sys.argv
         model.load_state_dict(x,strict=STRICT_LOAD)
+        conf.optimizer.load_state_dict(checkpoint['optimizer'])
         # optimizer.load_state_dict(checkpoint["optimizer"])
     else:
         test_losses = []
@@ -165,7 +181,7 @@ def main():
         model.eval()
         dataset.test()
         for tsi,item in enumerate(conf.dataloader):
-            x = item['english']
+            x    = item['english']
             zi   = item['index']
             # print(zi.min())
             loss =  -model.log_prob(zi,x).mean()
@@ -174,9 +190,11 @@ def main():
                 break
                 # print(tsi)
 
-        model.zero_grad()
+
+
         model.train()
         dataset.train()
+        model.zero_grad()
         for tri,item in enumerate(tqdm(conf.dataloader)):
             x    = item['english']
             zi   = item['index']
