@@ -7,8 +7,9 @@ def main():
     conf = init_conf(CUDA=0)
 
     epoch = sys.argv[sys.argv.index('--LOAD')+1]
-    epoch = int(epoch)
-    res = glob(os.path.join("Checkpoints",f"{conf.model.__class__.__name__}_{epoch}_*.pkl"))
+    # epoch = int(epoch.)
+    res = glob(os.path.join("Checkpoints",f"{conf.model.__class__.__name__}_{epoch}*.pkl"))
+    assert len(res)==1,['Which one to choose?',res]
 
     fn = res[0]
     xx = torch.load(fn)

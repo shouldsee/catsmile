@@ -36,8 +36,9 @@ from Model import RNNWithTransformer
 from Model import RNNWithParellelVector
 from Model import RNNWithMarkovNet
 from Model import RNNWithMovingAttention
-
+from Model import RNNWithMovingAttentionKV
 from Model import RNNWithMixtureMultipleVector
+from Model import RNNWithVectorSelection
 
 
 
@@ -73,9 +74,9 @@ def init_conf(CUDA):
     conf.criterion = cross_entropy
     conf.embed_dim = 50
     conf.mixture_count = 30
-    conf.state_count = 10
+    conf.state_count = 15
     conf.device =  torch.device('cuda:0' if CUDA else 'cpu')
-    conf.num_epoch = 1000
+    conf.num_epoch = 500
     # model = MixtureOfHMM(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
 
     conf.learning_rate = 0.001
@@ -88,8 +89,8 @@ def init_conf(CUDA):
     # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
     # conf.model = model = ExtractionAndMarkovTemplateMatching(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
     conf.model = model = ExtractionAndCNNTemplateMatching(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
-    # conf.model = model = SentenceAsRegression(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
-    #     state_count=conf.state_count, embed_dim=conf.embed_dim, device=conf.device)
+    conf.model = model = SentenceAsRegression(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+        state_count=conf.state_count, embed_dim=conf.embed_dim, device=conf.device)
     # conf.model = model = RNNWithSigmoid(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
     # conf.model = model = RNNWithMixture(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
@@ -101,7 +102,11 @@ def init_conf(CUDA):
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
     # conf.model = model = RNNWithMarkovNet(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
-    conf.model = model = RNNWithMovingAttention(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    # conf.model = model = RNNWithMovingAttention(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    # conf.model = model = RNNWithMovingAttentionKV(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    conf.model = model = RNNWithVectorSelection(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
     # conf.model = model = RNNWithParellelVector(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
@@ -113,7 +118,8 @@ def init_conf(CUDA):
     params = list(model.parameters())
     print(dict(model.named_parameters()).keys())
     #### using Adam with high learning_rate is catastrophic
-    conf.optimizer = torch.optim.Adagrad( params, lr=conf.learning_rate)
+    # conf.optimizer = torch.optim.Adagrad( params, lr=conf.learning_rate)
+    conf.optimizer = torch.optim.RMSprop( params, lr=conf.learning_rate)
     return conf
 
 def main():

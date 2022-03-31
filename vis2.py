@@ -34,7 +34,7 @@ def main():
     # traj,lp = model.sample_trajectory(model.latent[item['index'],:],conf.dataset.min_len, n_sample);trajm = traj.mean(2)
     print('[TRYING]')
     traj = model.sample_trajectory(model.latent[list(range(0,50))+list(range(800,850)),:],conf.dataset.min_len, );trajm = traj
-    tokens = model.sample_tokens(model.latent[list(range(0,50))+list(range(800,850)),:],conf.dataset.min_len, );
+    tokens = model.sample_tokens(model.latent[list(range(0,50))+list(range(800,850)),:],conf.dataset.min_len*2, );
     i = 0
     print()
 
@@ -56,21 +56,23 @@ def main():
     def ptr(i):
         for xx in  conf.dataset.english_sentences_train[i]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
         print()
+    def ptdr(i): [ptr(i),pdr(i)]
 
     # print((traj[0][:,:10]*10).long())
     i = 0; print((trajm[i][:,:10]*10).long())
     i = 49; print((trajm[i][:,:10]*10).long())
-    i = 50; print((trajm[i][:,:10]*10).long())
-    i = 52; print((trajm[i][:,:10]*10).long())
-    i = 51; print((trajm[i][:,:10]*10).long())
-    i = 1; print((trajm[i][:,:10]*10).long())
-    i = 0; print((trajm[i][:,:10]*10).long())
+    # i = 50; print((trajm[i][:,:10]*10).long())
+    # i = 52; print((trajm[i][:,:10]*10).long())
+    # i = 51; print((trajm[i][:,:10]*10).long())
+    # i = 1; print((trajm[i][:,:10]*10).long())
+    # i = 0; print((trajm[i][:,:10]*10).long())
 
     lat = model.latent
     lat[0]
-    i=0; [ptr(i),pdr(i)]
-    i=1; [ptr(i),pdr(i)]
-    for i in range(10): [ptr(i),pdr(i)]
+    print('[Fitted]')
+    for i in range(5): ptdr(i);print()
+    print('[NonFitted]')
+    for i in range(50,55): ptdr(i);print()
 
     print((model.latent[[0,1,801,802],:10]*100).long())
     loss = torch.cat([model.log_prob(item['index'],item['english']) for item in it],dim=0)
@@ -126,4 +128,14 @@ def main():
 
     import pdb; pdb.set_trace()
     print(fn)
+'''
+Epoch: 999
+Training Loss: 1.3184270177568709
+Testing Loss: 8.12166859886863
+
+Epoch: 400
+Training Loss: 1.39116393668311
+Testing Loss: 6.793539957566694
+
+'''
 main()
