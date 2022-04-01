@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim
 
-from Dataset.translation_dataset import EnglishToGermanDataset
+from markov_lm.Dataset.translation_dataset import EnglishToGermanDataset
 
 import os,sys
 
@@ -12,7 +12,7 @@ import numpy as np
 from tqdm import tqdm
 from torch import autograd
 
-from util_html import write_png_tag
+from markov_lm.util_html import write_png_tag
 
 import pandas as pd
 import sys
@@ -23,23 +23,27 @@ from tqdm import tqdm
 
 # device = torch.device('cuda:0' if CUDA else 'cpu')
 
-from Model import cross_entropy
+from markov_lm.Model import cross_entropy
 
-from Model import ExtractionAndMarkovTemplateMatching
-from Model import MixtureOfHMM
-from Model import ExtractionAndCNNTemplateMatching
-from Model import SentenceAsRegression
-from Model import RNNWithSigmoid
-from Model import RNNWithSampling
-from Model import RNNWithMixture
-from Model import RNNWithTransformer
-from Model import RNNWithParellelVector
-from Model import RNNWithMarkovNet
-from Model import RNNWithMovingAttention
-from Model import RNNWithMovingAttentionKV
-from Model import RNNWithMixtureMultipleVector
-from Model import RNNWithVectorSelection
-
+from markov_lm.Model import ExtractionAndMarkovTemplateMatching
+from markov_lm.Model import MixtureOfHMM
+from markov_lm.Model import ExtractionAndCNNTemplateMatching
+from markov_lm.Model import SentenceAsRegression
+from markov_lm.Model import RNNWithSigmoid
+from markov_lm.Model import RNNWithSampling
+from markov_lm.Model import RNNWithMixture
+from markov_lm.Model import RNNWithTransformer
+from markov_lm.Model import RNNWithParellelVector
+from markov_lm.Model import RNNWithMarkovNet
+from markov_lm.Model import RNNWithMovingAttention
+from markov_lm.Model import RNNWithMovingAttentionKV
+from markov_lm.Model import RNNWithMixtureMultipleVector
+from markov_lm.Model import RNNWithVectorSelection
+from markov_lm.Model import RNNWithSoftmaxVectorSelection
+from markov_lm.Model import RNNWithAttentionVectorSelection
+from markov_lm.Model import RNNWithHardmaxVectorSelection
+from markov_lm.Model import RNNWithMixedProjection
+from markov_lm.Model import RNNWithMixedProjectionSimpleTransition
 
 
 def parse_checkpoint(sys,):
@@ -76,7 +80,7 @@ def init_conf(CUDA):
     conf.mixture_count = 30
     conf.state_count = 15
     conf.device =  torch.device('cuda:0' if CUDA else 'cpu')
-    conf.num_epoch = 500
+    conf.num_epoch = 5000
     # model = MixtureOfHMM(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
 
     conf.learning_rate = 0.001
@@ -106,8 +110,19 @@ def init_conf(CUDA):
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
     # conf.model = model = RNNWithMovingAttentionKV(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
-    conf.model = model = RNNWithVectorSelection(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    # conf.model = model = RNNWithVectorSelection(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    conf.model = model = RNNWithSoftmaxVectorSelection(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    conf.model = model = RNNWithMixedProjection(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+        state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    conf.model = model = RNNWithMixedProjectionSimpleTransition(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+        state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    # conf.model = model = RNNWithAttentionVectorSelection(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
+    #
+    # conf.model = model = RNNWithHardmaxVectorSelection(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
     # conf.model = model = RNNWithParellelVector(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
 

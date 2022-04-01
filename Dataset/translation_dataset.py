@@ -14,11 +14,12 @@ import time
 # dest_lang_file  = "English_sentences.pkl"
 source_lang_file = "English_sentences.pkl"
 dest_lang_file  = "German_sentences.pkl"
+DIR = os.path.dirname(os.path.realpath(__file__))
 class EnglishToGermanDataset(torch.utils.data.Dataset):
     def __init__(self,CUDA=False):
         super(EnglishToGermanDataset, self).__init__()
         print("LOADING GERMAN SENTENCES")
-        load = torch.load(os.path.join("Dataset",dest_lang_file))
+        load = torch.load(os.path.join(DIR,dest_lang_file))
         self.german_sentences_train = load["train_data"]
         self.german_sentences_test = load["test_data"]
         self.german_max_len = load["max_len"]
@@ -28,7 +29,7 @@ class EnglishToGermanDataset(torch.utils.data.Dataset):
         self.german_vocab_reversed = load["vocab_reversed"]
         self.german_eos = self.german_vocab["<end>"]
         print("LOADING ENGLISH SENTENCES")
-        load = torch.load(os.path.join("Dataset",source_lang_file))
+        load = torch.load(os.path.join(DIR,source_lang_file))
         self.english_sentences_train = load["train_data"]
         self.english_sentences_test = load["test_data"]
         self.english_max_len = load["max_len"]

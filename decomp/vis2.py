@@ -3,6 +3,7 @@ import sys,os
 
 import torch
 from train import init_conf
+import numpy as np
 def main():
     conf = init_conf(CUDA=0)
 
@@ -13,7 +14,7 @@ def main():
 
     fn = res[0]
     xx = torch.load(fn)
-    conf.model.load_state_dict(xx['model'])
+    conf.model.load_state_dict(xx['model'],strict='--nostrict' not in sys.argv)
     print(xx['test_losses'][-1])
 
     from tqdm import tqdm
@@ -35,8 +36,13 @@ def main():
     print('[TRYING]')
     traj = model.sample_trajectory(model.latent[list(range(0,50))+list(range(800,850)),:],conf.dataset.min_len, );trajm = traj
     tokens = model.sample_tokens(model.latent[list(range(0,50))+list(range(800,850)),:],conf.dataset.min_len*2, );
+    # tokens = model.sample_tokens(model.latent,conf.dataset.min_len*2, );
+    tokens = model.sample_tokens(model.latent[range(800),:],conf.dataset.min_len*2, );
+    # model.latent[range(1000),:]
     i = 0
     print()
+    lat = model.latent
+    lat    = lat / (0.00001 + lat.std(-1,keepdims=True)) *0.113
 
     n_sample = 20
     xp = tokens.softmax(-1)[:,None].repeat((1,n_sample,1,1))
@@ -50,13 +56,24 @@ def main():
     for xx in  tokens.argmax(-1)[25]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
     print()
 
-    def pdr(i):
-        for xx in  tokens.argmax(-1)[i]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
-        print()
     def ptr(i):
-        for xx in  conf.dataset.english_sentences_train[i]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
+        L = len( conf.dataset.english_sentences_train)
+        if i<=L-1:
+            for xx in  conf.dataset.english_sentences_train[i]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
+        else:
+            for xx in  conf.dataset.english_sentences_test[i-L]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
         print()
-    def ptdr(i): [ptr(i),pdr(i)]
+    def getptdr(tokens):
+        def pdr(i):
+            for xx in  tokens.argmax(-1)[i]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
+            print()
+        def ptdr(i): [ptr(i),pdr(i)]
+        return ptdr
+    ptdr = getptdr(tokens)
+
+    # xtokens = model.sample_tokens(lat[0:5,:]+lat[5:10,:],conf.dataset.min_len*2, );
+    # xptdr = getptdr(xtokens)
+
 
     # print((traj[0][:,:10]*10).long())
     i = 0; print((trajm[i][:,:10]*10).long())
@@ -74,8 +91,24 @@ def main():
     print('[NonFitted]')
     for i in range(50,55): ptdr(i);print()
 
+    ## order by l2 loss to latent vectors
+    xlat = model.latent.reshape((-1,model.state_count,model.embed_dim))
+    xlat    = xlat / (0.00001 + xlat.std(-1,keepdims=True)) *0.113
+
+    # [0]
+    def xcnn(i,k=0):
+        xx = (xlat[i:i+1] - xlat[:])[:,k:k+1].square().mean(-1)[:,0]
+        xst = xx.argsort()
+        for  si in xst[:5]: print(si,xx[si]);ptdr(si)
+    def replace(x,a,b): x = np.vectorize('{0:03d}'.format)(x); x[x==a]=b; return x
+    def pa(i,k=20,model=model,replace=replace):print(replace((model.atts[i,:k]*100).long().numpy(),'000','   '))
+    pa(4)
+    i = 1; k =4
+    xcnn(801)
+
+    assert 0
     print((model.latent[[0,1,801,802],:10]*100).long())
-    loss = torch.cat([model.log_prob(item['index'],item['english']) for item in it],dim=0)
+    # loss = torch.cat([model.log_prob(item['index'],item['english']) for item in it],dim=0)
     # clup = torch.cat([model.log_prob(item['english']) for item in tqdm(conf.dataloader)],dim=0)
     # clup = torch.cat(clup,dim=0)[:,:,0]
     for i in range(5):
