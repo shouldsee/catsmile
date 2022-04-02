@@ -81,34 +81,8 @@ class EnglishToGermanDataset(torch.utils.data.Dataset):
             german_item = self.german_sentences_train[idx]
             english_item = self.english_sentences_train[idx]
         #
-        #
-        # min_len = min(len(german_item),len(english_item))
-        # start_token = torch.tensor([self.german_vocab["<start>"]],dtype=torch.int64)
-        # if(min_len>self.min_len):
-        #     #Crop randomly
-        #     crop_range = min(len(german_item),len(english_item)) - self.min_len
-        #     crop = random.randint(0,crop_range)
-        #     german_item = german_item[crop:self.min_len+crop]
-        #     english_item = english_item[crop:self.min_len+crop]
-        #     german_item = torch.cat((start_token,german_item))
-        #     logit_mask = torch.ones((len(german_item),1),dtype=torch.bool)
-        # else:
-        #     german_item = F.pad(german_item,(0,self.min_len-len(german_item)),"constant", self.german_vocab_reversed.index('<end>'))
-        #     # german_item = F.pad(german_item,(0,self.min_len-len(german_item)),"constant", self.german_eos)
-        #     english_item = F.pad(english_item,(0,self.min_len-len(english_item)),"constant",self.english_vocab_reversed.index('<end>'))
-        #     english_item = F.pad(english_item,(0,self.min_len-len(english_item)),"constant",self.english_eos)
-        #     german_item = torch.cat((start_token,german_item))
-        #     #Logit Mask For Training
-        #     logit_mask = torch.ones((len(german_item),1),dtype=torch.bool)
-        #     logit_mask[min_len+1:,:] = 0
-        # german_logits = torch.zeros((len(german_item),self.german_vocab_len))
-        # index = torch.arange(0,len(german_item))
-        # german_logits[index,german_item] = 1
-        # if(self.CUDA):
-        #     torch.set_default_tensor_type(torch.cuda.FloatTensor)
-        #
+        # Tooo slow
         # # gl = german_logits*logit_mask
-        # # german_logits = (gl).mean(dim=1,keepdims=True)*0.2+gl * 0.8
         # if self.mode=='test':
         #     idx = idx + len(self.german_sentences_train)
 
@@ -127,3 +101,57 @@ class EnglishToGermanDataset(torch.utils.data.Dataset):
             return len(self.german_sentences_train)
     def total_length(self):
         return  len(self.german_sentences_test)+len(self.german_sentences_train)
+
+import random
+class RefillDataset(EnglishToGermanDataset):
+    def __init__(self,CUDA=False):
+        super().__init__(CUDA)
+        self.english_vocab_len += 1
+        idx = len(self.english_vocab_reversed)
+        self.english_vocab_reversed.append('<mask>')
+        self.english_vocab['<mask>'] =idx
+        self.op_extract_and_mask(2)
+
+    def op_extract_and_mask(self,n_mask):
+        #### randomly take out tokens and put mask at its position
+        train_idx = range(0,len(self.english_sentences_train))
+        test_idx =range(len(self.english_sentences_train), len(self.english_sentences_train)+len(self.english_sentences_test))
+        x = torch.cat([self.english_sentences_train,self.english_sentences_test],dim=0)
+        idx = [random.sample(range(x.size(1)), n_mask) for _ in range(x.size(0))]
+        idx = torch.tensor(idx).to(self.device)
+        y = torch.gather(x,index=idx,dim=1)
+        z = x.clone()
+        z = torch.scatter(z,index=idx,dim=1,src=torch.tensor(self.english_vocab['<mask>']).to(self.device)[None,None].repeat(idx.shape))
+        # import pdb; pdb.set_trace()
+        self.english_extracted_train = y[train_idx]
+        self.english_masked_train = z[train_idx]
+        self.english_extracted_test = y[test_idx]
+        self.english_masked_test = z[test_idx]
+
+    def __getitem__(self, idx):
+        # torch.set_default_tensor_type(torch.FloatTensor)
+        # print(idx)
+        if(self.mode=="test"):
+            german_item = self.german_sentences_test[idx]
+            x = english_item = self.english_sentences_test[idx]
+            extracted = self.english_extracted_test[idx]
+            masked    = self.english_masked_test[idx]
+        else:
+            german_item = self.german_sentences_train[idx]
+            x = english_item = self.english_sentences_train[idx]
+            extracted = self.english_extracted_train[idx]
+            masked     = self.english_masked_train[idx]
+        #
+        # Tooo slow
+        # # gl = german_logits*logit_mask
+        # if self.mode=='test':
+        #     idx = idx + len(self.german_sentences_train)
+
+        return {
+                "index":idx,
+                "extracted":extracted,
+                "masked":masked,
+                "english":x,
+                "german":german_item,
+                }
+                    # def __getitem__()
