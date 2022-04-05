@@ -5,7 +5,7 @@ import torch
 from train import init_conf
 import numpy as np
 def main():
-    conf = init_conf(CUDA=0)
+    conf = init_conf(CUDA=0,shuffle=False)
 
     epoch = sys.argv[sys.argv.index('--LOAD')+1]
     # epoch = int(epoch.)
@@ -17,6 +17,10 @@ def main():
     conf.model.load_state_dict(xx['model'],strict='--nostrict' not in sys.argv)
     print(xx['test_losses'][-1])
 
+    # for k,v in conf.model.named_parameters():
+    #     print(k)
+    #     print((v*100).long().reshape(-1)[:10])
+
     from tqdm import tqdm
     model = conf.model
     # model.sigma = 2
@@ -24,96 +28,75 @@ def main():
     for k,v in dict(xx['model']).items():     print(k);print(  (100*v.reshape(-1)[:10]).long())
 
     self = model
+    conf.dataset.op_extract_and_mask(4)
 
-    dbg = 0
-    it = list(tqdm(conf.dataloader))[:1]
-    # testit
-    # it = list(tqdm(conf.dataloader))[:1]
-
-    n_sample=100
-    # traj = torch.cat([model.sample_trajectory(model.latent[item['index'],:],conf.dataset.min_len, n_sample) for item in it],dim=0)
-    item = it[0]
-    # traj,lp = model.sample_trajectory(model.latent[item['index'],:],conf.dataset.min_len, n_sample);trajm = traj.mean(2)
     print('[TRYING]')
-    def ptr(i):
-        L = len( conf.dataset.english_sentences_train)
-        if i<=L-1:
-            for xx in  conf.dataset.english_sentences_train[i]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
+    def idx2word(i): return conf.dataset.english_vocab_reversed[i]
+    def seqs_to_printer(seqs_of_seqs,L=10,mapper=conf.dataset.english_vocab_reversed):
+        def printer(i):
+            for seqs in seqs_of_seqs:
+                for xx in  seqs[i]:
+                    v = mapper.__getitem__(int(xx))
+                    v = (v + ' '*(L-len(v)))[:L]
+                    print(v,end=':')
+                    # print(repr(mapper.__getitem__(xx)),end=':')
+                    # mapper(int(xx))
+                print()
+
+        return printer
+
+    def wlen(v,L): v = (v + ' '*(L-len(v)))[:L]; return v
+    ### hook callbacks
+    def callback(s, xc, out='token'):
+        (zi,x,y,z,fs) =s
+        (i,sel,xz,xs) = xc
+        if out=='traj':
+            lptok = conf.model.vocab(fs[0:1,-1:])
+        elif out == 'token':
+            lptok = fs[0:1,-1:]
+            sel = sel.exp()
         else:
-            for xx in  conf.dataset.english_sentences_test[i-L]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
-        print()
-    def getptdr(tokens):
-        def pdr(i):
-            for xx in  tokens.argmax(-1)[i]: print(repr(conf.dataset.english_vocab_reversed[xx]),end=':')
+            assert 0
+        # print((sel[0,:,:10]*100).long())
+        v = idx2word(conf.model.vocab(xz[0:1]).argmax(-1)[0])
+        v2= idx2word(lptok.argmax(-1)[0])
+        v3= idx2word((int(x[0:1,i:i+1])))
+        print(wlen(v,7), end=' : ')
+        print(wlen(v2,7),end=' : ')
+        print(wlen(v3,7),end=' : ')
+        if v!='<mask>':
             print()
-        def ptdr(i):
-            if i <0:
-                return
-            [ptr(i),pdr(i)]
-        return ptdr
+            return
+        print((sel[0,:,:100]*100).long(),end=' : ')
+        print((xs[0,-1:,:10]*10).long())
+    conf.model.callback_init= lambda *a:print('-'*40)
+    conf.model.callback_step = callback
+    # def callback(s, inner ): print(wlen(idx2word(conf.model.vocab(inner[2][0:1]).argmax(-1)[0]),10),end=' : '); print((inner[1][0,:,:10]*100).long())
+    conf.model.callback_step = callback
 
-    # traj = model.sample_trajectory(model.latent[list(range(0,50))+list(range(800,850)),:],conf.dataset.min_len, );trajm = traj
-    # tokens = model.sample_tokens(list(range(0,50))+list(range(800,850))model.latent[list(range(0,50))+list(range(800,850)),:],conf.dataset.min_len*2, );
-    # tokens = model.sample_tokens(model.latent,conf.dataset.min_len*2, );
-    # tokens = model.sample_tokens(None,torch.cat([conf.dataset.english_sentences_train,conf.dataset.english_sentences_test],dim=0),conf.dataset.min_len*2, is_embed=False);
-    # tokens = model.sample_tokens(None,torch.cat([conf.dataset.english_sentences_train,conf.dataset.english_sentences_test],dim=0),conf.dataset.min_len*2, is_embed=False);
-    ys = torch.cat([conf.dataset.english_sentences_train,conf.dataset.english_sentences_test])
-    ys = ys[:100]
-    # e1 = model.energy(model.nembed(ys)).mean()
-    # e2 = model.energy(yc).mean()
-    # e3 = model.energy(model.recover(None,model.nembed(ys))).mean()
-    # (xc[0][:,:10]*100).long()
+    outs = []
+    xs   = []
+    ts   = []
+    ts = torch.tensor([],requires_grad=True)
+    for i in range(2):
+        if i==0:
+            conf.dataset.train()
+        else:
+            conf.dataset.test()
+        for item in (conf.dataloader):
+            out = model.get_tokens(item['index'],item['english'],item['extracted'],item['masked'])
+            xs.append(item['masked'])
+            ts = torch.cat([ts,item['english']],dim=0)
+            outs.append(out)
 
-    #### embedded
-    yn = model.nembed(ys)
-    xc = yn
-    e0 = model.energy(xc).mean()
-    ytokens = model.vocab(xc).log_softmax(-1)
-    ptdrn = getptdr(ytokens)
-    ptdrn(1)
+    xs  = torch.cat(xs,dim=0)
+    xrs = torch.cat(outs,dim=0)
+    # ptdr,ptr,pdr = getptdr
+    printer = seqs_to_printer([ts,xrs.argmax(-1),xs],L=7)
+    for i in range(20):printer(i);print()
+    # for i in range(20): ptdr(i);print()
+    import pdb; pdb.set_trace()
 
-    #### corrupted
-    yc = model.corrupt(None,yn)
-    yc = model.norm(yc)
-    xc = yc
-    e1 = model.energy(xc).mean()
-    ytokens = model.vocab(xc).log_softmax(-1)
-    ptdry = getptdr(ytokens)
-    ptdry(1)
-
-
-    #### over corrected
-    # xc = model.corrupt(None,self.nembed(ys))
-    xc = yc
-    xc = model.recover(None,xc,nstep=80,lr=0.01)
-    e2 = model.energy(xc).mean()
-    tokens = model.vocab(xc).log_softmax(-1)
-    ptdrt = getptdr(tokens)
-
-
-
-    ####　random sample
-    xc = torch.normal(0,1,(80,conf.dataset.min_len,model.embed_dim),requires_grad=True)
-    # tokens = model.sample_tokens(None,xc,n_step=0,is_embed=True)
-    xc = model.recover(None,xc,nstep=0,lr=0.01)
-
-    e3 = model.energy(xc).mean()
-    tokens = model.vocab(xc).log_softmax(-1)
-    ptdre = getptdr(tokens)
-
-    ####　random sample 2
-    xc = torch.normal(0,1,(80,conf.dataset.min_len,model.embed_dim),requires_grad=True)
-    # tokens = model.sample_tokens(None,xc,n_step=0,is_embed=True)
-    xc = model.recover(None,xc,lr=0.01)
-
-    e4 = model.energy(xc).mean()
-    tokens = model.vocab(xc).log_softmax(-1)
-    ptdre2 = getptdr(tokens)
-
-    ptdre(11)
-
-    for i in range(5): ptdrn(-1),ptdry(i), ptdrt(i),ptdre(i),ptdre2(i),print()
-    for xe in (e0,e1,e2,e3,e4):print(xe.item())
 
 def obs():
     assert 0

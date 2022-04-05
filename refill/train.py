@@ -27,11 +27,18 @@ from tqdm import tqdm
 from markov_lm.Model import cross_entropy
 
 # from markov_lm.Model_Refill import RefillModel
-from markov_lm.Model_Refill import RefillModelRNNSwitch
+# from markov_lm.Model_Refill import RefillModelRNNSwitch
+# from markov_lm.Model_Refill import RefillModelRNNAttention
+from markov_lm.Model_Refill import RefillModelRNNAdditive
+from markov_lm.Model_Refill import RefillModelRNNAdditiveDirect
+from markov_lm.Model_Refill import RefillModelRNNGRU
+from markov_lm.Model_Refill import RefillModelNGRAM
+# Additive
 from markov_lm.Model_Refill import RefillModelOld
 from markov_lm.Model_Refill import RefillModelCopy
 from markov_lm.Model_Refill import RefillModelCopyWithRandomFill
-
+from markov_lm.Model_Refill import RefillModelRNNAdditiveWithPseudoSampling
+from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectSampling
 
 
 def parse_checkpoint(sys,):
@@ -61,7 +68,7 @@ class Config(object):
         return
 
 CUDA = 1
-def init_conf(CUDA):
+def init_conf(CUDA,shuffle):
     conf = Config()
     conf.criterion = cross_entropy
     conf.embed_dim = 50
@@ -80,10 +87,12 @@ def init_conf(CUDA):
     ### test dataset works
     (conf.dataset[range(5)])
 
-    conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
+    conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
     # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
     # conf.model = model = ExtractionAndMarkovTemplateMatching(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
-    conf.optimizer_factory = torch.optim.RMSprop
+    conf.optimizer_factory = None
+     # torch.optim.RMSprop
+    # conf.optimizer_factory = torch.optim.Ada
     conf.model = model = RefillModelOld(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
 
@@ -97,11 +106,24 @@ def init_conf(CUDA):
     conf.model = model = RefillModelCopy(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
 
-    conf.model = model = RefillModelRNNSwitch(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    conf.model = model = RefillModelRNNAdditive(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
 
-    conf.model = model = RefillModelCopyWithRandomFill(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    conf.model = model = RefillModelNGRAM(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+
+    conf.model = model = RefillModelRNNAdditiveDirect(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+        state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+    conf.model = model = RefillModelRNNAdditiveDirectSampling(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+        state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+
+    # conf.model = model = RefillModelRNNAdditiveWithPseudoSampling(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+    # conf.model = model = RefillModelRNNGRU(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+
+    # conf.model = model = RefillModelCopyWithRandomFill(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
     ### 180_0.1007
 
     params = list(model.parameters())
@@ -109,11 +131,12 @@ def init_conf(CUDA):
     #### using Adam with high learning_rate is catastrophic
     # conf.optimizer = torch.optim.Adagrad( params, lr=conf.learning_rate)
     conf.optimizer      = torch.optim.RMSprop( params, lr=conf.learning_rate)
+    # conf.optimizer      = torch.optim.Adam( params, lr=conf.learning_rate)
     return conf
 
 def main():
     CUDA = 1
-    conf = init_conf(CUDA)
+    conf = init_conf(CUDA,shuffle=True)
     model = conf.model
     dataset = conf.dataset
     dataset
@@ -151,8 +174,9 @@ def main():
 
 
     loss_test_mean = 0
+    n_mask = 4
     for _epoch in range(conf.num_epoch):
-        conf.dataset.op_extract_and_mask(3)
+        conf.dataset.op_extract_and_mask(n_mask)
         epoch += 1
         loss_train_sum = 0
         loss_test_sum = 0
@@ -213,6 +237,7 @@ def main():
         loss_train_mean = loss_train_sum/(1+tri)
         loss_test_mean = loss_test_sum/(1+tsi)
         print(f'Epoch: {epoch}')
+        print(f'ModelClassName: {conf.model.__class__.__name__}')
         print(f'Training Loss: {loss_train_mean}')
         print(f'Testing Loss: {loss_test_mean}')
 
