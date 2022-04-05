@@ -41,6 +41,8 @@ from markov_lm.Model_Refill import RefillModelRNNAdditiveWithPseudoSampling
 from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixing
 
 
+from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectSampling
+
 def parse_checkpoint(sys,):
     if '--auto' in sys.argv:
         LOAD_GET_AUTO = 1
@@ -116,6 +118,11 @@ def init_conf(CUDA,shuffle):
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
     conf.model = model = RefillModelRNNAdditiveDirectMixing(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+
+    conf.model = model = RefillModelRNNAdditiveDirectSampling(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+        state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+
+
 
     # conf.model = model = RefillModelRNNAdditiveWithPseudoSampling(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])

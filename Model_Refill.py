@@ -9,6 +9,8 @@ import torch.optim
 
 class RefillModelRNNBase(nn.Module):
     '''
+    Symbolic Module that defines Loss function
+
     Calculate f_{ik}(Y,Z)
     where Y a set of tokens
           Z a sequence with masks at position of extraction
@@ -33,29 +35,17 @@ class RefillModelRNNBase(nn.Module):
         self.embed_dim = embed_dim
         self.state_count = state_count
 
-        # x = nn.Linear(embed_dim*state_count,total_length).to(self.device)
-        # self.latent     = nn.Parameter(x.weight)
-        # self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
-        # self.anchor = nn.Linear(embed_dim,mixture_count).to(self.device)
-        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
         self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
         self.n_step     = min_len
         self.selector   = nn.Linear(embed_dim, mixture_count).to(self.device)
         self.selector_q = nn.Linear(embed_dim, mixture_count).to(self.device)
         # self.selector_q = nn.Linear(embed_dim, mixture_count*embed_dim).to(self.device)
         self.selector_k = nn.Linear(embed_dim, embed_dim).to(self.device)
-        # self.extractor = nn.Linear(embed_dim,state_count).to(self.device)
-        # self.kernel    = nn.Bilinear(embed_dim,embed_dim,mixture_count).to(self.device)
         kernel_size = 5
         self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
         self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
         self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
-        # self.updater_v  = nn.Linear(embed_dim,embed_dim).to(self.device)
-        # self.query_init = nn.Linear(1,embed_dim).to(self.device)
-        # self.query_init      = nn.Linear(1,embed_dim).to(self.device)
-        # self.query_k    = nn.Linear(embed_dim,embed_dim).to(self.device)
-        # self.query_v    = nn.Linear(embed_dim,embed_dim).to(self.device)
-        # self.callback = lambda zi,x,y,z,sel: None
+
     def callback_step(self,outer,inner):
         [zi,x,y,z,fs],[i,sel,xz,xs] = outer,inner
         return
@@ -84,6 +74,7 @@ class RefillModelRNNBase(nn.Module):
 
     def loss(self,zi,x,y,z):
         return self._loss(zi,x,y,z,out='loss')
+
     def get_tokens(self,zi,x,y,z):
         return self._loss(zi,x,y,z,out='token')
 
@@ -520,6 +511,229 @@ class RefillModelRNNAdditiveDirect(RefillModelRNNBase):
         return outer,inner
 
 
+class RefillModelRNNAdditiveDirectSampling(RefillModelRNNBase):
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        state_count,
+        total_length,
+        min_len,
+        mask_token_idx):
+
+        state_count = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        #### the vector vocabulary needs a more flexibile management [TBC]
+        #### here the extra tokens are tied to this model
+        self.embed_extra= nn.Embedding(5,embed_dim).to(self.device)
+
+        self.n_step     = min_len
+        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'sampled_traj'
+        self.K = 10
+
+    def _batch_init(self,zi,x,y,z):
+        ### k is number of chain
+        #### batch_init part
+        ### state init
+        k = self.K
+        z = self.embed(z)
+        B = y.size(0)
+        self.max_mem = M = 9
+
+        ### construct reservoir
+        y = self.embed(y)
+        y = torch.cat([y,self.embed_extra(torch.zeros((B, M -y.shape[1])).long().to(self.device)) ],dim=1)
+        y = y[:,None].repeat((1,k,1,1))
+
+        # xs = torch.cat([y,init_state],dim=1)
+        xs = self.init_state.weight.T[None,0:1]
+        xs = xs.repeat((len(z),k,1))
+        xs = self.norm(xs)
+        # xs =
+
+        ## the reservoir set is now a variable
+        y  = self.norm(y)
+        z  = self.norm(z)
+        fs = torch.tensor([],requires_grad=True).to(self.device)
+        # outer,inner = self.batch_init(zi,x,y,z,fs)
+        i = -1
+        sel = None
+        # xz = None
+        lp = 0*xs[:,:,0]
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,lp,xs]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+
+        ##### The sampling model factorize the loss function as
+        ##### an expectation to allow flexibility in the underlying
+        ##### probability function.
+        #####
+        ##### instead of directly calculate L = f(x,y,z)
+        ##### we caclculate L = E_p(t)[f(x,y,z,t)]
+        ##### where t is a hidden variable generated from sampling
+        ##### and the expectation is approximated by normalising the probability
+        ##### of generated samples
+
+
+        For expecation models, must maintain
+        a probabilistic representation of the states
+
+        here the probabilistic part is the reservoir vector
+        if the t-step predicts a END state, then the selected
+        vector needs to be deleted from the reservoir.
+
+        Each state needs to be associated with a score, so
+        that later can be used to calculate expecation
+
+
+        adds a dimension after batch to indicates which sample is this
+
+        This model is not quite working yet, unable to learn when to copy the input
+        '''
+
+        (zi,x,y,z,fs) = outer
+        (i,sel,lp,xs) = inner
+
+        ### xs needs to be expanded into
+        sel = None
+        xz  = None
+
+        K = self.K
+        B = len(xs)
+        E = self.embed_dim
+        M = self.max_mem
+
+        ##shared
+        xz = z[:,i:i+1]
+        xs = self.transition(xs) + self.updater(xz)
+        xs = self.norm(xs)
+
+        ##### Action Selection
+        ### selector can be static or dynamic
+        ### Input is under a static key, whereas the reservoir is self-keyed
+        ### under a projection matrix
+        ### This should allow a direction interaction between hidden and
+        ### the output
+
+        ## static keys are shared
+        xkey_static = self.xkey_static.weight[None,None, :2,:self.embed_dim].repeat((len(z),K,1,1))
+
+        ### dynamic keys are dependent on the
+        xkey_dynamic= self.xkey_dynamic(y)
+        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=2)
+
+        # import pdb; pdb.set_trace()
+
+        ### einsum maybe slow, but maybe reshape?
+        sel   = xs .reshape((B*K,-1,E)).matmul(xkey.reshape((B*K,-1,E)).transpose(2,1))
+        # sel   = sel / 0.1
+        sel   = sel.log_softmax(-1)
+        sel   = sel.reshape((B,K,-1))
+        cand  = torch.cat([ xz[:,None].repeat((1,K,1,1)),xs[:,:,None],y],dim=2)
+        ###
+
+        ### performs random sampling and record loglp
+        ### temperature should be a parameter?
+        xpc = sel.exp().cumsum(-1)
+        xr = torch.rand(sel.shape[:-1]+(1,)).to(self.device)
+        _ ,xi = (xr<=xpc).max(dim=-1)
+
+        lp = lp + torch.gather(sel,index=xi[:,:,None],dim=-1)[:,:,0]
+
+        #### modify reservoir to erase accessed memory
+        xi = (xi - 2)% self.max_mem
+        # 0.3980,  1.7758, -0.6467,
+        y = torch.scatter(y,index=xi[:,:,None,None].repeat((1,1,1,E)),dim=2,src=self.embed_extra.weight[0:1,None,None,:].repeat((B,K,1,1)))
+        y = self.norm(y)
+
+        xq = torch.gather(cand,index=xi[:,:,None,None].repeat((1,1,1,E)),dim=2)
+
+
+        # xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+        #### I think the expectation aggregation here is too harsh...
+        #### it's probably better to calculate emission probability by sampling, then aggregate the
+        #### Emission.
+        #### indeed it's much better to not aggregate the expectation
+
+        #### fs represents lptok
+        fs   = torch.cat([fs,xq],dim=2)
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,lp,xs]
+        return outer,inner
+
+
+    def loss(self,zi,x,y,z):
+        return self._loss(zi,x,y,z,out='loss')
+    # grad_loss = loss
+
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj grad_loss'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        for i in range(z.size(1)):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        self.callback_end(outer)
+        (zi,x,y,z, sampled_traj) = outer
+        (i,sel,lp,xs) = inner
+        lptok = self.vocab(sampled_traj).log_softmax(-1)
+        xc = cent  = torch.gather(lptok,index=x[:,None,:,None].repeat((1,self.K,1,1)),dim=-1).mean((-1))
+        # import pdb; pdb.set_trace()
+
+        if out == 'grad_loss':
+            ## REINFORCE
+            wloss = xc.mean(-1) * lp
+            # wloss = xc.mean(-1)/
+            # wloss = -xc.mean(-1) * lp.log_softmax(-1)
+            # wloss = -xc.mean(-1) * lp.softmax(-1)
+            # wloss =
+            return wloss
+        # cent = self.target_energy(lptok,x)
+        # loss  = -cent.mean(-1)
+        loss  = -xc.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+    def grad_loss(self,zi,x,y,z):
+        return self._loss(zi,x,y,z,out='grad_loss')
+
+
 
 class RefillModelRNNAdditiveDirectMixing(RefillModelRNNBase):
     def __init__(self,
@@ -531,6 +745,8 @@ class RefillModelRNNAdditiveDirectMixing(RefillModelRNNBase):
         total_length,
         min_len,
         mask_token_idx):
+
+        state_count = 1
         super().__init__(
             device,
             graph_dim,
@@ -540,7 +756,6 @@ class RefillModelRNNAdditiveDirectMixing(RefillModelRNNBase):
             total_length,
             min_len,
             mask_token_idx)
-        state_count = 5
         # state_count = 15
         self.device = device
         self.total_length = total_length
@@ -549,31 +764,18 @@ class RefillModelRNNAdditiveDirectMixing(RefillModelRNNBase):
         self.embed_dim = embed_dim
         self.state_count = state_count
 
-        # x = nn.Linear(embed_dim*state_count,total_length).to(self.device)
-        # self.latent     = nn.Parameter(x.weight)
-        # self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
-        # self.anchor = nn.Linear(embed_dim,mixture_count).to(self.device)
-
         #### share embed usually works
         # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
-
-
         self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
         self.n_step     = min_len
-        self.selector   = nn.Linear(embed_dim, mixture_count).to(self.device)
-        # self.selector_2   = nn.Linear(embed_dim, embed_dim).to(self.device)
-        self.selector_q = nn.Linear(embed_dim, mixture_count).to(self.device)
-        # self.selector_q = nn.Linear(embed_dim, mixture_count*embed_dim).to(self.device)
-        self.selector_k = nn.Linear(embed_dim, embed_dim).to(self.device)
         self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
         self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
-        # self.extractor = nn.Linear(embed_dim,state_count).to(self.device)
-        # self.kernel    = nn.Bilinear(embed_dim,embed_dim,mixture_count).to(self.device)
         kernel_size = 5
         self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
         self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
         self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
-    # def _step(self,outer,inner):
+        self.fs_type    = 'lptok'
+
     def _batch_init(self,zi,x,y,z):
         #### batch_init part
         ### state init
@@ -605,14 +807,11 @@ class RefillModelRNNAdditiveDirectMixing(RefillModelRNNBase):
         sel = None
         xz  = None
 
-        xz = z[:,i:i+1]
-
-        # xs = xs + self.updater(xz)
-        # xs = xs + self.transition(xs) + self.updater(xz)
         # if i>=2:
         #     ### Uses the minus two token for prediction
         #     ### nearly a CNN fashion
         #     xs = self.transition(z[:,i-2:i-1])
+        xz = z[:,i:i+1]
 
         xs = self.transition(xs) + self.updater(xz)
         xs = self.norm(xs)
@@ -631,13 +830,12 @@ class RefillModelRNNAdditiveDirectMixing(RefillModelRNNBase):
         lptok = self.vocab(cand).log_softmax(-1)
 
         xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
-        # xq   = sel.matmul(cand)
         #### I think the expectation aggregation here is too harsh...
         #### it's probably better to calculate emission probability by sampling, then aggregate the
         #### Emission.
+        #### indeed it's much better to not aggregate the expectation
 
-        # xs = xs + self.transition(xs) + self.updater(xq)
-        # xs = self.norm(xs)
+        #### fs represents lptok
         fs   = torch.cat([fs,xq],dim=1)
         outer = [zi,x,y,z,fs]
         inner = [i,sel,xz,xs]
