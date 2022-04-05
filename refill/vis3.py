@@ -80,7 +80,8 @@ def main():
     ts = torch.tensor([],requires_grad=True)
     for i in range(2):
         if i==0:
-            conf.dataset.train()
+            # conf.dataset.train()
+            conf.dataset.test()
         else:
             conf.dataset.test()
         for item in (conf.dataloader):

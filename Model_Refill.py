@@ -521,7 +521,7 @@ class RefillModelRNNAdditiveDirect(RefillModelRNNBase):
 
 
 
-class RefillModelRNNAdditiveDirectSampling(RefillModelRNNBase):
+class RefillModelRNNAdditiveDirectMixing(RefillModelRNNBase):
     def __init__(self,
         device,
         graph_dim,
@@ -623,11 +623,11 @@ class RefillModelRNNAdditiveDirectSampling(RefillModelRNNBase):
         ### the output
         xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
         xkey_dynamic= self.xkey_dynamic(y)
-        xkey = torch.cat([xkey_static, xkey_dynamic],dim=1)
+        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
 
 
-        sel = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
-        cand = torch.cat([xz,xs,y],dim=1)
+        sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+        cand  = torch.cat([xz,xs,y],dim=1)
         lptok = self.vocab(cand).log_softmax(-1)
 
         xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
