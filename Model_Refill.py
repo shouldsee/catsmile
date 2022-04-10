@@ -555,7 +555,7 @@ class RefillModelRNNAdditiveDirectSampling(RefillModelRNNBase):
         self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
         self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
         self.fs_type    = 'sampled_traj'
-        self.K = 10
+        self.K = 100
 
     def _batch_init(self,zi,x,y,z):
         ### k is number of chain
@@ -634,6 +634,8 @@ class RefillModelRNNAdditiveDirectSampling(RefillModelRNNBase):
 
         ##shared
         xz = z[:,i:i+1]
+        # print(xs.shape)
+        # print(xz.shape)
         xs = self.transition(xs) + self.updater(xz)
         xs = self.norm(xs)
 
@@ -651,8 +653,8 @@ class RefillModelRNNAdditiveDirectSampling(RefillModelRNNBase):
         xkey_dynamic= self.xkey_dynamic(y)
         xkey  = torch.cat([xkey_static, xkey_dynamic],dim=2)
 
-        # import pdb; pdb.set_trace()
 
+        ### calculate actions
         ### einsum maybe slow, but maybe reshape?
         sel   = xs .reshape((B*K,-1,E)).matmul(xkey.reshape((B*K,-1,E)).transpose(2,1))
         # sel   = sel / 0.1
@@ -670,12 +672,15 @@ class RefillModelRNNAdditiveDirectSampling(RefillModelRNNBase):
         lp = lp + torch.gather(sel,index=xi[:,:,None],dim=-1)[:,:,0]
 
         #### modify reservoir to erase accessed memory
+        xq = torch.gather(cand,index=xi[:,:,None,None].repeat((1,1,1,E)),dim=2)
+
         xi = (xi - 2)% self.max_mem
         # 0.3980,  1.7758, -0.6467,
         y = torch.scatter(y,index=xi[:,:,None,None].repeat((1,1,1,E)),dim=2,src=self.embed_extra.weight[0:1,None,None,:].repeat((B,K,1,1)))
-        y = self.norm(y)
+        # y = self.norm(y)
 
-        xq = torch.gather(cand,index=xi[:,:,None,None].repeat((1,1,1,E)),dim=2)
+
+        ### maybe we can still use a mixture in the calculation of emission? [TBC]
 
 
         # xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
@@ -694,8 +699,6 @@ class RefillModelRNNAdditiveDirectSampling(RefillModelRNNBase):
     def loss(self,zi,x,y,z):
         return self._loss(zi,x,y,z,out='loss')
     # grad_loss = loss
-
-
 
     def _loss(self,zi,x,y,z,out='loss'):
         assert out in 'loss token traj grad_loss'.split()
@@ -720,7 +723,6 @@ class RefillModelRNNAdditiveDirectSampling(RefillModelRNNBase):
             # wloss = xc.mean(-1)/
             # wloss = -xc.mean(-1) * lp.log_softmax(-1)
             # wloss = -xc.mean(-1) * lp.softmax(-1)
-            # wloss =
             return wloss
         # cent = self.target_energy(lptok,x)
         # loss  = -cent.mean(-1)
@@ -732,6 +734,8 @@ class RefillModelRNNAdditiveDirectSampling(RefillModelRNNBase):
         assert 0
     def grad_loss(self,zi,x,y,z):
         return self._loss(zi,x,y,z,out='grad_loss')
+
+
 
 
 
@@ -853,6 +857,1779 @@ class RefillModelRNNAdditiveDirectMixing(RefillModelRNNBase):
             inner[0]=i
             outer,inner = self._step(outer,inner) #### do what ever with your hidden state
             self.callback_step(outer,inner)
+        self.callback_end(outer)
+        (zi,x,y,z,lptok) = outer
+
+        cent = self.target_energy(lptok,x)
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
+
+class RefillModelRNNAdditiveDirectMixingWithGate(RefillModelRNNBase):
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        state_count,
+        total_length,
+        min_len,
+        mask_token_idx):
+
+        state_count = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self.n_step     = min_len
+        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.update_gate = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'lptok'
+
+    def _batch_init(self,zi,x,y,z):
+        #### batch_init part
+        ### state init
+        z = self.embed(z)
+        y = self.embed(y)
+        # xs = torch.cat([y,init_state],dim=1)
+        xs = self.init_state.weight.T[None,0:1]
+        xs = xs.repeat((len(z),1,1))
+        xs = self.norm(xs)
+        # xs =
+        y  = self.norm(y)
+        z  = self.norm(z)
+        fs = torch.tensor([],requires_grad=True).to(self.device)
+        # outer,inner = self.batch_init(zi,x,y,z,fs)
+        i = -1
+        sel = None
+        xz = None
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,xz,xs]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+        Outer should be non-mutable?
+        '''
+
+        (zi,x,y,z,fs) = outer
+        (i,sel,xz,xs) = inner
+        sel = None
+        xz  = None
+
+        # if i>=2:
+        #     ### Uses the minus two token for prediction
+        #     ### nearly a CNN fashion
+        #     xs = self.transition(z[:,i-2:i-1])
+        xz = z[:,i:i+1]
+        xg = self.update_gate(xz)[:,:,0:1].sigmoid()
+        xs = self.transition(xs) + xg * self.updater(xz)
+        xs = self.norm(xs)
+        ### The selector is a direct manner
+        ### Input is under a static key, whereas the reservoir is self-keyed
+        ### under a projection matrix
+        ### This should allow a direction interaction between hidden and
+        ### the output
+        xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+        xkey_dynamic= self.xkey_dynamic(y)
+        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+
+
+        sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+        cand  = torch.cat([xz,xs,y],dim=1)
+        lptok = self.vocab(cand).log_softmax(-1)
+
+        xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+        #### I think the expectation aggregation here is too harsh...
+        #### it's probably better to calculate emission probability by sampling, then aggregate the
+        #### Emission.
+        #### indeed it's much better to not aggregate the expectation
+
+        #### fs represents lptok
+        fs   = torch.cat([fs,xq],dim=1)
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,xz,xs]
+        return outer,inner
+
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        for i in range(z.size(1)):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        self.callback_end(outer)
+        (zi,x,y,z,lptok) = outer
+
+        cent = self.target_energy(lptok,x)
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
+
+class RefillModelRNNAdditiveDirectMixingBidirectional(RefillModelRNNBase):
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        state_count,
+        total_length,
+        min_len,
+        mask_token_idx):
+
+        state_count = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self.n_step     = min_len
+        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        # self.transition_gate = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'lptok'
+
+    def _batch_init(self,zi,x,y,z):
+        #### batch_init part
+        ### state init
+        z = self.embed(z)
+        y = self.embed(y)
+        # xs = torch.cat([y,init_state],dim=1)
+        xsa = self.init_state.weight.T[None,0:1]
+        xsa = xsa.repeat((len(z),z.size(1),1))
+        xsa = self.norm(xsa)
+
+        y  = self.norm(y)
+        z  = self.norm(z)
+        fs = self.vocab(xsa)*0
+        # fs = torch.tensor([],requires_grad=True).to(self.device)
+        # outer,inner = self.batch_init(zi,x,y,z,fs)
+        i = -1
+        sel = None
+        xz = None
+        outer = [zi, x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+        Outer should be non-mutable?
+        '''
+
+        (zi,x,y,z,fs) = outer
+        (i,sel,xz,xsa) = inner
+        sel = None
+        xz  = None
+
+        xz = z[:,i:i+1]
+
+        L = x.shape[1]
+        xs = 0
+        if i>=1:
+            xsl = xsa[:,i-1:i]
+            xg = 1
+            # xg = xs.matmul(self.transition_gate.weight).matmul(xsl.transpose(2,1)).sigmoid()
+            xs = xs + xg * xsl.matmul(self.transition.weight)
+        if i+1<=L-1:
+            xsl = xsa[:,i+1:i+2]
+            xg = 1
+            # xg = xsl.matmul(self.transition_gate.weight).matmul(xs.transpose(2,1)).sigmoid()
+            xs = xs + xg * xsl.matmul(self.transition.weight.transpose(1,0  ))
+
+        xs = xs + self.updater(xz)
+        xs = self.norm(xs)
+
+        xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+        xkey_dynamic= self.xkey_dynamic(y)
+        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+
+        sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+        cand  = torch.cat([xz,xs,y],dim=1)
+        lptok = self.vocab(cand).log_softmax(-1)
+
+        xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+        # fs   = torch.cat([fs,xq],dim=1)
+        fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+        # import pdb; pdb.set_trace()
+        xsa = torch.scatter(xsa,index=(xs*0).long()+i,src=xs,dim=1)
+
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        L = z.size(1)
+        for i in range(L):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=L-1-i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+
+        self.callback_end(outer)
+        (zi,x,y,z,lptok) = outer
+
+        cent = self.target_energy(lptok,x)
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
+# class RefillModelRNNAdditiveDirectMixingWithGate(RefillModelRNNBase):
+#     def __init__(self,
+#         device,
+#         graph_dim,
+#         embed_dim,
+#         mixture_count,
+#         state_count,
+#         total_length,
+#         min_len,
+#         mask_token_idx):
+#
+#         state_count = 1
+#         super().__init__(
+#             device,
+#             graph_dim,
+#             embed_dim,
+#             mixture_count,
+#             state_count,
+#             total_length,
+#             min_len,
+#             mask_token_idx)
+#         # state_count = 15
+#         self.device = device
+#         self.total_length = total_length
+#         self.min_len = min_len
+#         self.mixture_count = mixture_count
+#         self.embed_dim = embed_dim
+#         self.state_count = state_count
+#
+#         #### share embed usually works
+#         # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+#         self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+#         self.n_step     = min_len
+#         self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+#         self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+#         kernel_size = 5
+#         self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+#         self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+#         self.transition_gate = nn.Linear(embed_dim,embed_dim).to(self.device)
+#         self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+#         self.fs_type    = 'lptok'
+#
+#     def _batch_init(self,zi,x,y,z):
+#         #### batch_init part
+#         ### state init
+#         z = self.embed(z)
+#         y = self.embed(y)
+#         # xs = torch.cat([y,init_state],dim=1)
+#         xsa = self.init_state.weight.T[None,0:1]
+#         xsa = xsa.repeat((len(z),z.size(1),1))
+#         xsa = self.norm(xsa)
+#
+#         y  = self.norm(y)
+#         z  = self.norm(z)
+#         fs = self.vocab(xsa)*0
+#         # fs = torch.tensor([],requires_grad=True).to(self.device)
+#         # outer,inner = self.batch_init(zi,x,y,z,fs)
+#         i = -1
+#         sel = None
+#         xz = None
+#         outer = [zi, x,y,z,fs]
+#         inner = [i,sel,xz,xsa]
+#         return outer,inner
+#
+#     def _step(self,outer,inner):
+#         '''
+#         Outer should be non-mutable?
+#         '''
+#
+#         (zi,x,y,z,fs) = outer
+#         (i,sel,xz,xsa) = inner
+#         sel = None
+#         xz  = None
+#
+#         xz = z[:,i:i+1]
+#
+#         L = x.shape[1]
+#         xs = 0
+#         if i>=1:
+#             xsl = xsa[:,i-1:i]
+#             xg = xsl.matmul(self.transition_gate.weight)[:,:,0:1].sigmoid()
+#             # .matmul(xsl.transpose(2,1)).sigmoid()
+#             xs = xs + xg * xsl.matmul(self.transition.weight)
+#         if i+1<=L-1:
+#             xsl = xsa[:,i+1:i+2]
+#             xg = xsl.matmul(self.transition_gate.weight)[:,:,1:2].sigmoid()
+#             # xg = xsl.matmul(self.transition_gate.weight).matmul(xs.transpose(2,1)).sigmoid()
+#             xs = xs + xg * xsl.matmul(self.transition.weight.transpose(1,0  ))
+#
+#         xs = xs + self.updater(xz)
+#         xs = self.norm(xs)
+#
+#         xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+#         xkey_dynamic= self.xkey_dynamic(y)
+#         xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+#
+#         sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+#         cand  = torch.cat([xz,xs,y],dim=1)
+#         lptok = self.vocab(cand).log_softmax(-1)
+#
+#         xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+#         # fs   = torch.cat([fs,xq],dim=1)
+#         fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+#         # import pdb; pdb.set_trace()
+#         xsa = torch.scatter(xsa,index=(xs*0).long()+i,src=xs,dim=1)
+#
+#         outer = [zi,x,y,z,fs]
+#         inner = [i,sel,xz,xsa]
+#         return outer,inner
+#
+#
+#     def _loss(self,zi,x,y,z,out='loss'):
+#         assert out in 'loss token traj'.split()
+#
+#         outer,inner = self._batch_init(zi,x,y,z)
+#         ### Uses an explicit RNN to switch between copying z and extract y
+#         self.callback_init(outer)
+#         L = z.size(1)
+#         for i in range(L):
+#             inner[0]=i
+#             outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+#             self.callback_step(outer,inner)
+#         for i in range(L):
+#             inner[0]=L-1-i
+#             outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+#             self.callback_step(outer,inner)
+#         for i in range(L):
+#             inner[0]=i
+#             outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+#             self.callback_step(outer,inner)
+#
+#         self.callback_end(outer)
+#         (zi,x,y,z,lptok) = outer
+#
+#         cent = self.target_energy(lptok,x)
+#         loss  = -cent.mean(-1)
+#         # if out=='token': return lptok
+#         if out=='token': return lptok
+#
+#         if out=='loss': return loss
+#         assert 0
+
+class RefillModelRNNAdditiveDirectMixingWithAttention(RefillModelRNNBase):
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        state_count,
+        total_length,
+        min_len,
+        mask_token_idx):
+
+        state_count = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self.n_step     = min_len
+        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_kernel = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_energy = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_prob   = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'lptok'
+
+    def _batch_init(self,zi,x,y,z):
+        #### batch_init part
+        ### state init
+        z = self.embed(z)
+        y = self.embed(y)
+        # xs = torch.cat([y,init_state],dim=1)
+        xsa = self.init_state.weight.T[None,0:1]
+        xsa = xsa.repeat((len(z),z.size(1),1))
+        xsa = self.norm(xsa)
+
+        y  = self.norm(y)
+        z  = self.norm(z)
+        fs = self.vocab(xsa)*0
+        # fs = torch.tensor([],requires_grad=True).to(self.device)
+        # outer,inner = self.batch_init(zi,x,y,z,fs)
+        i = -1
+        sel = None
+        xz = None
+        outer = [zi, x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+        Outer should be non-mutable?
+        '''
+
+        (zi,x,y,z,fs) = outer
+        (i,sel,xz,xsa) = inner
+        sel = None
+        xz  = None
+
+        xz = z[:,i:i+1]
+
+        L = x.shape[1]
+
+        xs = xsa[:,i:i+1]
+        ##### adds attention interaction term
+        # import pdb; pdb.set_trace()
+        att = self.att_kernel(xs).matmul(xsa.transpose(2,1)).softmax(-1)
+        att = att * (self.att_prob(xs)[:,:,0:1].sigmoid())
+        val = att.matmul(xsa)
+        xs  = xs+ (val).matmul(self.att_energy.weight.T)
+
+        if i>=1:
+            xsl = xsa[:,i-1:i]
+            xs = xs + xsl.matmul(self.transition.weight)
+        if i+1<=L-1:
+            xsl = xsa[:,i+1:i+2]
+            xs = xs + xsl.matmul(self.transition.weight.transpose(1,0  ))
+
+        xs = xs + self.updater(xz)
+
+
+        # att = self.att_kernel(xsa).matmul(xs.transpose(2,1)).softmax(-2)
+        # val = att.transpose(2,1).matmul(xsa)
+        # xs = xs+ val.matmul(self.att_energy.weight)
+        # self.att_energy(val)
+
+
+        xs = self.norm(xs)
+
+        xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+        xkey_dynamic= self.xkey_dynamic(y)
+        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+
+        sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+        cand  = torch.cat([xz,xs,y],dim=1)
+        lptok = self.vocab(cand).log_softmax(-1)
+
+        xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+        # fs   = torch.cat([fs,xq],dim=1)
+        fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+        # import pdb; pdb.set_trace()
+        xsa = torch.scatter(xsa,index=(xs*0).long()+i,src=xs,dim=1)
+
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        L = z.size(1)
+        for i in range(L):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=L-1-i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+
+        self.callback_end(outer)
+        (zi,x,y,z,lptok) = outer
+
+        cent = self.target_energy(lptok,x)
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
+
+
+class RefillModelRNNAdditiveDirectMixingBidirectionalFixedEmission(RefillModelRNNAdditiveDirectMixingBidirectional):
+    def _step(self,outer,inner):
+        '''
+        Outer should be non-mutable?
+        '''
+
+        (zi,x,y,z,fs) = outer
+        (i,sel,xz,xsa) = inner
+        sel = None
+        xz  = None
+
+        xz = z[:,i:i+1]
+
+        L = x.shape[1]
+        xs = 0
+        if i>=1:
+            xsl = xsa[:,i-1:i]
+            xs = xs + xsl.matmul(self.transition.weight)
+        if i+1<=L-1:
+            xsl = xsa[:,i+1:i+2]
+            xs = xs + xsl.matmul(self.transition.weight.transpose(1,0  ))
+
+        xs = xs + (xz)
+        xs = self.norm(xs)
+
+        xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+        xkey_dynamic= self.xkey_dynamic(y)
+        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+
+        sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+        cand  = torch.cat([xz,xs,y],dim=1)
+        lptok = self.vocab(cand).log_softmax(-1)
+
+        xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+        # fs   = torch.cat([fs,xq],dim=1)
+        fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+        # import pdb; pdb.set_trace()
+        xsa = torch.scatter(xsa,index=(xs*0).long()+i,src=xs,dim=1)
+
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        L = z.size(1)
+        for i in range(L):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=L-1-i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+
+        self.callback_end(outer)
+        (zi,x,y,z,lptok) = outer
+
+        cent = self.target_energy(lptok,x)
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
+
+class RefillModelRNNAdditiveSweeping(RefillModelRNNBase):
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        state_count,
+        total_length,
+        min_len,
+        mask_token_idx):
+
+        state_count = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self.n_step     = min_len
+        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'lptok'
+
+    def _batch_init(self,zi,x,y,z):
+        #### batch_init part
+        ### state init
+        z = self.embed(z)
+        y = self.embed(y)
+        # xs = torch.cat([y,init_state],dim=1)
+        xsa = self.init_state.weight.T[None,0:1]
+        xsa = xsa.repeat((len(z),z.size(1),1))
+        xsa = self.norm(xsa)
+
+        y  = self.norm(y)
+        z  = self.norm(z)
+        fs = self.vocab(xsa)*0
+        # fs = torch.tensor([],requires_grad=True).to(self.device)
+        # outer,inner = self.batch_init(zi,x,y,z,fs)
+        i = -1
+        sel = None
+        xz = None
+        outer = [zi, x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+        Outer should be non-mutable?
+        '''
+
+        (zi,x,y,z,fs) = outer
+        (i,sel,xz,xsa) = inner
+        sel = None
+        xz  = None
+
+        xz = z[:,i:i+1]
+
+        L = x.shape[1]
+        xs = 0
+        if i>=1:
+            xsl = xsa[:,i-1:i]
+            xs = xs + xsl.matmul(self.transition.weight)
+        if i+1<=L-1:
+            xsl = xsa[:,i+1:i+2]
+            xs = xs + xsl.matmul(self.transition.weight.transpose(1,0   ))
+
+        xs = xs + self.updater(xz)
+        xs = self.norm(xs)
+
+        xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+        xkey_dynamic= self.xkey_dynamic(y)
+        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+
+        sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+        cand  = torch.cat([xz,xs,y],dim=1)
+        lptok = self.vocab(cand).log_softmax(-1)
+
+        xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+        fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+        xsa = torch.scatter(xsa,index=(xs*0).long()+i,src=xs,dim=1)
+
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        L = z.size(1)
+        for i in range(L):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=L-1-i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+
+        self.callback_end(outer)
+        (zi,x,y,z,lptok) = outer
+
+        cent = self.target_energy(lptok,x)
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
+
+class RefillModelRNNAdditiveSweepingWithResidual(RefillModelRNNBase):
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        state_count,
+        total_length,
+        min_len,
+        mask_token_idx):
+
+        state_count = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self.n_step     = min_len
+        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'lptok'
+
+    def _batch_init(self,zi,x,y,z):
+        #### batch_init part
+        ### state init
+        z = self.embed(z)
+        y = self.embed(y)
+        # xs = torch.cat([y,init_state],dim=1)
+        xsa = self.init_state.weight.T[None,0:1]
+        xsa = xsa.repeat((len(z),z.size(1),1))
+        xsa = self.norm(xsa)
+
+        y  = self.norm(y)
+        z  = self.norm(z)
+        fs = self.vocab(xsa)*0
+        # fs = torch.tensor([],requires_grad=True).to(self.device)
+        # outer,inner = self.batch_init(zi,x,y,z,fs)
+        i = -1
+        sel = None
+        xz = None
+        outer = [zi, x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+        Outer should be non-mutable?
+        '''
+
+        (zi,x,y,z,fs) = outer
+        (i,sel,xz,xsa) = inner
+        sel = None
+        xz  = None
+
+        xz = z[:,i:i+1]
+
+        L = x.shape[1]
+        xs = xsa[:,i:i+1]
+        if i>=1:
+            xsl = xsa[:,i-1:i]
+            xs = xs + xsl.matmul(self.transition.weight)
+        if i+1<=L-1:
+            xsl = xsa[:,i+1:i+2]
+            xs = xs + xsl.matmul(self.transition.weight.transpose(1,0   ))
+
+        xs = xs + self.updater(xz)
+        xs = self.norm(xs)
+
+        xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+        xkey_dynamic= self.xkey_dynamic(y)
+        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+
+        sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+        cand  = torch.cat([xz,xs,y],dim=1)
+        lptok = self.vocab(cand).log_softmax(-1)
+
+        xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+        fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+        xsa = torch.scatter(xsa,index=(xs*0).long()+i,src=xs,dim=1)
+
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        L = z.size(1)
+        for i in range(L):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=L-1-i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+
+        self.callback_end(outer)
+        (zi,x,y,z,lptok) = outer
+
+        cent = self.target_energy(lptok,x)
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
+class RefillModelMixtureRNNSweepingOldEmission(RefillModelRNNBase):
+    '''
+    Implements a MRF ICM where the base interaction is
+    a dynamic MRF, at each location, the MRF is selected
+    from a mixture to avoid forcing nearest neighbor interaction.
+
+    To achieve this, we needs to manage
+         - a set of vectors, varied at each step
+         - a distribution, varied at each step
+
+    '''
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        mask_token_idx):
+
+        state_count  = 1
+        total_length = 1
+        min_len      = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length  = total_length
+        self.min_len       = min_len
+        self.mixture_count = mixture_count
+        self.K = mixture_count
+        self.embed_dim   = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed        = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self.embed_extra  = nn.Embedding(10,embed_dim,).to(self.device)
+        self.n_step       = min_len
+        self.xkey_static  = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic = nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        # self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.We         = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.Wr         = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'lptok'
+
+
+
+    def _batch_init(self,zi,x,y,z):
+        '''
+        :type zi: shape of (B,)
+        :type x:  shape of (B, L)
+        :type y:  shape of (B, K), K <= self.mixture_count
+        :type z:  shape of (B, L)
+        :type xsa: shape of (B, L, E). this is stored as vector state
+        :type xl: shape of (B, L, K, E) this is the left image
+        :type xr: shape of (B, L, K, E) this is the right image
+        :type xlr: shape of (B, L, K, E) this is the left right image
+        ## xl and xr can be combined as long as the sweeping is simple
+        '''
+        #### batch_init part
+        #### state init
+        z = self.embed(z)
+        y = self.embed(y)
+
+        ### construct left rightimage
+        K = self.K
+        B = y.size(0)
+        L = x.size(1)
+        E = self.embed_dim
+        # xlr = torch.cat([y,self.embed_extra(torch.zeros((B, K -y.shape[1])).long().to(self.device)) ],dim=1).reshape((B,1,K,E)).repeat((1,L,1,1))
+        # xlr = torch.cat([self.embed_extra(torch.zeros((B, K)).long().to(self.device)) ],dim=1).reshape((B,1,K,E)).repeat((1,L,1,1))
+        xlr = self.embed_extra(torch.arange(K).long().to(self.device)).reshape((1,1,K,E)).repeat((B,L,1,1))
+
+        ### inferred from xlr thus empty for now
+        xsa  = xlr[:,:,0,:]*0
+
+        ### fs should store emitted token propensity, better to do in parallel
+
+        y  = self.norm(y)
+        z  = self.norm(z)
+        fs = self.vocab(xsa)*0
+
+        i   = -1
+        sel = None
+        lr  = 1 ## 1 for right, -1 for left
+        outer = [zi, x,y,z,fs]
+        inner = [(i,lr),  sel,xlr,xsa]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+        :param fs: token emission at each position
+        :param xsa: hidden state at each position
+        :param xz:  input state at current position
+        :param sel: selection probability at current position
+        :param i: pointer to current position
+        :param x: ground truth output sequence
+        :param y: candidate sets containing masked tokens
+        :param z: input sequence with tokens masked
+
+        ### needs a
+
+        ### Unlike simple MRF
+            The states propagate to left and right without equalisation
+            to ensure long-range interaction.
+        ### At each position, we choose one chain to place a node
+            this node takes a value that minimise the LRC 3-way interaction,
+            and is thus determined by summing the conditional interaction.
+            The choice is manifested as a probability, parametrising the
+            update of L and R channels
+
+        ### pseudo-code
+            for pos in seg:
+                lp = f(L(t-1),R(t+1),Ct)
+                xp = softmax(lp)  ### choose the most likely node
+                                        ### When propagating to right, left image is updated
+                                        ### When propagating to left, right image is updated
+                                        ### the most likely node is calculated as the one maximising the
+                                        ### three way interaction
+
+                L(t) = L(xp,L(t-1))     ### propagate left image towards right
+                                        ### if a node is absent,  directly copy
+                                        ### if a node is present, copy the node vector into left image
+                                        ### scatter into t
+
+                R(t) = R(xp,R(t+1))     ### propagate right image towards left
+                                        ### if a node is absent,  directly copy
+                                        ### if a node is present, copy the node vector into right image
+                                        ### scatter into t
+
+                E(t) = g(xp,L,R)        ### scatter into t
+
+                ### problem:
+                #### how to model emission? Should select between copying and the candidates
+
+                - old emission: extract the state vector, pass through a dynamic selector, mix the output likelihood.
+                    - this is closer to the old model
+                    - easier for comparision for now
+
+                - new emission: emit between the original token and the node token, selected by the node.
+                    - this is much simpler since the selection is only between 2 nodes.
+
+                #### the Wr matrix needs to be different for each chain...
+        '''
+
+        (zi,x,  y,  z, fs) = outer
+        ((i,lr), sel,  xlr,   xsa) = inner
+
+
+
+        '''
+        Computing probability as maximising exp(xWL+xWR+xWz)
+
+                 z
+                 |
+                (We)
+                 |
+        L--(Wr)--x--(Wr)--R
+
+        '''
+
+
+        xz = z[:,i:i+1,None]
+        # trying for all K components
+        # (B,L,K,E)
+        B  = x.size(0)
+        L  = x.shape[1]
+        K  = self.K
+        E  = self.embed_dim
+
+        xss = 0.
+        ### always have Z
+        xss = xss + xz.matmul(self.We.weight.T)
+        if i>=1:
+            xl = xlr[:,i-1:i]
+            xss = xss + xl.matmul(self.Wr.weight.T)
+        if i+1<=L-1:
+            xr = xlr[:,i+1:i+2]
+            xss = xss + xr.matmul(self.Wr.weight)
+        xss = self.norm(xss)
+
+        xe = 0
+        xe = xe + (xss * xz.matmul(self.We.weight.T)).mean(-1)
+        if i>=1:
+            xl = xlr[:,i-1:i]
+            xe  = xe  + (xss * xl.matmul(self.Wr.weight.T)).mean(-1)
+        if i+1<=L-1:
+            xr = xlr[:,i+1:i+2]
+            xe  = xe  + (xss * xr.matmul(self.Wr.weight)).mean(-1)
+        xp = xe.softmax(-1)[:,:,:,None]  ### select the best node
+        # import pdb; pdb.set_trace()
+        #### propagate the images
+        if lr==1:
+            ## copy from left or new vector
+            val = xlr[:,i-1:i] if i>=1 else 0.
+            val  = xp*xss + (1-xp) * val
+            xlr  = torch.scatter(xlr,index=(val*0).long()+i,src=val,dim=1)
+        elif lr==-1:
+            ### copy from right or new vector
+            val = xlr[:,i+1:i+2] if i+1<=L-1 else 0.
+            val  = xp*xss + (1-xp) * val
+            xlr  = torch.scatter(xlr,index=(val*0).long()+i,src=val,dim=1)
+        else:
+            raise Exception(f'Unknown lr={lr}')
+
+
+
+
+        ### old emission function to populate (fs)
+        if 1:
+            xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+            xkey_dynamic= self.xkey_dynamic(y)
+            xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+
+            xs = self.norm((xss*xp).sum(2))
+
+            sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+            cand  = torch.cat([xz[:,0],xs,y],dim=1)
+            lptok = self.vocab(cand).log_softmax(-1)
+
+            xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+            fs    = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+
+        outer = [zi,x,y,z,fs]
+        # inner = d
+        inner = [i,xp.reshape((B,1,K)).log(),xlr,xsa]
+        return outer,inner
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        L = z.size(1)
+        for i in range(L):
+            inner[0]=(i,1)
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=(L-1-i,-1)
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+
+        self.callback_end(outer)
+        (zi,x,y,z,lptok) = outer
+
+        cent = self.target_energy(lptok,x)
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
+
+class RefillModelMixtureRNNSweepingOldEmissionDifferentTransition(RefillModelRNNBase):
+    '''
+    Implements a MRF ICM where the base interaction is
+    a dynamic MRF, at each location, the MRF is selected
+    from a mixture to avoid forcing nearest neighbor interaction.
+
+    To achieve this, we needs to manage
+         - a set of vectors, varied at each step
+         - a distribution, varied at each step
+
+    '''
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        mask_token_idx):
+
+        state_count  = 1
+        total_length = 1
+        min_len      = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length  = total_length
+        self.min_len       = min_len
+        self.mixture_count = mixture_count
+        self.K = mixture_count
+        self.embed_dim   = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed        = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self.embed_extra  = nn.Embedding(10,embed_dim,).to(self.device)
+        self.n_step       = min_len
+        self.xkey_static  = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic = nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        # self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.We         = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.Wr         = nn.Linear(mixture_count*embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'lptok'
+
+
+
+    def _batch_init(self,zi,x,y,z):
+        '''
+        :type zi: shape of (B,)
+        :type x:  shape of (B, L)
+        :type y:  shape of (B, K), K <= self.mixture_count
+        :type z:  shape of (B, L)
+        :type xsa: shape of (B, L, E). this is stored as vector state
+        :type xl: shape of (B, L, K, E) this is the left image
+        :type xr: shape of (B, L, K, E) this is the right image
+        :type xlr: shape of (B, L, K, E) this is the left right image
+        ## xl and xr can be combined as long as the sweeping is simple
+        '''
+        #### batch_init part
+        #### state init
+        z = self.embed(z)
+        y = self.embed(y)
+
+        ### construct left rightimage
+        K = self.K
+        B = y.size(0)
+        L = x.size(1)
+        E = self.embed_dim
+        # xlr = torch.cat([y,self.embed_extra(torch.zeros((B, K -y.shape[1])).long().to(self.device)) ],dim=1).reshape((B,1,K,E)).repeat((1,L,1,1))
+        # xlr = torch.cat([self.embed_extra(torch.zeros((B, K)).long().to(self.device)) ],dim=1).reshape((B,1,K,E)).repeat((1,L,1,1))
+        xlr = self.embed_extra(torch.arange(K).long().to(self.device)).reshape((1,1,K,E)).repeat((B,L,1,1))
+
+        ### inferred from xlr thus empty for now
+        xsa  = xlr[:,:,0,:]*0
+
+        ### fs should store emitted token propensity, better to do in parallel
+
+        y  = self.norm(y)
+        z  = self.norm(z)
+        fs = self.vocab(xsa)*0
+
+        i   = -1
+        sel = None
+        lr  = 1 ## 1 for right, -1 for left
+        outer = [zi, x,y,z,fs]
+        inner = [(i,lr),  sel,xlr,xsa]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+        :param fs: token emission at each position
+        :param xsa: hidden state at each position
+        :param xz:  input state at current position
+        :param sel: selection probability at current position
+        :param i: pointer to current position
+        :param x: ground truth output sequence
+        :param y: candidate sets containing masked tokens
+        :param z: input sequence with tokens masked
+
+        ### needs a
+
+        ### Unlike simple MRF
+            The states propagate to left and right without equalisation
+            to ensure long-range interaction.
+        ### At each position, we choose one chain to place a node
+            this node takes a value that minimise the LRC 3-way interaction,
+            and is thus determined by summing the conditional interaction.
+            The choice is manifested as a probability, parametrising the
+            update of L and R channels
+
+        ### pseudo-code
+            for pos in seg:
+                lp = f(L(t-1),R(t+1),Ct)
+                xp = softmax(lp)  ### choose the most likely node
+                                        ### When propagating to right, left image is updated
+                                        ### When propagating to left, right image is updated
+                                        ### the most likely node is calculated as the one maximising the
+                                        ### three way interaction
+
+                L(t) = L(xp,L(t-1))     ### propagate left image towards right
+                                        ### if a node is absent,  directly copy
+                                        ### if a node is present, copy the node vector into left image
+                                        ### scatter into t
+
+                R(t) = R(xp,R(t+1))     ### propagate right image towards left
+                                        ### if a node is absent,  directly copy
+                                        ### if a node is present, copy the node vector into right image
+                                        ### scatter into t
+
+                E(t) = g(xp,L,R)        ### scatter into t
+
+                ### problem:
+                #### how to model emission? Should select between copying and the candidates
+
+                - old emission: extract the state vector, pass through a dynamic selector, mix the output likelihood.
+                    - this is closer to the old model
+                    - easier for comparision for now
+
+                - new emission: emit between the original token and the node token, selected by the node.
+                    - this is much simpler since the selection is only between 2 nodes.
+
+                #### the Wr matrix needs to be different for each chain...
+        '''
+
+        (zi,x,  y,  z, fs) = outer
+        ((i,lr), sel,  xlr,   xsa) = inner
+
+
+
+        '''
+        Computing probability as maximising exp(xWL+xWR+xWz)
+
+                 z
+                 |
+                (We)
+                 |
+        L--(Wr)--x--(Wr)--R
+
+        '''
+
+
+        xz = z[:,i:i+1,None]
+        # trying for all K components
+        # (B,L,K,E)
+        B  = x.size(0)
+        L  = x.shape[1]
+        K  = self.K
+        E  = self.embed_dim
+
+        Wr = self.Wr.weight.reshape((K,E,E))
+        # import pdb; pdb.set_trace()
+
+
+        xss = 0.
+        ### always have Z
+        xss = xss + xz.matmul(self.We.weight.T)
+        def trans_wr(xr,Wr):
+            x = xr[:,:,:,:,None] * Wr[None,None]
+            x = x.sum(-2)
+            return x
+
+        if i>=1:
+            xl = xlr[:,i-1:i]
+            xss = xss + trans_wr(xl,Wr)
+            # xl.matmul(self.Wr.weight.T)
+        if i+1<=L-1:
+            xr = xlr[:,i+1:i+2]
+            xss = xss +  trans_wr(xr,Wr.transpose(2,1))
+            # xr.matmul(self.Wr.weight)
+        xss = self.norm(xss)
+
+        xe = 0
+        xe = xe + (xss * xz.matmul(self.We.weight.T)).mean(-1)
+        if i>=1 and 1==1:
+            xl = xlr[:,i-1:i]
+            xe  = xe  + (xss * trans_wr(xl,Wr)).mean(-1)
+            # xe  = xe  + (xss * xl.matmul(self.Wr.weight.T)).mean(-1)
+        if i+1<=L-1 and -1==-1:
+            xr = xlr[:,i+1:i+2]
+            xe  = xe  + (xss *  trans_wr(xr,Wr.transpose(2,1))).mean(-1)
+
+        xp = xe.softmax(-1)[:,:,:,None]  ### select the best node
+        # import pdb; pdb.set_trace()
+        #### propagate the images
+        if lr==1:
+            ## copy from left or new vector
+            val = xlr[:,i-1:i] if i>=1 else 0.
+            val  = xp*xss + (1-xp) * val
+            xlr  = torch.scatter(xlr,index=(val*0).long()+i,src=val,dim=1)
+        elif lr==-1:
+            ### copy from right or new vector
+            val = xlr[:,i+1:i+2] if i+1<=L-1 else 0.
+            val  = xp*xss + (1-xp) * val
+            xlr  = torch.scatter(xlr,index=(val*0).long()+i,src=val,dim=1)
+        else:
+            raise Exception(f'Unknown lr={lr}')
+
+
+
+
+        ### old emission function to populate (fs)
+        if 0:
+            xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+            xkey_dynamic= self.xkey_dynamic(y)
+            xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+
+            xs = self.norm((xss*xp).sum(2))
+
+            sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+            cand  = torch.cat([xz[:,0],xs,y],dim=1)
+            lptok = self.vocab(cand).log_softmax(-1)
+
+            xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+            fs    = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+
+        if 1:
+
+            xkey_static = self.xkey_static.weight[None,:1,:self.embed_dim].repeat((len(z),1,1))
+            xkey_dynamic= self.xkey_dynamic(y)
+            xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+
+            #### all xss are equally possible to be the vector, thus should consider all
+            #### consider all possiblilities equally. expand the nodes then compute lptok
+            ####
+            # xss[:,0].matmul(xkey.transpose(2,1))
+            sel = xss[:,0].matmul(xkey.transpose(2,1))
+            sel = sel.log_softmax(-1)
+            sel = sel + xp[:,0].log()
+            sel = sel.logsumexp(-2,keepdims=True)
+            # sel = sel.reshape((B,-1)).log_softmax(-1).reshape(sel.shape)
+
+            # import pdb; pdb.set_trace()
+            # xs = self.norm((xss*xp).sum(2))
+            # sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+            cand  = torch.cat([xz[:,0],y],dim=1)
+            lptok = self.vocab(cand).log_softmax(-1)
+
+            xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+            fs    = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+
+
+
+        outer = [zi,x,y,z,fs]
+        inner = [i,xp.reshape((B,1,K)).log(),xlr,xsa]
+        return outer,inner
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        L = z.size(1)
+        for i in range(L):
+            inner[0]=(i,1)
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=(L-1-i,-1)
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+
+        self.callback_end(outer)
+        (zi,x,y,z,lptok) = outer
+
+        cent = self.target_energy(lptok,x)
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
+
+class RefillModelMixtureRNNSweepingOldEmission2(RefillModelMixtureRNNSweepingOldEmission):
+    pass
+
+class RefillModelMixtureRNNSweepingNewEmission(RefillModelRNNBase):
+    '''
+    Implements a MRF ICM where the base interaction is
+    a dynamic MRF, at each location, the MRF is selected
+    from a mixture to avoid forcing nearest neighbor interaction.
+
+    To achieve this, we needs to manage
+         - a set of vectors, varied at each step
+         - a distribution, varied at each step
+
+    '''
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        mask_token_idx):
+
+        state_count  = 1
+        total_length = 1
+        min_len      = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length  = total_length
+        self.min_len       = min_len
+        self.mixture_count = mixture_count
+        self.K = mixture_count
+        self.embed_dim   = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed        = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self.embed_extra  = nn.Embedding(10,embed_dim,).to(self.device)
+        self.n_step       = min_len
+        self.xkey_static  = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic = nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        # self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.We         = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.Wr         = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'lptok'
+
+
+
+    def _batch_init(self,zi,x,y,z):
+        '''
+        :type zi: shape of (B,)
+        :type x:  shape of (B, L)
+        :type y:  shape of (B, K), K <= self.mixture_count
+        :type z:  shape of (B, L)
+        :type xsa: shape of (B, L, E). this is stored as vector state
+        :type xl: shape of (B, L, K, E) this is the left image
+        :type xr: shape of (B, L, K, E) this is the right image
+        :type xlr: shape of (B, L, K, E) this is the left right image
+        ## xl and xr can be combined as long as the sweeping is simple
+        '''
+        #### batch_init part
+        #### state init
+        z = self.embed(z)
+        y = self.embed(y)
+
+        ### construct left rightimage
+        K = self.K
+        B = y.size(0)
+        L = x.size(1)
+        E = self.embed_dim
+        xlr = torch.cat([y,self.embed_extra(torch.zeros((B, K -y.shape[1])).long().to(self.device)) ],dim=1).reshape((B,1,K,E)).repeat((1,L,1,1))
+
+        ### inferred from xlr thus empty for now
+        xsa  = xlr[:,:,0,:]*0
+
+        ### fs should store emitted token propensity, better to do in parallel
+
+        y  = self.norm(y)
+        z  = self.norm(z)
+        fs = self.vocab(xsa)*0
+
+        i   = -1
+        sel = None
+        lr  = 1 ## 1 for right, -1 for left
+        outer = [zi, x,y,z,fs]
+        inner = [(i,lr),  sel,xlr,xsa]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+        :param fs: token emission at each position
+        :param xsa: hidden state at each position
+        :param xz:  input state at current position
+        :param sel: selection probability at current position
+        :param i: pointer to current position
+        :param x: ground truth output sequence
+        :param y: candidate sets containing masked tokens
+        :param z: input sequence with tokens masked
+
+        ### needs a
+
+        ### Unlike simple MRF
+            The states propagate to left and right without equalisation
+            to ensure long-range interaction.
+        ### At each position, we choose one chain to place a node
+            this node takes a value that minimise the LRC 3-way interaction,
+            and is thus determined by summing the conditional interaction.
+            The choice is manifested as a probability, parametrising the
+            update of L and R channels
+
+        ### pseudo-code
+            for pos in seg:
+                lp = f(L(t-1),R(t+1),Ct)
+                xp = softmax(lp)  ### choose the most likely node
+                                        ### When propagating to right, left image is updated
+                                        ### When propagating to left, right image is updated
+                                        ### the most likely node is calculated as the one maximising the
+                                        ### three way interaction
+
+                L(t) = L(xp,L(t-1))     ### propagate left image towards right
+                                        ### if a node is absent,  directly copy
+                                        ### if a node is present, copy the node vector into left image
+                                        ### scatter into t
+
+                R(t) = R(xp,R(t+1))     ### propagate right image towards left
+                                        ### if a node is absent,  directly copy
+                                        ### if a node is present, copy the node vector into right image
+                                        ### scatter into t
+
+                E(t) = g(xp,L,R)        ### scatter into t
+
+                ### problem:
+                how to model emission? Should select between copying and the candidates
+
+                old emission: extract the state vector, pass through a dynamic selector, mix the output likelihood.
+                    - this is closer to the old model
+
+                new emission: emit between the original token and the node token, selected by the node.
+                    - this is much simpler since the selection is only between 2 nodes.
+
+        '''
+
+        (zi,x,  y,  z, fs) = outer
+        ((i,lr), sel,  xlr,   xsa) = inner
+
+
+
+        '''
+        Computing probability as maximising exp(xWL+xWR+xWz)
+
+                 z
+                 |
+                (We)
+                 |
+        L--(Wr)--x--(Wr)--R
+
+        '''
+
+
+        xz = z[:,i:i+1,None]
+        # trying for all K components
+        # (B,L,K,E)
+        B  = x.size(0)
+        L  = x.shape[1]
+        K  = self.K
+        E  = self.embed_dim
+
+        xss = 0.
+        ### always have Z
+        xss = xss + xz.matmul(self.We.weight.T)
+        if i>=1:
+            xl = xlr[:,i-1:i]
+            xss = xss + xl.matmul(self.Wr.weight.T)
+        if i+1<=L-1:
+            xr = xlr[:,i+1:i+2]
+            xss = xss + xr.matmul(self.Wr.weight)
+        xss = self.norm(xss)
+
+        xe = 0
+        xe = xe + (xss * xz.matmul(self.We.weight.T)).mean(-1)
+        if i>=1:
+            xl = xlr[:,i-1:i]
+            xe  = xe  + (xss * xl.matmul(self.Wr.weight.T)).mean(-1)
+        if i+1<=L-1:
+            xr = xlr[:,i+1:i+2]
+            xe  = xe  + (xss * xr.matmul(self.Wr.weight)).mean(-1)
+        xp = xe.softmax(-1)[:,:,:,None]  ### select the best node
+
+        #### propagate the images
+        if lr==1:
+            ## copy from left or new vector
+            val  = xlr[:,i-1:i] if i>=1 else 0.
+            val  = xp*xss + (1-xp) * val
+            val  = self.norm(val)
+            xlr  = torch.scatter(xlr,index=(val*0).long()+i,src=val,dim=1)
+        elif lr==-1:
+            ### copy from right or new vector
+            val  = xlr[:,i+1:i+2] if i+1<=L-1 else 0.
+            val  = xp*xss + (1-xp) * val
+            val  = self.norm(val)
+            xlr  = torch.scatter(xlr,index=(val*0).long()+i,src=val,dim=1)
+        else:
+            raise Exception(f'Unknown lr={lr}')
+
+
+
+
+        ### new emission function to populate (fs)
+        if 1:
+            # xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+            xs    = self.norm((xss*xp).sum(2))
+            cand  = torch.cat([xz[:,0],xs,],dim=1)
+            xkey  = xkey_dynamic= self.xkey_dynamic(cand)
+
+            sel   = xkey[:,:,0:1].transpose(2,1).log_softmax(-1)
+            lptok = self.vocab(cand).log_softmax(-1)
+
+            xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+            fs    = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+
+        if 0:
+            # xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+            # xs    = self.norm((xss*xp).sum(2))
+            # cand  = torch.cat([xz[:,0],xs,],dim=1)
+
+            # import pdb; pdb.set_trace()
+            cand = torch.cat([ xz[:,0],xss[:,0]],dim=1)
+            # xkey_static = self.xkey_static.weight[None,:21:self.embed_dim].repeat((len(z),1,1))
+            xe   = torch.cat([self.xkey_dynamic(xz[:,0])[:,:,0:1], xe],dim=2)
+            sel  = xe.log_softmax(-1)
+            # import pdb; pdb.set_trace()
+            # xkey = xkey_dynamic= self.xkey_dynamic(cand)
+            # sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+            lptok = self.vocab(cand).log_softmax(-1)
+
+            xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+            fs    = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+
+        '''
+        Epoch: 45
+        ModelClassName: RefillModelMixtureRNNSweepingNewEmission
+        Training Loss: 0.3286665997334889
+        Testing Loss: 0.3549345460805026
+
+        '''
+        outer = [zi,x,y,z,fs]
+        inner = [(i,lr),sel,xlr,xsa]
+        return outer,inner
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        L = z.size(1)
+        for i in range(L):
+            inner[0]=(i,1)
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L):
+            inner[0]=(L-1-i,-1)
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+
         self.callback_end(outer)
         (zi,x,y,z,lptok) = outer
 

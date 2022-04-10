@@ -53,22 +53,24 @@ def main():
         if out=='traj':
             lptok = conf.model.vocab(fs[0:1,-1:])
         elif out == 'token':
-            lptok = fs[0:1,-1:]
+            lptok = fs[0:1,i:i+1]
             sel = sel.exp()
         else:
             assert 0
+        xz = z[:,i:i+1]
+        # print(sel.shape)
         # print((sel[0,:,:10]*100).long())
         v = idx2word(conf.model.vocab(xz[0:1]).argmax(-1)[0])
         v2= idx2word(lptok.argmax(-1)[0])
         v3= idx2word((int(x[0:1,i:i+1])))
         print(wlen(v,7), end=' : ')
         print(wlen(v2,7),end=' : ')
+
         print(wlen(v3,7),end=' : ')
-        if v!='<mask>':
-            print()
-            return
+        # if v!='<mask>': print();return
         print((sel[0,:,:100]*100).long(),end=' : ')
-        print((xs[0,-1:,:10]*10).long())
+        # print((xs[0,-1:,:10]*10).long(),end=':')
+        print()
     conf.model.callback_init= lambda *a:print('-'*40)
     conf.model.callback_step = callback
     # def callback(s, inner ): print(wlen(idx2word(conf.model.vocab(inner[2][0:1]).argmax(-1)[0]),10),end=' : '); print((inner[1][0,:,:10]*100).long())

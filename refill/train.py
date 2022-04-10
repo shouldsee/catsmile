@@ -39,9 +39,19 @@ from markov_lm.Model_Refill import RefillModelCopy
 from markov_lm.Model_Refill import RefillModelCopyWithRandomFill
 from markov_lm.Model_Refill import RefillModelRNNAdditiveWithPseudoSampling
 from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixing
-
+from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixingWithGate
+# RefillModelRNNAdditiveDirectMixingWithGate
+from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixingBidirectional
 
 from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectSampling
+from markov_lm.Model_Refill import RefillModelRNNAdditiveSweeping
+from markov_lm.Model_Refill import RefillModelRNNAdditiveSweepingWithResidual
+from markov_lm.Model_Refill import RefillModelMixtureRNNSweepingOldEmission
+from markov_lm.Model_Refill import RefillModelMixtureRNNSweepingOldEmission2
+from markov_lm.Model_Refill import RefillModelMixtureRNNSweepingNewEmission
+from markov_lm.Model_Refill import RefillModelMixtureRNNSweepingOldEmissionDifferentTransition
+from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixingWithAttention
+from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixingWithGate
 
 def parse_checkpoint(sys,):
     if '--auto' in sys.argv:
@@ -116,14 +126,51 @@ def init_conf(CUDA,shuffle):
 
     conf.model = model = RefillModelRNNAdditiveDirect(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+
     conf.model = model = RefillModelRNNAdditiveDirectMixing(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
 
-    conf.model = model = RefillModelRNNAdditiveDirectSampling(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    conf.model = model = RefillModelRNNAdditiveDirectMixingWithGate(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
         state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
 
+    # conf.model = model = RefillModelRNNAdditiveDirectSampling(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+    #
+    # #
+    # from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixingBidirectionalFixedEmission
+    # conf.model = model = RefillModelRNNAdditiveDirectMixingBidirectional(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+    #
+    # conf.model = model = RefillModelRNNAdditiveDirectMixingBidirectionalFixedEmission(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+    #
+    #
+    # conf.model = model = RefillModelRNNAdditiveDirectMixingWithGate(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+
+    conf.model = model = RefillModelRNNAdditiveDirectMixingWithAttention(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+        state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+    #
+    # conf.model = model = RefillModelRNNAdditiveDirectMixingWithGate(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
 
 
+    # conf.model = model = RefillModelRNNAdditiveSweeping(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+
+    # conf.model = model = RefillModelRNNAdditiveSweepingWithResidual(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
+    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+    #
+    # conf.mixture_count=3
+    # conf.model= model = RefillModelMixtureRNNSweepingOldEmission(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+    #
+    #
+    # conf.mixture_count=3
+    # conf.model= model = RefillModelMixtureRNNSweepingOldEmissionDifferentTransition(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+
+    # conf.mixture_count=3
+    # conf.model= model = RefillModelMixtureRNNSweepingOldEmission2(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
+    # conf.model= model = RefillModelMixtureRNNSweepingNewEmission(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
     # conf.model = model = RefillModelRNNAdditiveWithPseudoSampling(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
     #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
     # conf.model = model = RefillModelRNNGRU(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
@@ -172,7 +219,8 @@ def main():
         x = xx
         STRICT_LOAD = '--nostrict' not in sys.argv
         model.load_state_dict(x,strict=STRICT_LOAD)
-        conf.optimizer.load_state_dict(checkpoint['optimizer'])
+        if STRICT_LOAD:
+            conf.optimizer.load_state_dict(checkpoint['optimizer'])
         # optimizer.load_state_dict(checkpoint["optimizer"])
     else:
         test_losses = []
