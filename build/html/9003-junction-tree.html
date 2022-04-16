@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="zh-CN" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>9003: [TBC] Junction Tree Algorithm &mdash; catsmile 0.0.1 文档</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/translations.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="搜索" href="search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="index.html" class="icon icon-home"> catsmile
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="在文档中搜索" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="1001-ctc-loss.html">1001: CTC Loss 结构解析</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1002-bptt.html">1002: [TBC]// BPTT in RNN</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1003-repar-gaussian.html">1003: 高斯随机变量的重参数化技巧(Reparametrisation)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1004-diff-expectation.html">1004: 期望函数的梯度计算</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1005-hmm-overview.html">1005: HMM简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="3001-kg-study.html">3001-知识图谱和NLP句子表示</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8001-intro.html">8001: CATSMILE简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8500-pytorch-common-problems.html">8500: PyTorch模型常用药</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9001-normal-dist.html">9001: [TBC] L2损失函数-正态分布</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">catsmile</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>9003: [TBC] Junction Tree Algorithm</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/9003-junction-tree.md.txt" rel="nofollow"> 查看页面源码</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section class="tex2jax_ignore mathjax_ignore" id="tbc-junction-tree-algorithm">
+<h1>9003: [TBC] Junction Tree Algorithm<a class="headerlink" href="#tbc-junction-tree-algorithm" title="永久链接至标题"></a></h1>
+<ul class="simple">
+<li><p>函数全称: 节点树算法</p></li>
+<li><p>函数解决的问题/不使用的后果: 你失去了使用树状模型的权利。</p></li>
+<li><p>函数解决改问题的原理: 消息传递在树状DAG的特殊形式。</p></li>
+<li><p>函数可能存在的问题</p></li>
+<li><p>函数在某一场景下的具体形式</p></li>
+<li><p>函数的具体计算方法</p></li>
+<li><p>函数备注</p></li>
+<li><p>函数参考信源</p></li>
+<li><p>[TBC]</p></li>
+</ul>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; 版权所有 2022, Feng Geng.</p>
+  </div>
+
+  利用 <a href="https://www.sphinx-doc.org/">Sphinx</a> 构建，使用了 
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">主题</a>
+    由 <a href="https://readthedocs.org">Read the Docs</a>开发.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

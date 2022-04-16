@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="zh-CN" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>9005: GPT和BERT对比-无监督语言模型 &mdash; catsmile 0.0.1 文档</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/translations.js"></script>
+        <script>window.MathJax = {"options": {"processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="搜索" href="search.html" />
+    <link rel="next" title="9006: 内容填充" href="9006-discriminative-refill.html" />
+    <link rel="prev" title="9003: [TBC] Junction Tree Algorithm" href="9003-junction-tree.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="index.html" class="icon icon-home"> catsmile
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="在文档中搜索" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="1001-ctc-loss.html">1001: CTC Loss 结构解析</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1002-bptt.html">1002: [TBC]// BPTT in RNN</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1003-repar-gaussian.html">1003: 高斯随机变量的重参数化技巧(Reparametrisation)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1004-diff-expectation.html">1004: 期望函数的梯度计算</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1005-hmm-overview.html">1005: HMM简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="3001-kg-study.html">3001-知识图谱和NLP句子表示</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8001-intro.html">8001: CATSMILE简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8500-pytorch-common-problems.html">8500: PyTorch模型常用药</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9001-normal-dist.html">9001: [TBC] L2损失函数-正态分布</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9003-junction-tree.html">9003: [TBC] Junction Tree Algorithm</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">9005: GPT和BERT对比-无监督语言模型</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9006-discriminative-refill.html">9006: 内容填充</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">catsmile</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>9005: GPT和BERT对比-无监督语言模型</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/9005-gpt-bert.md.txt" rel="nofollow"> 查看页面源码</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section class="tex2jax_ignore mathjax_ignore" id="gptbert">
+<h1>9005: GPT和BERT对比-无监督语言模型<a class="headerlink" href="#gptbert" title="永久链接至标题"></a></h1>
+<ul>
+<li><p>不使用的后果: 无法从大型语料库中对语言进行无监督学习</p></li>
+<li><p>直观介绍: MLM尝试从上下文中预测MaskedToken的实际值,目标是最小化
+<span class="math notranslate nohighlight">\(L=-\sum_{t} x_{tk} \log \pi_{tk}\)</span></p>
+<p>对于未masked的token,</p>
+<div class="math notranslate nohighlight">
+\[y_{tk}=\pi_{tk} \in \{1,0\}\]</div>
+<p>因此贡献为0. 对此进行推广,</p>
+<div class="math notranslate nohighlight">
+\[\pi_{tk}=f(g(x_{tk})),g(x)=\text{perturb}(x)\]</div>
+<p>如果没有掩码扰动,
+那么L等于0. 我们也可以认为我们要求 <span class="math notranslate nohighlight">\(L(f(g(x_{tk})))&lt;L(g(x_{tk}))\)</span>
+其中f代表BERT施加的修复,g代表掩码扰动, 也就是最小化dL</p>
+</li>
+<li><div class="math notranslate nohighlight">
+\[\begin{split}
+  \begin{aligned}
+  dL &amp;= L(f(g(x_{tk}))) - L(g(x_{tk})) \\
+     &amp;= -\sum_{t} x_{tk} \log f_{tk} +  \sum_{t} x_{tk} \log g_{tk}
+  \end{aligned}
+  \end{split}\]</div>
+</li>
+<li><p>注意到f和g只在掩码位置有差别,因此可以简化为掩码m上的和,进一步令<span class="math notranslate nohighlight">\(g_{mk}\)</span>在掩码位置
+为均匀分布或MaskToken上的delta,dL可以近似MLM目标,也就是
+我们希望bert模型,能够把扰动后的句子,拉回原来的句子.</p></li>
+<li><div class="math notranslate nohighlight">
+\[
+  \begin{aligned}
+  dL &amp;= -\sum_{m} x_{mk} \log f_{mk} +  \sum_{t} x_{mk} \log g_{mk}
+  \end{aligned}
+  \]</div>
+</li>
+<li><p>形式:</p></li>
+<li><p>MLM Masked Language Model</p></li>
+</ul>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="9003-junction-tree.html" class="btn btn-neutral float-left" title="9003: [TBC] Junction Tree Algorithm" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> 上一页</a>
+        <a href="9006-discriminative-refill.html" class="btn btn-neutral float-right" title="9006: 内容填充" accesskey="n" rel="next">下一页 <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; 版权所有 2022, Feng Geng.</p>
+  </div>
+
+  利用 <a href="https://www.sphinx-doc.org/">Sphinx</a> 构建，使用了 
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">主题</a>
+    由 <a href="https://readthedocs.org">Read the Docs</a>开发.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

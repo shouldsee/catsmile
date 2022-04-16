@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="zh-CN" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3001-知识图谱和NLP句子表示 &mdash; catsmile 0.0.1 文档</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/translations.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="搜索" href="search.html" />
+    <link rel="next" title="CATSMILE" href="8001-intro.html" />
+    <link rel="prev" title="1005: HMM简介" href="1005-hmm-overview.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="index.html" class="icon icon-home"> catsmile
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="在文档中搜索" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">CATSMILE-MAIN</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="1001-ctc-loss.html">1001: CTC Loss 结构解析</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1002-bptt.html">1002: [TBC]// BPTT in RNN</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1003-repar-gaussian.html">1003: 高斯随机变量的重参数化技巧(Reparametrisation)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1004-diff-expectation.html">1004: 期望函数的梯度计算</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1005-hmm-overview.html">1005: HMM简介</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">3001-知识图谱和NLP句子表示</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#traditional-knowledge-graph">Traditional Knowledge Graph</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#softmax-bottleneck">softmax bottleneck</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#unsupervised-hmm">Unsupervised HMM</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#mrf-junction-tree">MRF, Junction Tree</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#attention">Attention!</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#unsupervised-knowledge-graph">Unsupervised Knowledge Graph</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="8001-intro.html">CATSMILE</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">catsmile</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>3001-知识图谱和NLP句子表示</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/3001-kg-study.md.txt" rel="nofollow"> 查看页面源码</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section class="tex2jax_ignore mathjax_ignore" id="nlp">
+<h1>3001-知识图谱和NLP句子表示<a class="headerlink" href="#nlp" title="永久链接至标题"></a></h1>
+<section id="traditional-knowledge-graph">
+<h2>Traditional Knowledge Graph<a class="headerlink" href="#traditional-knowledge-graph" title="永久链接至标题"></a></h2>
+<p>Loss function: Supervised against a triplet datasets that specifies true
+triplets</p>
+<p>Tool for searching related papers:</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://www.connectedpapers.com/">https://www.connectedpapers.com/</a></p></li>
+<li><p>Google Scholar</p></li>
+</ul>
+</section>
+<section id="softmax-bottleneck">
+<h2>softmax bottleneck<a class="headerlink" href="#softmax-bottleneck" title="永久链接至标题"></a></h2>
+<p>A rather practical problem in word represntation</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://proceedings.neurips.cc/paper/2019/file/512fc3c5227f637e41437c999a2d3169-Paper.pdf">mixtape and sigmoid tree decomp</a></p></li>
+<li><p><a class="reference external" href="https://arxiv.org/pdf/1711.03953.pdf">mixture of softmax</a></p></li>
+</ul>
+</section>
+<section id="unsupervised-hmm">
+<h2>Unsupervised HMM<a class="headerlink" href="#unsupervised-hmm" title="永久链接至标题"></a></h2>
+<ul class="simple">
+<li><p><a class="reference external" href="https://arxiv.org/pdf/1609.09007.pdf">Ke 2016, Unsupervised Neural Hidden Markov Models</a></p></li>
+<li><p><a class="reference external" href="https://aclanthology.org/P19-1228.pdf">PCFG: Compound Probabilistic Context-Free Grammarsfor Grammar Induction.</a></p></li>
+<li><p>Viterbi and BW revisited https://nlp.stanford.edu/courses/lsa352/lsa352.lec7.6up.pdf</p></li>
+<li><p>HMM in protein alignment https://www.aaai.org/Papers/ISMB/1995/ISMB95-014.pdf</p></li>
+<li><p>Sequence level training: https://arxiv.org/pdf/1511.06732.pdf</p></li>
+</ul>
+</section>
+<section id="mrf-junction-tree">
+<h2>MRF, Junction Tree<a class="headerlink" href="#mrf-junction-tree" title="永久链接至标题"></a></h2>
+<ul class="simple">
+<li><p>CMU slides: https://www.cs.cmu.edu/~epxing/Class/10708-07/Slides/lecture6-JT-annotation.pdf</p></li>
+<li><p>Freiburg Slides: https://ml.informatik.uni-freiburg.de/former/_media/teaching/ws1314/gm/10-random_fields.handout.pdf</p></li>
+<li><p>Toronto MRF in denoising: https://ml.informatik.uni-freiburg.de/former/_media/teaching/ws1314/gm/10-random_fields.handout.pdf</p></li>
+<li><p>RNN seems interpretable with ICM https://en.wikipedia.org/wiki/Iterated_conditional_modes</p></li>
+<li><p>More ICM (Iterated Conditional Modes)  https://www.cs.rpi.edu/~stewart/sltcv/handout-07.pdf</p></li>
+<li><p>Besag 1986 on ICM  Besag, J. E. (1986), “On the Statistical Analysis of Dirty Pictures”, Journal of the Royal Statistical Society, Series B, 48 (3): 259–302, JSTOR 2345426</p></li>
+</ul>
+</section>
+<section id="attention">
+<h2>Attention!<a class="headerlink" href="#attention" title="永久链接至标题"></a></h2>
+<ul class="simple">
+<li><p>NEURAL MACHINE TRANSLATION BY JOINTLY LEARNING TO ALIGN AND TRANSLATE https://arxiv.org/pdf/1409.0473.pdf</p></li>
+</ul>
+</section>
+<section id="unsupervised-knowledge-graph">
+<h2>Unsupervised Knowledge Graph<a class="headerlink" href="#unsupervised-knowledge-graph" title="永久链接至标题"></a></h2>
+<ul class="simple">
+<li><p>KG to bias LM: KELM: augment pretraining corpus with KG
+https://ai.googleblog.com/2021/05/kelm-integrating-knowledge-graphs-with.html
+Sample sentences from KG (using a random walk？)</p></li>
+<li><p>KG from LM: KG extraction from BERT by evaluating attention seqs.
+https://arxiv.org/abs/2010.11967</p></li>
+<li><p>Visual Storytelling: Convert pictures into natural languages 看图说话.</p></li>
+<li><p>NotInteresting,read: Review of KG refinement http://www.semantic-web-journal.net/system/files/swj1167.pdf</p></li>
+<li><p>Important! Semantically Conditioned LSTM-based Natural Language Generation for Spoken Dialogue Systems
+https://arxiv.org/pdf/1508.01745.pdf</p></li>
+<li><p>SeqGAN: Sequence Generative Adversarial Nets with Policy Gradient</p></li>
+<li><p>https://ojs.aaai.org/index.php/AAAI/article/view/10804/10663</p></li>
+<li><p>Deep Reinforcement Learning for Dialogue Generation</p></li>
+<li><p>https://arxiv.org/abs/1606.01541</p></li>
+<li><p>A Diversity-Promoting Objective Function for Neural Conversation Models</p></li>
+<li><p>https://arxiv.org/abs/1510.03055</p></li>
+<li><p>Quite Weird: Neural Text Generation from Structured Data with Application to the Biography Domain
+https://arxiv.org/pdf/1603.07771.pdf</p></li>
+<li><p>ToRead: Controlling Linguistic Style Aspects in Neural Language Generation
+https://arxiv.org/pdf/1707.02633.pdf</p></li>
+<li><p>InterestingDirection: KG and Recommendation system
+https://arxiv.org/pdf/2003.00911.pdf</p></li>
+<li><p>Fundmental LM: Language Models 1996 https://aclanthology.org/J96-1002.pdf
+Found through WIKI https://en.wikipedia.org/wiki/Language_model
+CRF2001: https://repository.upenn.edu/cgi/viewcontent.cgi?article=1162&amp;context=cis_papers</p></li>
+<li><p>LM Review: 2019 https://arxiv.org/abs/1906.03591</p></li>
+<li><p>Sentence Rep: Sanjeev Arora on random walk and sentence rep:
+https://aclanthology.org/W18-3012.pdf</p></li>
+<li><p>NLP text Generation notes: https://zhuanlan.zhihu.com/p/162035103</p></li>
+<li><p>zhihu KB MemNN: https://zhuanlan.zhihu.com/p/163343976</p></li>
+<li><p>LSTM for drawing Deepmind: https://arxiv.org/pdf/1502.04623.pdf</p></li>
+<li><p>char-RNN2015: Andrej Karpathy LSTM https://karpathy.github.io/2015/05/21/rnn-effectiveness/
+http://vision.stanford.edu/pdf/KarpathyICLR2016.pdf</p></li>
+<li><p>Samuel R. Bowman在Generating Sentences from a Continuous Space中使用VAE进行文本生成。这种方法可以对句子间插值。
+https://arxiv.org/abs/1511.06349</p></li>
+<li><p>zhihu Notes on NLG: https://zhuanlan.zhihu.com/p/188446640</p></li>
+<li><p>conferences: ACL EMNLP NAACL</p></li>
+<li><p>GoolgeNN SENNA 2011: https://www.jmlr.org/papers/volume12/collobert11a/collobert11a
+Representation Learning 2012 https://arxiv.org/pdf/1206.5538.pdf
+Schizophrenia detection?? https://www.sciencedirect.com/science/article/abs/pii/S0165178121004315</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="1005-hmm-overview.html" class="btn btn-neutral float-left" title="1005: HMM简介" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> 上一页</a>
+        <a href="8001-intro.html" class="btn btn-neutral float-right" title="CATSMILE" accesskey="n" rel="next">下一页 <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; 版权所有 2022, Feng Geng.</p>
+  </div>
+
+  利用 <a href="https://www.sphinx-doc.org/">Sphinx</a> 构建，使用了 
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">主题</a>
+    由 <a href="https://readthedocs.org">Read the Docs</a>开发.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

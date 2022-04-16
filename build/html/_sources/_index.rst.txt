@@ -1,0 +1,20 @@
+.. catsmile documentation master file, created by
+   sphinx-quickstart on Thu Apr  7 17:38:57 2022.
+   You can adapt this file completely to your liking, but it should at least
+   contain the root `toctree` directive.
+
+CATSMILE: A CATalogue of Statistical Machine Learning Error functions
+====================================================================================
+
+
+Github: https://github.com/shouldsee/catsmile
+
+.. toctree::
+   :maxdepth: 3
+   :numbered:
+   :caption: 目录:
+
+   1001-ctc-loss.md
+   1001-ctc-loss
+   source/1001-ctc-loss
+   _index.md

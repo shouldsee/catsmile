@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="zh-CN" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>1001: CTC Loss 结构解析 &mdash; catsmile 0.0.1 文档</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/translations.js"></script>
+        <script>window.MathJax = {"options": {"processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="搜索" href="search.html" />
+    <link rel="next" title="1002: [TBC]// BPTT in RNN" href="1002-bptt.html" />
+    <link rel="prev" title="CATSMILE: A CATalogue of Statistical Machine Learning Error functions" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="index.html" class="icon icon-home"> catsmile
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="在文档中搜索" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">1001: CTC Loss 结构解析</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1002-bptt.html">1002: [TBC]// BPTT in RNN</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1003-repar-gaussian.html">1003: 高斯随机变量的重参数化技巧(Reparametrisation)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1004-diff-expectation.html">1004: 期望函数的梯度计算</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1005-hmm-overview.html">1005: HMM简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="3001-kg-study.html">3001-知识图谱和NLP句子表示</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8001-intro.html">8001: CATSMILE简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8500-pytorch-common-problems.html">8500: PyTorch模型常用药</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9001-normal-dist.html">9001: [TBC] L2损失函数-正态分布</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">catsmile</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>1001: CTC Loss 结构解析</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/1001-ctc-loss.md.txt" rel="nofollow"> 查看页面源码</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section class="tex2jax_ignore mathjax_ignore" id="ctc-loss">
+<span id="id1"></span><h1>1001: CTC Loss 结构解析<a class="headerlink" href="#ctc-loss" title="永久链接至标题"></a></h1>
+<ul>
+<li><p>CTC全称：Connectionist Temporal Classification 连接派时域分类（？）</p></li>
+<li><p>CTC解决的问题：对齐问题alignment/空格问题</p></li>
+<li><p>不使用CTC的后果：标签空间 <span class="math notranslate nohighlight">\(\set{i}\)</span> 和迭代空间 <span class="math notranslate nohighlight">\(\set{j}\)</span> 强制耦合，模型对于标签空间的标注会很敏感。</p></li>
+<li><p>CTC如何规避这个后果：通过加入免费的（跳过空白）这个操作，CTC只对标签空间的序列顺序变更敏感(A–B -&gt; B– A)，对绝对位置不敏感，因为绝对位置的变更无法穿透B操作。CTC将所有的顺序相同的标签序列归入同一个等价类，并通过求和来测量这些等价类的概率。也就是说，CTC在B操作后的空间计算概率，而不在有空格的空间计算概率。</p></li>
+<li><p>CTC的可能问题：CTC不能直接处理需要表示空格的场景。</p></li>
+<li><p>CTC的具体场景和形式:</p>
+<ul>
+<li><p>监督向量 <span class="math notranslate nohighlight">\(l_{bik}=1\)</span> , <span class="math notranslate nohighlight">\(\text{if}. L_{bi} = k   l_{bik}=1 . \text{if}. L_{bi} = k\)</span></p></li>
+<li><p>数据向量 <span class="math notranslate nohighlight">\(x_b\)</span> ，一般为高维数据有维度c此处省略</p></li>
+<li><p>结构操作B：跳过空格(-)连接标签</p></li>
+<li><p>一般的标签比对损失模型:</p>
+<div class="amsmath math notranslate nohighlight" id="equation-ecc13a06-097e-41cc-8134-60601eaf8480">
+<span class="eqno">(1)<a class="headerlink" href="#equation-ecc13a06-097e-41cc-8134-60601eaf8480" title="公式的永久链接"></a></span>\[\begin{align}
+      \text{loss} &amp;=  \sum_{_{bik}}  l_{bik} \log  \pi_{bik} \\   
+      &amp;= \sum_{bi} \log P(\Pi_{bi}  = L_{bi} |x_{b},\theta) \\  
+      &amp;= \sum_{b} \log P(\{ \Pi_{bi} \}  = \{ L_{bi} \} |x_{b},\theta) \\
+      \text{where} \ \pi_{bik}&amp;= P(\Pi_{bi}  = k |x_{b},\theta)
+      \end{align}\]</div>
+<p>可以看出，在做交叉熵计算的时候，已经做出了，给定隐变量后，标签生成是条件独立的假设。
+其中b为batch，i为监督向量位置索引，k为监督向量维度索引，这个交叉熵比较常见，CTC的主要贡献在于重写了后面的概率P</p>
+<div class="amsmath math notranslate nohighlight" id="equation-901f3c19-9677-425e-bbfa-f503c1ddf442">
+<span class="eqno">(2)<a class="headerlink" href="#equation-901f3c19-9677-425e-bbfa-f503c1ddf442" title="公式的永久链接"></a></span>\[\begin{align}
+      P( \{\Pi_{bi} \} |x_{b},\theta)
+      &amp;= \sum_{\{z_{bjk}\}\in B^{-1}(\{\Pi_{bi} \})}  P( \{\Pi_{bi} \}\},\{{z_{bjk}}\}|x_b,\theta) \\
+      &amp;= \sum_{\{z_{bjk}\}\in B^{-1}(\{\Pi_{bi} \}\})}  P(\{{z_{bjk}}\}|x_b,\theta) P( \{\Pi_{bi} \} |x_{b},\theta)
+      \\ &amp;= \sum_{\{z_{bjk}\}\in B^{-1}(\{\Pi_{bi} \})}  P( \{\Pi_{bi} \}\},\{{z_{bjk}}\}|x_b,\theta)
+      \\ &amp; =\sum_{\{z_{bjk}\}\in B^{-1}(\{\Pi_{bi} \}\})}  P(\{{z_{bjk}}\}|x_b,\theta)
+      \end{align}\]</div>
+<p>（由于 <span class="math notranslate nohighlight">\(\Pi = B^{-1}(Z)\)</span> 是多对一映射，可以省略 <span class="math notranslate nohighlight">\(\Pi\)</span> ）
+由于穷举序列 <span class="math notranslate nohighlight">\(\{z_{jk}\}\)</span>   的复杂度为指数级别 <span class="math notranslate nohighlight">\(O(K^J)\)</span>，
+直接暴力计算这个混合过程是低效的，因此CTC的贡献之一，是在（给定隐变量后，标签生成是条件独立的）
+假设下，也就是序列的每个位置可以单独采样
+<span class="math notranslate nohighlight">\(P(\{{z_{jk}}\}_{b}|x_b,\theta) =\prod_{j }  P({\{{z_k}\}_{bj}}|x_b,\theta)\)</span> ，
+应用前向-后向思想（可能源自HMM,动态规划）给出了一个快速计算这个混合概率的方法，复杂度为 <span class="math notranslate nohighlight">\(O(JK)\)</span> 。</p>
+</li>
+</ul>
+</li>
+<li><p>具体的forward和backward计算方法：[TBC] 待添加</p></li>
+<li><p>备注：看起来这个forward和backward的迭代并不是固定的，因此计算图取决于具体的监督向量，针对不同的目标Pi，计算这个混合分布的方法不同。</p></li>
+<li><p>参考：</p>
+<ul class="simple">
+<li><p>白裳：一文读懂CRNN+CTC文字识别</p></li>
+<li><p>Graves et al. 2006</p></li>
+</ul>
+</li>
+</ul>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="CATSMILE: A CATalogue of Statistical Machine Learning Error functions" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> 上一页</a>
+        <a href="1002-bptt.html" class="btn btn-neutral float-right" title="1002: [TBC]// BPTT in RNN" accesskey="n" rel="next">下一页 <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; 版权所有 2022, Feng Geng.</p>
+  </div>
+
+  利用 <a href="https://www.sphinx-doc.org/">Sphinx</a> 构建，使用了 
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">主题</a>
+    由 <a href="https://readthedocs.org">Read the Docs</a>开发.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

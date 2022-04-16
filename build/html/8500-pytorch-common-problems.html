@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="zh-CN" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>8500: PyTorch模型常用药 &mdash; catsmile 0.0.1 文档</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/translations.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="搜索" href="search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="index.html" class="icon icon-home"> catsmile
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="在文档中搜索" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="1001-ctc-loss.html">1001: CTC Loss 结构解析</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1002-bptt.html">1002: [TBC]// BPTT in RNN</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1003-repar-gaussian.html">1003: 高斯随机变量的重参数化技巧(Reparametrisation)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1004-diff-expectation.html">1004: 期望函数的梯度计算</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1005-hmm-overview.html">1005: HMM简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="3001-kg-study.html">3001-知识图谱和NLP句子表示</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8001-intro.html">8001: CATSMILE</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">catsmile</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>8500: PyTorch模型常用药</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/8500-pytorch-common-problems.md.txt" rel="nofollow"> 查看页面源码</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section class="tex2jax_ignore mathjax_ignore" id="pytorch">
+<h1>8500: PyTorch模型常用药<a class="headerlink" href="#pytorch" title="永久链接至标题"></a></h1>
+<ul>
+<li><p>前言: 建模是令人激动的旅程，但是模型很容易生病，这里列举了一些PyTorch的常见药品。**
+（现象和实因是多对多关系。）</p></li>
+<li><p>更新日期： 20220324</p></li>
+<li><p><strong>8501</strong></p>
+<ul class="simple">
+<li><p>现象：</p>
+<ul>
+<li><p>loss不下降，参数不移动</p></li>
+<li><p>恢复模型后，损失函数和保存前不一样。<code class="docutils literal notranslate"><span class="pre">x</span> <span class="pre">=</span> <span class="pre">torch.load(&quot;Checkpoint.pkl&quot;);</span>&#160; <span class="pre">model.load_state_dict(x['model'])</span></code></p></li>
+</ul>
+</li>
+<li><p>实因： <code class="docutils literal notranslate"><span class="pre">nn.Parameter</span></code>绑定不正确，造成梯度恒为0，或者模型恢复后权重重新初始化</p></li>
+<li><p>原理：当你创建<code class="docutils literal notranslate"><span class="pre">nn.Module</span></code>时，对<code class="docutils literal notranslate"><span class="pre">self</span></code>进行属性挂载从而建立计算图时，有多种可能失败。造成
+该张量从梯度计算中脱落。</p></li>
+<li><p>排查方案: 检查目标参数是否在<code class="docutils literal notranslate"><span class="pre">nn.Model.named_parameters()</span></code>中出现。例如</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">FeedForwardLayer</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">x1</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span><span class="mi">10</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">x2</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span><span class="mi">10</span><span class="p">)</span><span class="o">.</span><span class="n">weight</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">x3</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span><span class="mi">10</span><span class="p">)</span><span class="o">.</span><span class="n">weight</span><span class="p">)</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">FeedForwardLayer</span><span class="p">()</span>
+
+<span class="c1">###打印模块参数列表</span>
+<span class="nb">print</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">named_parameters</span><span class="p">())</span><span class="o">.</span><span class="n">keys</span><span class="p">()))</span>
+<span class="kn">from</span> <span class="nn">pprint</span> <span class="kn">import</span> <span class="n">pprint</span>
+<span class="n">pprint</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">named_parameters</span><span class="p">())</span><span class="o">.</span><span class="n">keys</span><span class="p">()))</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>8502</strong></p>
+<ul class="simple">
+<li><p>现象：训练过程中出现了<code class="docutils literal notranslate"><span class="pre">NaN</span></code></p></li>
+<li><p>实因：进行了未定义的运算，如：<code class="docutils literal notranslate"><span class="pre">1/0</span> <span class="pre">log(-0.1)</span>&#160; <span class="pre">sqrt(-0.1)</span></code></p></li>
+<li><p>排查：排查近期相关修改记录，用<code class="docutils literal notranslate"><span class="pre">git</span> <span class="pre">diff</span></code>或者IDE编辑器的<code class="docutils literal notranslate"><span class="pre">Ctrl+Z</span></code>工具查找近期修改过的类似函数。</p></li>
+</ul>
+</li>
+<li><p><strong>8503</strong></p>
+<ul class="simple">
+<li><p>现象：TestLoss和TrainLoss相同。</p></li>
+<li><p>实因:</p>
+<ul>
+<li><p>忘记调用<code class="docutils literal notranslate"><span class="pre">Dataset.test()</span></code>和<code class="docutils literal notranslate"><span class="pre">Dataset.train()</span></code>在训练集和测试集进行切换。</p></li>
+<li><p>他们压根就是一个变量。</p></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><p><strong>8504</strong></p>
+<ul class="simple">
+<li><p>现象：无法分配CUDA内存。<code class="docutils literal notranslate"><span class="pre">Unable</span> <span class="pre">To</span> <span class="pre">Allocate</span></code></p></li>
+<li><p>实因：</p>
+<ul>
+<li><p>中间变量存在未释放的指针。如历史loss计算完毕后，需要从计算图上取下。如<code class="docutils literal notranslate"><span class="pre">test_losses.append(</span> <span class="pre">loss.item()</span> <span class="pre">)</span></code></p></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; 版权所有 2022, Feng Geng.</p>
+  </div>
+
+  利用 <a href="https://www.sphinx-doc.org/">Sphinx</a> 构建，使用了 
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">主题</a>
+    由 <a href="https://readthedocs.org">Read the Docs</a>开发.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

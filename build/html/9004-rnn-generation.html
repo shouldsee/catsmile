@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="zh-CN" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>9004: RNN生成实验 &mdash; catsmile 0.0.1 文档</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/translations.js"></script>
+        <script>window.MathJax = {"options": {"processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="搜索" href="search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="index.html" class="icon icon-home"> catsmile
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="在文档中搜索" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="1001-ctc-loss.html">1001: CTC Loss 结构解析</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1002-bptt.html">1002: [TBC]// BPTT in RNN</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1003-repar-gaussian.html">1003: 高斯随机变量的重参数化技巧(Reparametrisation)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1004-diff-expectation.html">1004: 期望函数的梯度计算</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1005-hmm-overview.html">1005: HMM简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="3001-kg-study.html">3001-知识图谱和NLP句子表示</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8001-intro.html">8001: CATSMILE简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8500-pytorch-common-problems.html">8500: PyTorch模型常用药</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9001-normal-dist.html">9001: [TBC] L2损失函数-正态分布</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">catsmile</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>9004: RNN生成实验</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/9004-rnn-generation.md.txt" rel="nofollow"> 查看页面源码</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section class="tex2jax_ignore mathjax_ignore" id="rnn">
+<h1>9004: RNN生成实验<a class="headerlink" href="#rnn" title="永久链接至标题"></a></h1>
+<section id="id1">
+<h2>目标:<a class="headerlink" href="#id1" title="永久链接至标题"></a></h2>
+<p>测试一个架构上更接近HMM的RNN生成模型，避免tokenwise生成过程</p>
+</section>
+<section id="sentence-as-function-decomposition">
+<h2>Sentence As Function Decomposition<a class="headerlink" href="#sentence-as-function-decomposition" title="永久链接至标题"></a></h2>
+<p>“Function decomposition” is coined to differentiate from matrix decomposition.
+Here the target parameters are not matrices, but functions.</p>
+<p>sentence = observed token sequence: <code class="docutils literal notranslate"><span class="pre">$Y_{bt}</span> <span class="pre">=</span> <span class="pre">k</span>&#160; <span class="pre">&lt;=&gt;</span> <span class="pre">y_{btk}</span> <span class="pre">=</span> <span class="pre">1$</span></code>
+sentence generation</p>
+<p>projects a vector <span class="math notranslate nohighlight">\(z\)</span> from <span class="math notranslate nohighlight">\(R^N\)</span> to <span class="math notranslate nohighlight">\(Y^{TK}\)</span></p>
+<section id="objective">
+<h3>Objective<a class="headerlink" href="#objective" title="永久链接至标题"></a></h3>
+<p>finds parameters that minimise NLL <code class="docutils literal notranslate"><span class="pre">$(z_b,w)</span> <span class="pre">=</span> <span class="pre">\text{argmin}_{z_b,w}</span> <span class="pre">(-\sum_{btk}</span> <span class="pre">y_{btk}</span> <span class="pre">\log</span> <span class="pre">f_{tk}(z_b,w))$</span></code></p>
+</section>
+<section id="structure-of-f-z-w">
+<h3>Structure of <span class="math notranslate nohighlight">\(f(z,w)\)</span><a class="headerlink" href="#structure-of-f-z-w" title="永久链接至标题"></a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">$$</span> <span class="pre">\begin{aligned}</span> <span class="pre">g_{t+1}(z,w)&amp;=w1</span> <span class="pre">\cdot</span> <span class="pre">g_{t}(z,w)</span> <span class="pre">+</span> <span class="pre">w2</span> <span class="pre">\\</span> <span class="pre">f_{t}</span> <span class="pre">&amp;=</span> <span class="pre">\text{softmax}_k(w3</span> <span class="pre">\cdot</span> <span class="pre">g_t(z,w)</span> <span class="pre">+</span> <span class="pre">w4)</span> <span class="pre">\end{aligned}</span> <span class="pre">$$</span></code></p>
+</section>
+<section id="optimisation">
+<h3>Optimisation<a class="headerlink" href="#optimisation" title="永久链接至标题"></a></h3>
+<p>Use RMSprop. Adagrad doesn’t work</p>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; 版权所有 2022, Feng Geng.</p>
+  </div>
+
+  利用 <a href="https://www.sphinx-doc.org/">Sphinx</a> 构建，使用了 
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">主题</a>
+    由 <a href="https://readthedocs.org">Read the Docs</a>开发.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

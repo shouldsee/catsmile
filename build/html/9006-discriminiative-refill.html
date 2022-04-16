@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="zh-CN" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>9006: 内容填充 &mdash; catsmile 0.0.1 文档</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/translations.js"></script>
+        <script>window.MathJax = {"options": {"processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="搜索" href="search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="index.html" class="icon icon-home"> catsmile
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="在文档中搜索" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="1001-ctc-loss.html">1001: CTC Loss 结构解析</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1002-bptt.html">1002: [TBC]// BPTT in RNN</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1003-repar-gaussian.html">1003: 高斯随机变量的重参数化技巧(Reparametrisation)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1004-diff-expectation.html">1004: 期望函数的梯度计算</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1005-hmm-overview.html">1005: HMM简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="3001-kg-study.html">3001-知识图谱和NLP句子表示</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8001-intro.html">8001: CATSMILE简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8500-pytorch-common-problems.html">8500: PyTorch模型常用药</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9001-normal-dist.html">9001: [TBC] L2损失函数-正态分布</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9003-junction-tree.html">9003: [TBC] Junction Tree Algorithm</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9005-gpt-bert.html">9005: GPT和BERT对比-无监督语言模型</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">catsmile</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>9006: 内容填充</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/9006-discriminiative-refill.md.txt" rel="nofollow"> 查看页面源码</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section class="tex2jax_ignore mathjax_ignore" id="id1">
+<h1>9006: 内容填充<a class="headerlink" href="#id1" title="永久链接至标题"></a></h1>
+<ul class="simple">
+<li><p>不使用的后果: 目前不明确,是一个模型实验性的一部分</p></li>
+<li><p>具体形式:</p></li>
+</ul>
+<p>给定token序列并 <span class="math notranslate nohighlight">\(x_{ik}\)</span>, 抽取若干token构成无序的内容集合并在抽取位填入mask token.</p>
+<p>`$$
+\left{</p>
+<div class="amsmath math notranslate nohighlight" id="equation-8395b605-5f21-47fd-bdcb-a480e4d1c338">
+<span class="eqno">(1)<a class="headerlink" href="#equation-8395b605-5f21-47fd-bdcb-a480e4d1c338" title="公式的永久链接"></a></span>\[\begin{align}
+Y&amp;=\set{y_{jk}} \\
+z_{ik}&amp;=\text{mask} \  \text{if} \  i \in \set{j} \\
+      &amp;=x_{ik} \ \text{elsewise}
+\end{align}\]</div>
+<p>\right.
+$$`</p>
+<ul class="simple">
+<li><p>损失形式:</p></li>
+</ul>
+<p>`$$
+L = \sum_{i} x_{ik} \log f_{ik}(Y,Z) \</p>
+<p>f_{i+1,k}(Y,Z) = \text{choose a token to output given the current grammar}
+$$`</p>
+<ul class="simple">
+<li><p>需要使用一个迭代的方法来计算f,回答如下问题</p></li>
+<li><p>我当前处于什么状态 状态更新</p></li>
+<li><p>我要输出何种信息 信息输出</p></li>
+<li><p>信息输出:可以抽象为选择提取矩阵,然后从信息向量中提取.特别的,KV提取是一类特殊的提取矩阵和信息向量.</p></li>
+<li><p>状态更新:可以抽象为做一个梯度操作,使得某个提取矩阵的输出等于目标输出.</p></li>
+<li><p>信息输出: 考虑基于KVC的多元状态向量,令K为C的投影.信息输出可以抽象为先从状态中提取提取Query向量,然后和K
+再输出….好像多此一举?直接用一个外部Query提取一个向量输出就完事了?</p>
+<ul>
+<li><p>但是模型需要区分应该从哪条输入线,先假设不使用KV提取的情况下,选择权下放给一个配合SlotMemory的选择器
+这个选择器可以进行有限个选择,但是SlotMemory对permute就不是不变的了.</p></li>
+<li><p>现在假设Memory还是以KV形式存在,但是模型需要根据状态来选择Query,又或者说,记忆和控制序列是混在
+KV矩阵里面的,KV既需要接受浅层Query提取,又要生成Query本身,也就是说,我们要求从KV进行的输出的这个
+提取操作,最后一步必须是简单的Query提取,把剩下的复杂度留给生成Query的这个过程.</p></li>
+<li><p>最简单的Query生成就是用一个外部固定Query1对Memory进行提取生成一个Query2,然后Query2再对
+KV容器进行提取.</p></li>
+<li><p>也可以用多几个Query来增强一下定位效果</p></li>
+<li><p>复杂一点的Query生成可能需要考虑到二阶项,也就是需要考虑KV容器内部的向量的相互作用状态,
+可以试着挂一层self-attention上去试试看.</p></li>
+<li><p>如果运用粒子化思想,那么简单的query就是根据空间来提取信息,加了SA的就是允许系统在多体相互作用下运行
+若干步再进行特定空间的提取. 如果要倒过来继续保持Query2简单提取的方式,那就要把Query2作为多体的一部分
+倒过来运行一下多体相互作用, 或者就是简单地仅仅允许Query2单独进行动力学.</p></li>
+</ul>
+</li>
+<li><p>状态更新:</p>
+<ul>
+<li><p>如果希望特定投影满足约束,可以考虑新添加粒子,或者移动原有粒子.</p></li>
+<li><p>目前仅进行粒子移动操作</p></li>
+<li><p>也可以考虑多体作用,但是会降低可解释性</p></li>
+</ul>
+</li>
+</ul>
+<p>继承输出,先假设这个是最终的提取Query可以用一个简单的选择器,这个选择器表征自己需要的是</p>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; 版权所有 2022, Feng Geng.</p>
+  </div>
+
+  利用 <a href="https://www.sphinx-doc.org/">Sphinx</a> 构建，使用了 
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">主题</a>
+    由 <a href="https://readthedocs.org">Read the Docs</a>开发.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

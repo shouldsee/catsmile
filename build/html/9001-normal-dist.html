@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="zh-CN" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>9001: [TBC] L2损失函数-正态分布 &mdash; catsmile 0.0.1 文档</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/translations.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="搜索" href="search.html" />
+    <link rel="prev" title="8500: PyTorch模型常用药" href="8500-pytorch-common-problems.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="index.html" class="icon icon-home"> catsmile
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="在文档中搜索" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="1001-ctc-loss.html">1001: CTC Loss 结构解析</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1002-bptt.html">1002: [TBC]// BPTT in RNN</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1003-repar-gaussian.html">1003: 高斯随机变量的重参数化技巧(Reparametrisation)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1004-diff-expectation.html">1004: 期望函数的梯度计算</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1005-hmm-overview.html">1005: HMM简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="3001-kg-study.html">3001-知识图谱和NLP句子表示</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8001-intro.html">8001: CATSMILE</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8500-pytorch-common-problems.html">8500: PyTorch模型常用药</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">9001: [TBC] L2损失函数-正态分布</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">catsmile</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>9001: [TBC] L2损失函数-正态分布</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/9001-normal-dist.md.txt" rel="nofollow"> 查看页面源码</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section class="tex2jax_ignore mathjax_ignore" id="tbc-l2">
+<h1>9001: [TBC] L2损失函数-正态分布<a class="headerlink" href="#tbc-l2" title="永久链接至标题"></a></h1>
+<p>不使用的后果：你可能没法造很多很多很多很多神经网络了。大部分的神经网络可以认为在中间层隐式地采用了L2损失（？[TBC]）
+正态分布的基本性质</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>X \sim NormalX \sim Normal的主要意义在于P(x) \propto e^{-z^2}P(x) \propto e^{-z^2}，其中变量z是x的拉伸变换。z=\frac{x}{k}z=\frac{x}{k}
+概率密度函数的归一化要求E[1]=1E[1]=1，这提供了第一个约束条件。
+同样地，对二阶矩的考察E[X^2]-E^2[X]=\sigma^2E[X^2]-E^2[X]=\sigma^2提供了第二个约束条件。
+如果只考虑拉伸变换，则隐含了E[X]=0E[X]=0。显式地考虑E[X]=\muE[X]=\mu，给出了第三个约束条件。
+</pre></div>
+</div>
+<p>引理:\int^{+\infty}<em>{-\infty}e^{-z^2}dz=\sqrt{\pi}\int^{+\infty}</em>{-\infty}e^{-z^2}dz=\sqrt{\pi}</p>
+<ol class="arabic simple">
+<li><p>显式化正比关系
+P(x) =c e^{-z^2}~~~,z=\frac{x}{k}P(x) =c e^{-z^2}~~~,z=\frac{x}{k}</p></li>
+<li><p>归一化约束
+\begin{aligned} E[1]=1 \ \int P(x)=1 \ \int^{+\infty}<em>{-\infty} ce^{-z^2}dx = 1 \ \int^{+\infty}</em>{-\infty} ce^{-z^2}d(kz) = 1 \ ck\int^{+\infty}<em>{-\infty} e^{-z^2}d(z) = 1 \ ck\sqrt{\pi}=1 \ alt. ~~c=\frac{1}{\sqrt{\pi}} \frac{1}{k} \end{aligned}\begin{aligned} E[1]=1 \ \int P(x)=1 \ \int^{+\infty}</em>{-\infty} ce^{-z^2}dx = 1 \ \int^{+\infty}<em>{-\infty} ce^{-z^2}d(kz) = 1 \ ck\int^{+\infty}</em>{-\infty} e^{-z^2}d(z) = 1 \ ck\sqrt{\pi}=1 \ alt. ~~c=\frac{1}{\sqrt{\pi}} \frac{1}{k} \end{aligned}</p></li>
+<li><p>二阶矩约束:
+\begin{aligned} E[X^2]-E^2[X]=\sigma^2 \ but~E[X]=0 \ E[X^2]=\sigma^2 \ \int c e^{-z^2} x^2.dx = \sigma^2 \ c\int (\frac{de^{-z^2}}{dz}\cdot\frac{1}{-2z}) (kz)^2.d(kz) = \sigma^2 \ \frac{ck^3}{-2}\int (\frac{de^{-z^2}}{dz}) z.dz = \sigma^2 \ \frac{ck^3}{-2}\left{[e^{-z^2}z]^ {+\infty}<em>{-\infty} - \int ^ {+\infty}</em>{-\infty} e^{-z^2}.dz \right} = \sigma^2 \ \frac{ck^3}{-2} (0-(-\sqrt{\pi}))= \sigma^2 \ \frac{ck^3}{2} \sqrt{\pi}= \sigma^2 \ But~~ ck\sqrt{\pi}=1 \ \frac{k^2}{2}=\sigma^2 \end{aligned}\begin{aligned} E[X^2]-E^2[X]=\sigma^2 \ but~E[X]=0 \ E[X^2]=\sigma^2 \ \int c e^{-z^2} x^2.dx = \sigma^2 \ c\int (\frac{de^{-z^2}}{dz}\cdot\frac{1}{-2z}) (kz)^2.d(kz) = \sigma^2 \ \frac{ck^3}{-2}\int (\frac{de^{-z^2}}{dz}) z.dz = \sigma^2 \ \frac{ck^3}{-2}\left{[e^{-z^2}z]^ {+\infty}<em>{-\infty} - \int ^ {+\infty}</em>{-\infty} e^{-z^2}.dz \right} = \sigma^2 \ \frac{ck^3}{-2} (0-(-\sqrt{\pi}))= \sigma^2 \ \frac{ck^3}{2} \sqrt{\pi}= \sigma^2 \ But~~ ck\sqrt{\pi}=1 \ \frac{k^2}{2}=\sigma^2 \end{aligned}</p></li>
+<li><p>一阶矩约束:
+\begin{aligned} &amp; \left { \begin{aligned} E[X]&amp;=\mu \ P(X&amp;=x) = ce^{-z^2}\ z&amp;= \frac{x-\mu}{k} \end{aligned} \right . \ &amp;E[X] = \int xP(x).dx \ &amp;E[X] = \int (kz+\mu)ce^{-z^2}.d(kz+\mu) \ &amp;E[X] = \int (kz)ce^{-z^2}.d(kz) + \int (\mu) ce^{-z^2} .d(kz) \ &amp;E[X] = 0 + \mu \int ce^{-z^2} .d(kz) \ &amp;E[X] = 0 + \mu \int P(x) .d(x) \ &amp;E[X] = \mu \end{aligned}\begin{aligned} &amp; \left { \begin{aligned} E[X]&amp;=\mu \ P(X&amp;=x) = ce^{-z^2}\ z&amp;= \frac{x-\mu}{k} \end{aligned} \right . \ &amp;E[X] = \int xP(x).dx \ &amp;E[X] = \int (kz+\mu)ce^{-z^2}.d(kz+\mu) \ &amp;E[X] = \int (kz)ce^{-z^2}.d(kz) + \int (\mu) ce^{-z^2} .d(kz) \ &amp;E[X] = 0 + \mu \int ce^{-z^2} .d(kz) \ &amp;E[X] = 0 + \mu \int P(x) .d(x) \ &amp;E[X] = \mu \end{aligned}
+综上，正态分布是以P(x) \propto e^{-z^2}P(x) \propto e^{-z^2}为核心的，用一阶矩和二阶矩参数化的一种一维概率分布。</p></li>
+</ol>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="8500-pytorch-common-problems.html" class="btn btn-neutral float-left" title="8500: PyTorch模型常用药" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> 上一页</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; 版权所有 2022, Feng Geng.</p>
+  </div>
+
+  利用 <a href="https://www.sphinx-doc.org/">Sphinx</a> 构建，使用了 
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">主题</a>
+    由 <a href="https://readthedocs.org">Read the Docs</a>开发.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

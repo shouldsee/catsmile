@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="zh-CN" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>1003: 高斯随机变量的重参数化技巧(Reparametrisation) &mdash; catsmile 0.0.1 文档</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/translations.js"></script>
+        <script>window.MathJax = {"options": {"processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="搜索" href="search.html" />
+    <link rel="next" title="1004: 期望函数的梯度计算" href="1004-diff-expectation.html" />
+    <link rel="prev" title="1002: [TBC]// BPTT in RNN" href="1002-bptt.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="index.html" class="icon icon-home"> catsmile
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="在文档中搜索" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="1001-ctc-loss.html">1001: CTC Loss 结构解析</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1002-bptt.html">1002: [TBC]// BPTT in RNN</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">1003: 高斯随机变量的重参数化技巧(Reparametrisation)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1004-diff-expectation.html">1004: 期望函数的梯度计算</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1005-hmm-overview.html">1005: HMM简介</a></li>
+<li class="toctree-l1"><a class="reference internal" href="3001-kg-study.html">3001-知识图谱和NLP句子表示</a></li>
+<li class="toctree-l1"><a class="reference internal" href="8001-intro.html">8001: CATSMILE</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">catsmile</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>1003: 高斯随机变量的重参数化技巧(Reparametrisation)</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/1003-repar-gaussian.md.txt" rel="nofollow"> 查看页面源码</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section class="tex2jax_ignore mathjax_ignore" id="reparametrisation">
+<h1>1003: 高斯随机变量的重参数化技巧(Reparametrisation)<a class="headerlink" href="#reparametrisation" title="永久链接至标题"></a></h1>
+<ul>
+<li><p>不使用的后果：假设噪音 <span class="math notranslate nohighlight">\(\epsilon\)</span> 恒为0，那么隐变量空间的连续性可能会变差，更难进行插值[TBC Needs Evidence]
+最近受VAE启发在考虑随机激活函数(stochastic activation function)的可能性，然后就碰到了随机变量无法求微分这个梗。
+确切地说是采样算符(sampling operator)无法求微分。还好大牛们留的代码给了我一点提示。
+回忆对于确定性的神经网络<span class="math notranslate nohighlight">\(y = f(A) = f(wx+b)\)</span>，和损失函数<span class="math notranslate nohighlight">\(E(y)\)</span>，可得如下反向传播关系:</p>
+<div class="amsmath math notranslate nohighlight" id="equation-2c39b66b-6d79-4382-85bf-28be5d6c6000">
+<span class="eqno">(1)<a class="headerlink" href="#equation-2c39b66b-6d79-4382-85bf-28be5d6c6000" title="公式的永久链接"></a></span>\[\begin{align}
+  \frac{d E}{d x} &amp;= {{d E}\over{d y}} {d y \over d A} {d A \over d x} \\
+                  &amp;= {{d E}\over{d y}} \, f'(A) \, w
+  \end{align}\]</div>
+<p>简洁起见令</p>
+<div class="amsmath math notranslate nohighlight" id="equation-754f7670-a433-4719-a28a-83443fcffc48">
+<span class="eqno">(2)<a class="headerlink" href="#equation-754f7670-a433-4719-a28a-83443fcffc48" title="公式的永久链接"></a></span>\[\begin{align}
+  {\delta_x} &amp;= \frac{d E}{d x} \\
+
+  {\delta_x} &amp;= {\delta_y} \, f'(A) \, w
+  \end{align}\]</div>
+<p>考虑完经典情况后，接下来考虑当ff并不是一个确定函数而是随机变量比如<span class="math notranslate nohighlight">\(f(A)\sim N(A,1)\)</span>，
+这个时候该如何处理<span class="math notranslate nohighlight">\(f'(A)\)</span>？答案藏在在重参数化里。考虑重写<span class="math notranslate nohighlight">\(f(A)\)</span>为</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}
+  f(A) = A + \epsilon \\ \epsilon \sim N(0,1)
+  \end{split}\]</div>
+<p>此时可直接上微分算子得</p>
+<div class="math notranslate nohighlight">
+\[f'(A)= \frac{d A}{d A} + \frac{d \epsilon}{d A} = (1 + 0) = 1\]</div>
+</li>
+<li><p>总结:反向传播算法并不必须应用在完全Deterministic的神经网络上。对于含有随机激活函数的网络应用反向传播可以自然地导出一个随机的梯度下降过程。</p></li>
+<li><p>参考:</p>
+<ul class="simple">
+<li><p>本文是阅读该博客的笔记。</p></li>
+</ul>
+</li>
+</ul>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="1002-bptt.html" class="btn btn-neutral float-left" title="1002: [TBC]// BPTT in RNN" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> 上一页</a>
+        <a href="1004-diff-expectation.html" class="btn btn-neutral float-right" title="1004: 期望函数的梯度计算" accesskey="n" rel="next">下一页 <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; 版权所有 2022, Feng Geng.</p>
+  </div>
+
+  利用 <a href="https://www.sphinx-doc.org/">Sphinx</a> 构建，使用了 
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">主题</a>
+    由 <a href="https://readthedocs.org">Read the Docs</a>开发.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
