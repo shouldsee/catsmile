@@ -1,10 +1,6 @@
----
-title: 9006-内容填充
-date: 2022-04-01T11:39:04+08:00
-mathjax: true
----
+(9006-dis-refill)=
 
-# 9006: 内容填充
+# 9006: 语言模型内容填充
 
 - 不使用的后果: 目前不明确,是一个模型实验性的一部分
 
@@ -15,8 +11,9 @@ mathjax: true
   $$
   \left\{
   \begin{align}
-  Y&=\set{y_{jk}} \\
-  z_{ik}&=\text{mask} \  \text{if} \  i \in \set{j} \\
+  Y&=\{y_{jk}\} \\
+  z_{ik}&=\text{mask} \  \text{if} 
+  \  i \in \{j\} \\
         &=x_{ik} \ \text{elsewise}
   \end{align}
   \right.
@@ -25,8 +22,10 @@ mathjax: true
 - 损失形式:
 
 $$
+\begin{align}
 L &= \sum_{i} x_{ik} \log f_{ik}(Y,Z) \\
 f_{i+1,k}(Y,Z) &= \text{choose a token to output given the current grammar}
+\end{align}
 $$
 
 - 需要使用一个迭代的方法来计算f,回答如下问题

@@ -50,6 +50,10 @@
 <li class="toctree-l1"><a class="reference internal" href="8001-intro.html">8001: CATSMILE简介</a></li>
 <li class="toctree-l1"><a class="reference internal" href="8500-pytorch-common-problems.html">8500: PyTorch模型常用药</a></li>
 <li class="toctree-l1"><a class="reference internal" href="9001-normal-dist.html">9001: [TBC] L2损失函数-正态分布</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9002-ppca.html">9002: 连续隐变量的混合模型与卷积</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9003-junction-tree.html">9003: [TBC] Junction Tree Algorithm</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9005-gpt-bert.html">9005: GPT和BERT对比-无监督语言模型</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9006-discriminative-refill.html">9006: 语言模型内容填充</a></li>
 </ul>
 
         </div>
@@ -90,8 +94,8 @@
 <li><p>数据向量 <span class="math notranslate nohighlight">\(x_b\)</span> ，一般为高维数据有维度c此处省略</p></li>
 <li><p>结构操作B：跳过空格(-)连接标签</p></li>
 <li><p>一般的标签比对损失模型:</p>
-<div class="amsmath math notranslate nohighlight" id="equation-ecc13a06-097e-41cc-8134-60601eaf8480">
-<span class="eqno">(1)<a class="headerlink" href="#equation-ecc13a06-097e-41cc-8134-60601eaf8480" title="公式的永久链接"></a></span>\[\begin{align}
+<div class="amsmath math notranslate nohighlight" id="equation-630f54a9-0c45-49af-8b1e-68a805852859">
+<span class="eqno">(1)<a class="headerlink" href="#equation-630f54a9-0c45-49af-8b1e-68a805852859" title="公式的永久链接"></a></span>\[\begin{align}
       \text{loss} &amp;=  \sum_{_{bik}}  l_{bik} \log  \pi_{bik} \\   
       &amp;= \sum_{bi} \log P(\Pi_{bi}  = L_{bi} |x_{b},\theta) \\  
       &amp;= \sum_{b} \log P(\{ \Pi_{bi} \}  = \{ L_{bi} \} |x_{b},\theta) \\
@@ -99,8 +103,8 @@
       \end{align}\]</div>
 <p>可以看出，在做交叉熵计算的时候，已经做出了，给定隐变量后，标签生成是条件独立的假设。
 其中b为batch，i为监督向量位置索引，k为监督向量维度索引，这个交叉熵比较常见，CTC的主要贡献在于重写了后面的概率P</p>
-<div class="amsmath math notranslate nohighlight" id="equation-901f3c19-9677-425e-bbfa-f503c1ddf442">
-<span class="eqno">(2)<a class="headerlink" href="#equation-901f3c19-9677-425e-bbfa-f503c1ddf442" title="公式的永久链接"></a></span>\[\begin{align}
+<div class="amsmath math notranslate nohighlight" id="equation-9deb1be5-6613-4eee-9836-0f9495c1f394">
+<span class="eqno">(2)<a class="headerlink" href="#equation-9deb1be5-6613-4eee-9836-0f9495c1f394" title="公式的永久链接"></a></span>\[\begin{align}
       P( \{\Pi_{bi} \} |x_{b},\theta)
       &amp;= \sum_{\{z_{bjk}\}\in B^{-1}(\{\Pi_{bi} \})}  P( \{\Pi_{bi} \}\},\{{z_{bjk}}\}|x_b,\theta) \\
       &amp;= \sum_{\{z_{bjk}\}\in B^{-1}(\{\Pi_{bi} \}\})}  P(\{{z_{bjk}}\}|x_b,\theta) P( \{\Pi_{bi} \} |x_{b},\theta)

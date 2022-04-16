@@ -4,7 +4,7 @@
   <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>9006: 内容填充 &mdash; catsmile 0.0.1 文档</title>
+  <title>9006: 语言模型内容填充 &mdash; catsmile 0.0.1 文档</title>
       <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -49,9 +49,10 @@
 <li class="toctree-l1"><a class="reference internal" href="8001-intro.html">8001: CATSMILE简介</a></li>
 <li class="toctree-l1"><a class="reference internal" href="8500-pytorch-common-problems.html">8500: PyTorch模型常用药</a></li>
 <li class="toctree-l1"><a class="reference internal" href="9001-normal-dist.html">9001: [TBC] L2损失函数-正态分布</a></li>
+<li class="toctree-l1"><a class="reference internal" href="9002-ppca.html">9002: 连续隐变量的混合模型与卷积</a></li>
 <li class="toctree-l1"><a class="reference internal" href="9003-junction-tree.html">9003: [TBC] Junction Tree Algorithm</a></li>
 <li class="toctree-l1"><a class="reference internal" href="9005-gpt-bert.html">9005: GPT和BERT对比-无监督语言模型</a></li>
-<li class="toctree-l1 current"><a class="current reference internal" href="#">9006: 内容填充</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">9006: 语言模型内容填充</a></li>
 </ul>
 
         </div>
@@ -68,7 +69,7 @@
           <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
       <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
-      <li>9006: 内容填充</li>
+      <li>9006: 语言模型内容填充</li>
       <li class="wy-breadcrumbs-aside">
             <a href="_sources/9006-discriminative-refill.md.txt" rel="nofollow"> 查看页面源码</a>
       </li>
@@ -79,7 +80,7 @@
            <div itemprop="articleBody">
              
   <section class="tex2jax_ignore mathjax_ignore" id="id1">
-<h1>9006: 内容填充<a class="headerlink" href="#id1" title="永久链接至标题"></a></h1>
+<h1>9006: 语言模型内容填充<a class="headerlink" href="#id1" title="永久链接至标题"></a></h1>
 <ul class="simple">
 <li><p>不使用的后果: 目前不明确,是一个模型实验性的一部分</p></li>
 <li><p>具体形式:</p></li>
@@ -89,8 +90,9 @@
 \[\begin{split}
   \left\{
   \begin{align}
-  Y&amp;=\set{y_{jk}} \\
-  z_{ik}&amp;=\text{mask} \  \text{if} \  i \in \set{j} \\
+  Y&amp;=\{y_{jk}\} \\
+  z_{ik}&amp;=\text{mask} \  \text{if} 
+  \  i \in \{j\} \\
         &amp;=x_{ik} \ \text{elsewise}
   \end{align}
   \right.
@@ -100,8 +102,10 @@
 </ul>
 <div class="math notranslate nohighlight">
 \[\begin{split}
+\begin{align}
 L &amp;= \sum_{i} x_{ik} \log f_{ik}(Y,Z) \\
 f_{i+1,k}(Y,Z) &amp;= \text{choose a token to output given the current grammar}
+\end{align}
 \end{split}\]</div>
 <ul class="simple">
 <li><p>需要使用一个迭代的方法来计算f,回答如下问题</p></li>
