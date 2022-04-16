@@ -1,0 +1,2 @@
+systemctl restart apache2
+
