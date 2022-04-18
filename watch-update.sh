@@ -1,1 +1,2 @@
-watch -n100 make html
+sep=${1:-100}
+nohup watch -n $sep make html
