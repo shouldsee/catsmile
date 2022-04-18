@@ -75,7 +75,7 @@ $$
 
 ## 预训练语言模型中的知识
 
-### 基于论文团簇的盘点 
+### 基于论文团簇的盘点
 
 [K-BERT搜索结果](https://www.connectedpapers.com/main/06a73ad09664435f8b3cd90293f4e05a047cf375/K%20BERT%3A-Enabling-Language-Representation-with-Knowledge-Graph/graph)
 
@@ -116,6 +116,10 @@ $$
 
 1. 其他模型 NEZHA, ERNIE COLAKE ROBERTA
 
+1. [GNN图神经网络2018综述](https://arxiv.org/abs/1812.08434)
+    - 解决的问题: !?!
+    - 解决的方法: !?!
+    
 ![Image](https://pic4.zhimg.com/80/v2-dd4a9ddefad950ece2b4bf48e7575f7f.png)
 
 PS: 中文NLP的论文圈子有点小额...
@@ -181,7 +185,9 @@ Tool for searching related papers:
  - <https://www.connectedpapers.com/>
  - Google Scholar
 
+## Degenerate of Pure Attention 
 
+- [Attention is not all you need](https://arxiv.org/pdf/2103.03404.pdf)
 
 ## softmax bottleneck
 

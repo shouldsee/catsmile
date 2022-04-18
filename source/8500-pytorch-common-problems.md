@@ -1,12 +1,12 @@
----
-title: 8500-PyTorch模型常用药
----
+#! https://zhuanlan.zhihu.com/p/486933423
 
-# 8500: PyTorch模型常用药
+# 8500-PyTorch模型常用药
+
+*号外号外，CATSMILE静态站点已经开通[8500: PyTorch模型常用药](http://catsmile.info/8500-pytorch-common-problems.html)，发zhihu强烈安利[zhihu-on-vscode](https://zhuanlan.zhihu.com/p/106057556)* 
 
 - 前言: 建模是令人激动的旅程，但是模型很容易生病，这里列举了一些PyTorch的常见药品。**
 （现象和实因是多对多关系。）
-- 更新日期： 20220324
+- 更新日期： 20220417
 
 - **8501**
   - 现象：
@@ -47,3 +47,27 @@ title: 8500-PyTorch模型常用药
   - 现象：无法分配CUDA内存。`Unable To Allocate`
   - 实因：
     - 中间变量存在未释放的指针。如历史loss计算完毕后，需要从计算图上取下。如`test_losses.append( loss.item() )`
+
+- **8505**
+  - 现象：BERT初始化缓慢
+  - 实因：
+    - 有时候是hugging face transformers 内部的一些AutoModel/AutoTokenizer 的未知开销.    
+  - 解决办法:
+    - 把初始化好的模型存到本地
+    
+    ```python
+    from transformers import AutoTokenizer, AutoModel
+    import torch
+    import os
+
+    PKL = __file__+'.temp.pkl'
+    if os.path.exists(PKL):
+        tokenizer,model = torch.load(PKL)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        model = AutoModel.from_pretrained("bert-base-uncased")
+        torch.save((tokenizer,model),PKL)
+
+
+    ```
+
