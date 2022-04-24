@@ -40,7 +40,7 @@ class EnglishToGermanDataset(torch.utils.data.Dataset):
         self.mode = "train"
         self.english_eos = self.english_vocab["<end>"]
         # self.min_len = 30#min(self.german_min_len,self.english_min_len)
-        self.min_len = 15#min(self.german_min_len,self.english_min_len)
+        self.min_len = 15  #min(self.german_min_len,self.english_min_len)
         self.CUDA = CUDA
         self.device = torch.device('cuda:0' if CUDA else 'cpu')
 
@@ -90,7 +90,7 @@ class EnglishToGermanDataset(torch.utils.data.Dataset):
         "index":idx,
         "german":german_item,
                 # "english":english_item.to(self.device)[::2],
-                "english":english_item,
+        "english":english_item,
                 # "logits":german_logits.to(self.device),
                 # "logit_mask":logit_mask.to(self.device)
                 }

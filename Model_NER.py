@@ -9,6 +9,40 @@ import torch.optim
 
 class RefillModelRNNBase(nn.Module):
     '''
+    ### Refill Model seeks to put random selected tokens
+    back into where they were in the original sentence
+
+    ### This is similar to a NER formuation, where
+    NER tokens are put into sequence that corresponds
+    to the extracted words.
+
+    ### NER can be thought as a binary classification problem
+    to predict a binary labelling on the original sequence.
+
+    ### combine a global attention module so that
+    the supposed vector will be influenced by the global
+    module. This means information must flows between the
+    vector. and that the
+
+    ### consider NER as a segmentation problem
+    and extraction as attention focusing..
+
+    thus the object is to solely maximising the
+    extractor vector by gradient, and the extractor
+    is essentially a sigmoid vector and extraction
+    is a binary extraction (this means accuracy is
+    not directly optimisable... maybe a CTC loss
+    is possible)
+
+    ### so the model is as follows
+    the model is just a MRF with attention, optionally
+    with the special token. The token is just a node
+    disconnected from the sequence. The inference is
+    to find a set of parameters that maximise the
+    wanted attention. Whereas the inverse is to find
+    a vector that maximise the probability of the observed attention.
+    aka the model and the schema could induce each other.
+
     Symbolic Module that defines Loss function
 
     Calculate f_{ik}(Y,Z)
@@ -49,9 +83,9 @@ class RefillModelRNNBase(nn.Module):
     def callback_step(self,outer,inner):
         [zi,x,y,z,fs],[i,sel,xz,xs] = outer,inner
         return
-    def callback_init(self,outer):
+    def callback_init(self,outer,inner):
         return
-    def callback_end(self,outer):
+    def callback_end(self,outer,inner):
         return
         # self.callback_init = lambda zi,x,y,z,sel: None
 
@@ -736,134 +770,137 @@ class RefillModelRNNAdditiveDirectSampling(RefillModelRNNBase):
         return self._loss(zi,x,y,z,out='grad_loss')
 
 
-class RefillModelRNNAdditiveDirectMixing(RefillModelRNNBase):
-    def __init__(self,
-        device,
-        graph_dim,
-        embed_dim,
-        mixture_count,
-        state_count,
-        total_length,
-        min_len,
-        mask_token_idx):
 
-        state_count = 1
-        super().__init__(
-            device,
-            graph_dim,
-            embed_dim,
-            mixture_count,
-            state_count,
-            total_length,
-            min_len,
-            mask_token_idx)
-        # state_count = 15
-        self.device = device
-        self.total_length = total_length
-        self.min_len = min_len
-        self.mixture_count = mixture_count
-        self.embed_dim = embed_dim
-        self.state_count = state_count
-
-        #### share embed usually works
-        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
-        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
-        self.n_step     = min_len
-        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
-        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
-        kernel_size = 5
-        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
-        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.fs_type    = 'lptok'
-
-    def _batch_init(self,zi,x,y,z):
-        #### batch_init part
-        ### state init
-        z = self.embed(z)
-        y = self.embed(y)
-        # xs = torch.cat([y,init_state],dim=1)
-        xs = self.init_state.weight.T[None,0:1]
-        xs = xs.repeat((len(z),1,1))
-        xs = self.norm(xs)
-        # xs =
-        y  = self.norm(y)
-        z  = self.norm(z)
-        fs = torch.tensor([],requires_grad=True).to(self.device)
-        # outer,inner = self.batch_init(zi,x,y,z,fs)
-        i = -1
-        sel = None
-        xz = None
-        outer = [zi,x,y,z,fs]
-        inner = [i,sel,xz,xs]
-        return outer,inner
-
-    def _step(self,outer,inner):
-        '''
-        Outer should be non-mutable?
-        '''
-
-        (zi,x,y,z,fs) = outer
-        (i,sel,xz,xs) = inner
-        sel = None
-        xz  = None
-
-        # if i>=2:
-        #     ### Uses the minus two token for prediction
-        #     ### nearly a CNN fashion
-        #     xs = self.transition(z[:,i-2:i-1])
-        xz = z[:,i:i+1]
-
-        xs = self.transition(xs) + self.updater(xz)
-        xs = self.norm(xs)
-        ### The selector is a direct manner
-        ### Input is under a static key, whereas the reservoir is self-keyed
-        ### under a projection matrix
-        ### This should allow a direction interaction between hidden and
-        ### the output
-        xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
-        xkey_dynamic= self.xkey_dynamic(y)
-        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
-
-
-        sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
-        cand  = torch.cat([xz,xs,y],dim=1)
-        lptok = self.vocab(cand).log_softmax(-1)
-
-        xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
-        #### I think the expectation aggregation here is too harsh...
-        #### it's probably better to calculate emission probability by sampling, then aggregate the
-        #### Emission.
-        #### indeed it's much better to not aggregate the expectation
-
-        #### fs represents lptok
-        fs   = torch.cat([fs,xq],dim=1)
-        outer = [zi,x,y,z,fs]
-        inner = [i,sel,xz,xs]
-        return outer,inner
-
-
-
-    def _loss(self,zi,x,y,z,out='loss'):
-        assert out in 'loss token traj'.split()
-
-        outer,inner = self._batch_init(zi,x,y,z)
-        ### Uses an explicit RNN to switch between copying z and extract y
-        self.callback_init(outer)
-        for i in range(z.size(1)):
-            inner[0]=i
-            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-            self.callback_step(outer,inner)
-        self.callback_end(outer)
-        (zi,x,y,z,lptok) = outer
-
-        cent = self.target_energy(lptok,x)
-        loss  = -cent.mean(-1)
-        # if out=='token': return lptok
-        if out=='token': return lptok
-
-        if out=='loss': return loss
-        assert 0
+#
+#
+# class RefillModelRNNAdditiveDirectMixing(RefillModelRNNBase):
+#     def __init__(self,
+#         device,
+#         graph_dim,
+#         embed_dim,
+#         mixture_count,
+#         state_count,
+#         total_length,
+#         min_len,
+#         mask_token_idx):
+#
+#         state_count = 1
+#         super().__init__(
+#             device,
+#             graph_dim,
+#             embed_dim,
+#             mixture_count,
+#             state_count,
+#             total_length,
+#             min_len,
+#             mask_token_idx)
+#         # state_count = 15
+#         self.device = device
+#         self.total_length = total_length
+#         self.min_len = min_len
+#         self.mixture_count = mixture_count
+#         self.embed_dim = embed_dim
+#         self.state_count = state_count
+#
+#         #### share embed usually works
+#         # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+#         self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+#         self.n_step     = min_len
+#         self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+#         self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+#         kernel_size = 5
+#         self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+#         self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+#         self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+#         self.fs_type    = 'lptok'
+#
+#     def _batch_init(self,zi,x,y,z):
+#         #### batch_init part
+#         ### state init
+#         z = self.embed(z)
+#         y = self.embed(y)
+#         # xs = torch.cat([y,init_state],dim=1)
+#         xs = self.init_state.weight.T[None,0:1]
+#         xs = xs.repeat((len(z),1,1))
+#         xs = self.norm(xs)
+#         # xs =
+#         y  = self.norm(y)
+#         z  = self.norm(z)
+#         fs = torch.tensor([],requires_grad=True).to(self.device)
+#         # outer,inner = self.batch_init(zi,x,y,z,fs)
+#         i = -1
+#         sel = None
+#         xz = None
+#         outer = [zi,x,y,z,fs]
+#         inner = [i,sel,xz,xs]
+#         return outer,inner
+#
+#     def _step(self,outer,inner):
+#         '''
+#         Outer should be non-mutable?
+#         '''
+#
+#         (zi,x,y,z,fs) = outer
+#         (i,sel,xz,xs) = inner
+#         sel = None
+#         xz  = None
+#
+#         # if i>=2:
+#         #     ### Uses the minus two token for prediction
+#         #     ### nearly a CNN fashion
+#         #     xs = self.transition(z[:,i-2:i-1])
+#         xz = z[:,i:i+1]
+#
+#         xs = self.transition(xs) + self.updater(xz)
+#         xs = self.norm(xs)
+#         ### The selector is a direct manner
+#         ### Input is under a static key, whereas the reservoir is self-keyed
+#         ### under a projection matrix
+#         ### This should allow a direction interaction between hidden and
+#         ### the output
+#         xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+#         xkey_dynamic= self.xkey_dynamic(y)
+#         xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+#
+#
+#         sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+#         cand  = torch.cat([xz,xs,y],dim=1)
+#         lptok = self.vocab(cand).log_softmax(-1)
+#
+#         xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+#         #### I think the expectation aggregation here is too harsh...
+#         #### it's probably better to calculate emission probability by sampling, then aggregate the
+#         #### Emission.
+#         #### indeed it's much better to not aggregate the expectation
+#
+#         #### fs represents lptok
+#         fs   = torch.cat([fs,xq],dim=1)
+#         outer = [zi,x,y,z,fs]
+#         inner = [i,sel,xz,xs]
+#         return outer,inner
+#
+#
+#
+#     def _loss(self,zi,x,y,z,out='loss'):
+#         assert out in 'loss token traj'.split()
+#
+#         outer,inner = self._batch_init(zi,x,y,z)
+#         ### Uses an explicit RNN to switch between copying z and extract y
+#         self.callback_init(outer)
+#         for i in range(z.size(1)):
+#             inner[0]=i
+#             outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+#             self.callback_step(outer,inner)
+#         self.callback_end(outer)
+#         (zi,x,y,z,lptok) = outer
+#
+#         cent = self.target_energy(lptok,x)
+#         loss  = -cent.mean(-1)
+#         # if out=='token': return lptok
+#         if out=='token': return lptok
+#
+#         if out=='loss': return loss
+#         assert 0
 
 
 class RefillModelRNNAdditiveDirectMixingWithGate(RefillModelRNNBase):
@@ -1139,6 +1176,476 @@ class RefillModelRNNAdditiveDirectMixingBidirectional(RefillModelRNNBase):
         if out=='loss': return loss
         assert 0
 
+# class RefillModelRNNAdditiveDirectMixingWithGate(RefillModelRNNBase):
+#     def __init__(self,
+#         device,
+#         graph_dim,
+#         embed_dim,
+#         mixture_count,
+#         state_count,
+#         total_length,
+#         min_len,
+#         mask_token_idx):
+#
+#         state_count = 1
+#         super().__init__(
+#             device,
+#             graph_dim,
+#             embed_dim,
+#             mixture_count,
+#             state_count,
+#             total_length,
+#             min_len,
+#             mask_token_idx)
+#         # state_count = 15
+#         self.device = device
+#         self.total_length = total_length
+#         self.min_len = min_len
+#         self.mixture_count = mixture_count
+#         self.embed_dim = embed_dim
+#         self.state_count = state_count
+#
+#         #### share embed usually works
+#         # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+#         self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+#         self.n_step     = min_len
+#         self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+#         self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+#         kernel_size = 5
+#         self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+#         self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+#         self.transition_gate = nn.Linear(embed_dim,embed_dim).to(self.device)
+#         self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+#         self.fs_type    = 'lptok'
+#
+#     def _batch_init(self,zi,x,y,z):
+#         #### batch_init part
+#         ### state init
+#         z = self.embed(z)
+#         y = self.embed(y)
+#         # xs = torch.cat([y,init_state],dim=1)
+#         xsa = self.init_state.weight.T[None,0:1]
+#         xsa = xsa.repeat((len(z),z.size(1),1))
+#         xsa = self.norm(xsa)
+#
+#         y  = self.norm(y)
+#         z  = self.norm(z)
+#         fs = self.vocab(xsa)*0
+#         # fs = torch.tensor([],requires_grad=True).to(self.device)
+#         # outer,inner = self.batch_init(zi,x,y,z,fs)
+#         i = -1
+#         sel = None
+#         xz = None
+#         outer = [zi, x,y,z,fs]
+#         inner = [i,sel,xz,xsa]
+#         return outer,inner
+#
+#     def _step(self,outer,inner):
+#         '''
+#         Outer should be non-mutable?
+#         '''
+#
+#         (zi,x,y,z,fs) = outer
+#         (i,sel,xz,xsa) = inner
+#         sel = None
+#         xz  = None
+#
+#         xz = z[:,i:i+1]
+#
+#         L = x.shape[1]
+#         xs = 0
+#         if i>=1:
+#             xsl = xsa[:,i-1:i]
+#             xg = xsl.matmul(self.transition_gate.weight)[:,:,0:1].sigmoid()
+#             # .matmul(xsl.transpose(2,1)).sigmoid()
+#             xs = xs + xg * xsl.matmul(self.transition.weight)
+#         if i+1<=L-1:
+#             xsl = xsa[:,i+1:i+2]
+#             xg = xsl.matmul(self.transition_gate.weight)[:,:,1:2].sigmoid()
+#             # xg = xsl.matmul(self.transition_gate.weight).matmul(xs.transpose(2,1)).sigmoid()
+#             xs = xs + xg * xsl.matmul(self.transition.weight.transpose(1,0  ))
+#
+#         xs = xs + self.updater(xz)
+#         xs = self.norm(xs)
+#
+#         xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+#         xkey_dynamic= self.xkey_dynamic(y)
+#         xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+#
+#         sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+#         cand  = torch.cat([xz,xs,y],dim=1)
+#         lptok = self.vocab(cand).log_softmax(-1)
+#
+#         xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+#         # fs   = torch.cat([fs,xq],dim=1)
+#         fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+#         # import pdb; pdb.set_trace()
+#         xsa = torch.scatter(xsa,index=(xs*0).long()+i,src=xs,dim=1)
+#
+#         outer = [zi,x,y,z,fs]
+#         inner = [i,sel,xz,xsa]
+#         return outer,inner
+#
+#
+#     def _loss(self,zi,x,y,z,out='loss'):
+#         assert out in 'loss token traj'.split()
+#
+#         outer,inner = self._batch_init(zi,x,y,z)
+#         ### Uses an explicit RNN to switch between copying z and extract y
+#         self.callback_init(outer)
+#         L = z.size(1)
+#         for i in range(L):
+#             inner[0]=i
+#             outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+#             self.callback_step(outer,inner)
+#         for i in range(L):
+#             inner[0]=L-1-i
+#             outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+#             self.callback_step(outer,inner)
+#         for i in range(L):
+#             inner[0]=i
+#             outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+#             self.callback_step(outer,inner)
+#
+#         self.callback_end(outer)
+#         (zi,x,y,z,lptok) = outer
+#
+#         cent = self.target_energy(lptok,x)
+#         loss  = -cent.mean(-1)
+#         # if out=='token': return lptok
+#         if out=='token': return lptok
+#
+#         if out=='loss': return loss
+#         assert 0
+
+
+class RefillModelWithFixedEmission(RefillModelRNNBase):
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        state_count,
+        total_length,
+        min_len,
+        mask_token_idx):
+
+        state_count = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self.n_step     = min_len
+        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+
+        self.att_kernel = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_energy = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_prob   = nn.Linear(embed_dim,embed_dim).to(self.device)
+
+        self.att_kernel_2 = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_energy_2 = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_prob_2   = nn.Linear(embed_dim,embed_dim).to(self.device)
+
+        self.trans_gate = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'lptok'
+
+    def _batch_init(self,zi,x,y,z):
+        '''
+        :param x: the sequence to be predicted
+        :param y: the static set
+        :param z: the masked sequence
+        '''
+        #### batch_init part
+        ### state init
+        y = None
+        # import pdb; pdb.set_trace()
+        z = self.embed(z)
+        # y = self.embed(y)
+        # xs = torch.cat([y,init_state],dim=1)
+        xsa = self.init_state.weight.T[None,0:1]
+        xsa = xsa.repeat((len(z),z.size(1),1))
+        xsa = self.norm(xsa)
+
+        # y  = self.norm(y)
+        z  = self.norm(z)
+        fs = self.vocab(xsa)*0
+        # fs = torch.tensor([],requires_grad=True).to(self.device)
+        # outer,inner = self.batch_init(zi,x,y,z,fs)
+        i = -1
+        sel = None
+        xz = None
+        outer = [zi, x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+        Outer should be non-mutable?
+        '''
+
+        (zi,x,y,z,fs) = outer
+        (i,sel,xz,xsa) = inner
+        fs = xsa
+
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        L = z.size(1)
+        for i in range(L-2):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L-2):
+            inner[0]=L-1-i-2
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L-2):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+
+        self.callback_end(outer)
+        (zi,x,y,z,fs) = outer
+
+        emittor = self.xkey_static.weight[:2,:self.embed_dim]
+        lptok = fs.matmul(emittor.transpose(1,0)).log_softmax(-1)
+        # emittor = self.xkey_dynamic(fs[:,-1:])
+        # # emittor = self.xkey_static.weight[:2,:self.embed_dim]
+        # lptok = fs.matmul(emittor.transpose(2,1)).sigmoid()
+        # lptok = (1E-10 + torch.cat([lptok,1-lptok],dim=-1)).log()
+        # log_softmax(-1)
+
+        cent = self.target_energy(lptok,x)[:,:-2]
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
+
+class RefillModelDynamicRNN(RefillModelRNNBase):
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        state_count,
+        total_length,
+        min_len,
+        mask_token_idx):
+
+        state_count = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self.n_step     = min_len
+        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        self.transition = nn.Linear(embed_dim,embed_dim*embed_dim).to(self.device)
+        self.updater    = nn.Linear(embed_dim,embed_dim*embed_dim).to(self.device)
+
+        self.trans_gate = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'lptok'
+
+    def _batch_init(self,zi,x,y,z):
+        '''
+        :param x: the sequence to be predicted
+        :param y: the static set
+        :param z: the masked sequence
+        '''
+        #### batch_init part
+        ### state init
+        y = None
+        # import pdb; pdb.set_trace()
+        z = self.embed(z)
+        # y = self.embed(y)
+        # xs = torch.cat([y,init_state],dim=1)
+        xsa = self.init_state.weight.T[None,0:1]
+        xsa = xsa.repeat((len(z),z.size(1),1))
+        xsa = self.norm(xsa)
+
+        # y  = self.norm(y)
+        z  = self.norm(z)
+        fs = self.vocab(xsa)*0
+        # fs = torch.tensor([],requires_grad=True).to(self.device)
+        # outer,inner = self.batch_init(zi,x,y,z,fs)
+        i = -1
+        sel = None
+        xz = None
+        outer = [zi, x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+        Outer should be non-mutable?
+        '''
+
+        (zi,x,y,z,fs) = outer
+        (i,sel,xz,xsa) = inner
+        sel = None
+        xz  = None
+
+        xz = z[:,i:i+1]
+
+        L = x.shape[1]
+
+        xs = xsa[:,i:i+1]
+        ##### adds attention interaction term
+        # import pdb; pdb.set_trace()
+        # att = self.att_kernel(xs).matmul(xsa.transpose(2,1)).softmax(-1)
+        # att = att * (self.att_prob(xs)[:,:,0:1].sigmoid())
+        # val = att.matmul(xsa)
+        # dxs = (val).matmul(self.att_energy.weight.T)
+        #
+        #
+        # att = self.att_kernel_2(xs).matmul(xsa.transpose(2,1)).softmax(-1)
+        # att = att * (self.att_prob_2(xs)[:,:,0:1].sigmoid())
+        # val = att.matmul(xsa)
+        # dxs2 = (val).matmul(self.att_energy_2.weight.T)
+
+        # assert 0
+        # xs  = xs +  dxs
+        # xs  = xs + dxs2
+        # + dxs2
+        # val2.matmul(self.att_energy_2.weight.T)
+        otype = xsa[:,-1,:]
+        E = self.embed_dim
+        wr = self.transition(otype).reshape((len(x),E,E))
+        we = self.updater(otype).reshape((len(x),E,E))
+
+        # import pdb; pdb.set_trace()
+        if i>=1:
+            xsl = xsa[:,i-1:i]
+            xg = 1
+            xs = xs + xg* xsl.matmul(wr)
+        if i+1<=L-1:
+            xsl = xsa[:,i+1:i+2]
+            xg = 1
+            xs = xs + xg * xsl.matmul(wr.transpose(2,1))
+            # self.transition.weight.T)
+
+        # xs = xs + self.upda   ter(xz)
+        xs = xs + xz.matmul(we)
+
+        # att = self.att_kernel(xsa).matmul(xs.transpose(2,1)).softmax(-2)
+        # val = att.transpose(2,1).matmul(xsa)
+        # xs = xs+ val.matmul(self.att_energy.weight)
+        # self.att_energy(val)
+
+        xs = self.norm(xs)
+
+        xkey_static = self.xkey_static.weight[None,:3,:self.embed_dim].repeat((len(z),1,1))
+        # xkey_dynamic= self.xkey_dynamic(y)
+        # xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+        #
+        # sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+        # cand  = torch.cat([xz,xs,y],dim=1)
+        # lptok = self.vocab(cand).log_softmax(-1)
+        # xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+
+        # fs   = torch.cat([fs,xq],dim=1)
+        # fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+        # import pdb; pdb.set_trace()
+        xsa = torch.scatter(xsa,index=(xs*0).long()+i,src=xs,dim=1)
+        fs = xsa
+
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer,inner)
+        L = z.size(1)
+        for i in range(L-2):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L-2):
+            inner[0]=L-1-i-2
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L-2):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+
+        (zi,x,y,z,fs) = outer
+
+        emittor = self.xkey_static.weight[:2,:self.embed_dim]
+        lptok = fs.matmul(emittor.transpose(1,0)).log_softmax(-1)
+        outer[4] = lptok
+        # import pdb; pdb.set_trace()
+        # outer = (zi,x,y,z,lptok) 
+        self.callback_end(outer,inner)
+        # emittor = self.xkey_dynamic(fs[:,-1:])
+        # # emittor = self.xkey_static.weight[:2,:self.embed_dim]
+        # lptok = fs.matmul(emittor.transpose(2,1)).sigmoid()
+        # lptok = (1E-10 + torch.cat([lptok,1-lptok],dim=-1)).log()
+        # log_softmax(-1)
+
+        cent = self.target_energy(lptok,x)[:,:-2]
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
 
 class RefillModelRNNAdditiveDirectMixingWithAttention(RefillModelRNNBase):
     def __init__(self,
@@ -1179,22 +1686,36 @@ class RefillModelRNNAdditiveDirectMixingWithAttention(RefillModelRNNBase):
         self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
         self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
         self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+
         self.att_kernel = nn.Linear(embed_dim,embed_dim).to(self.device)
         self.att_energy = nn.Linear(embed_dim,embed_dim).to(self.device)
         self.att_prob   = nn.Linear(embed_dim,embed_dim).to(self.device)
+
+        self.att_kernel_2 = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_energy_2 = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_prob_2   = nn.Linear(embed_dim,embed_dim).to(self.device)
+
+        self.trans_gate = nn.Linear(embed_dim,embed_dim).to(self.device)
         self.fs_type    = 'lptok'
 
     def _batch_init(self,zi,x,y,z):
+        '''
+        :param x: the sequence to be predicted
+        :param y: the static set
+        :param z: the masked sequence
+        '''
         #### batch_init part
         ### state init
+        y = None
+        # import pdb; pdb.set_trace()
         z = self.embed(z)
-        y = self.embed(y)
+        # y = self.embed(y)
         # xs = torch.cat([y,init_state],dim=1)
         xsa = self.init_state.weight.T[None,0:1]
         xsa = xsa.repeat((len(z),z.size(1),1))
         xsa = self.norm(xsa)
 
-        y  = self.norm(y)
+        # y  = self.norm(y)
         z  = self.norm(z)
         fs = self.vocab(xsa)*0
         # fs = torch.tensor([],requires_grad=True).to(self.device)
@@ -1226,39 +1747,54 @@ class RefillModelRNNAdditiveDirectMixingWithAttention(RefillModelRNNBase):
         att = self.att_kernel(xs).matmul(xsa.transpose(2,1)).softmax(-1)
         att = att * (self.att_prob(xs)[:,:,0:1].sigmoid())
         val = att.matmul(xsa)
-        xs  = xs+ (val).matmul(self.att_energy.weight.T)
+        dxs = (val).matmul(self.att_energy.weight.T)
+
+
+        # att = self.att_kernel_2(xs).matmul(xsa.transpose(2,1)).softmax(-1)
+        # att = att * (self.att_prob_2(xs)[:,:,0:1].sigmoid())
+        # val = att.matmul(xsa)
+        # dxs2 = (val).matmul(self.att_energy_2.weight.T)
+
+        # assert 0
+        xs  = xs +  dxs
+        # xs  = xs + dxs2
+
+        # + dxs2
+        # val2.matmul(self.att_energy_2.weight.T)
 
         if i>=1:
             xsl = xsa[:,i-1:i]
-            xs = xs + xsl.matmul(self.transition.weight)
+            xg = xsl.matmul(self.trans_gate.weight).matmul(xs.transpose(2,1)).sigmoid()
+            # xg = xsl.matmul()
+            xs = xs + xg* xsl.matmul(self.transition.weight)
         if i+1<=L-1:
             xsl = xsa[:,i+1:i+2]
-            xs = xs + xsl.matmul(self.transition.weight.transpose(1,0  ))
+            xg = xsl.matmul(self.trans_gate.weight.T).matmul(xs.transpose(2,1)).sigmoid()
+            xs = xs + xg * xsl.matmul(self.transition.weight.T)
 
         xs = xs + self.updater(xz)
-
 
         # att = self.att_kernel(xsa).matmul(xs.transpose(2,1)).softmax(-2)
         # val = att.transpose(2,1).matmul(xsa)
         # xs = xs+ val.matmul(self.att_energy.weight)
         # self.att_energy(val)
 
-
         xs = self.norm(xs)
 
-        xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
-        xkey_dynamic= self.xkey_dynamic(y)
-        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+        xkey_static = self.xkey_static.weight[None,:3,:self.embed_dim].repeat((len(z),1,1))
+        # xkey_dynamic= self.xkey_dynamic(y)
+        # xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+        #
+        # sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+        # cand  = torch.cat([xz,xs,y],dim=1)
+        # lptok = self.vocab(cand).log_softmax(-1)
+        # xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
 
-        sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
-        cand  = torch.cat([xz,xs,y],dim=1)
-        lptok = self.vocab(cand).log_softmax(-1)
-
-        xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
         # fs   = torch.cat([fs,xq],dim=1)
-        fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+        # fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
         # import pdb; pdb.set_trace()
         xsa = torch.scatter(xsa,index=(xs*0).long()+i,src=xs,dim=1)
+        fs = xsa
 
         outer = [zi,x,y,z,fs]
         inner = [i,sel,xz,xsa]
@@ -1272,25 +1808,232 @@ class RefillModelRNNAdditiveDirectMixingWithAttention(RefillModelRNNBase):
         ### Uses an explicit RNN to switch between copying z and extract y
         self.callback_init(outer)
         L = z.size(1)
-        for i in range(L):
+        for i in range(L-2):
             inner[0]=i
             outer,inner = self._step(outer,inner) #### do what ever with your hidden state
             self.callback_step(outer,inner)
-        for i in range(L):
-            inner[0]=L-1-i
+        for i in range(L-2):
+            inner[0]=L-1-i-2
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L-2):
+            inner[0]=i
             outer,inner = self._step(outer,inner) #### do what ever with your hidden state
             self.callback_step(outer,inner)
 
         self.callback_end(outer)
-        (zi,x,y,z,lptok) = outer
+        (zi,x,y,z,fs) = outer
 
-        cent = self.target_energy(lptok,x)
+        emittor = self.xkey_static.weight[:2,:self.embed_dim]
+        lptok = fs.matmul(emittor.transpose(1,0)).log_softmax(-1)
+        # emittor = self.xkey_dynamic(fs[:,-1:])
+        # # emittor = self.xkey_static.weight[:2,:self.embed_dim]
+        # lptok = fs.matmul(emittor.transpose(2,1)).sigmoid()
+        # lptok = (1E-10 + torch.cat([lptok,1-lptok],dim=-1)).log()
+        # log_softmax(-1)
+
+        cent = self.target_energy(lptok,x)[:,:-2]
         loss  = -cent.mean(-1)
         # if out=='token': return lptok
         if out=='token': return lptok
 
         if out=='loss': return loss
         assert 0
+
+
+
+class RefillModelRNNAdditiveDirectMixing(RefillModelRNNBase):
+    def __init__(self,
+        device,
+        graph_dim,
+        embed_dim,
+        mixture_count,
+        state_count,
+        total_length,
+        min_len,
+        mask_token_idx):
+
+        state_count = 1
+        super().__init__(
+            device,
+            graph_dim,
+            embed_dim,
+            mixture_count,
+            state_count,
+            total_length,
+            min_len,
+            mask_token_idx)
+        # state_count = 15
+        self.device = device
+        self.total_length = total_length
+        self.min_len = min_len
+        self.mixture_count = mixture_count
+        self.embed_dim = embed_dim
+        self.state_count = state_count
+
+        #### share embed usually works
+        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
+        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self.n_step     = min_len
+        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
+        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
+        kernel_size = 5
+        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
+        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
+
+        self.att_kernel = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_energy = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_prob   = nn.Linear(embed_dim,embed_dim).to(self.device)
+
+        self.att_kernel_2 = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_energy_2 = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.att_prob_2   = nn.Linear(embed_dim,embed_dim).to(self.device)
+
+        self.trans_gate = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.fs_type    = 'lptok'
+
+    def _batch_init(self,zi,x,y,z):
+        '''
+        :param x: the sequence to be predicted
+        :param y: the static set
+        :param z: the masked sequence
+        '''
+        #### batch_init part
+        ### state init
+        y = None
+        # import pdb; pdb.set_trace()
+        z = self.embed(z)
+        # y = self.embed(y)
+        # xs = torch.cat([y,init_state],dim=1)
+        xsa = self.init_state.weight.T[None,0:1]
+        xsa = xsa.repeat((len(z),z.size(1),1))
+        xsa = self.norm(xsa)
+
+        # y  = self.norm(y)
+        z  = self.norm(z)
+        fs = self.vocab(xsa)*0
+        # fs = torch.tensor([],requires_grad=True).to(self.device)
+        # outer,inner = self.batch_init(zi,x,y,z,fs)
+        i = -1
+        sel = None
+        xz = None
+        outer = [zi, x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+    def _step(self,outer,inner):
+        '''
+        Outer should be non-mutable?
+        '''
+
+        (zi,x,y,z,fs) = outer
+        (i,sel,xz,xsa) = inner
+        sel = None
+        xz  = None
+
+        xz = z[:,i:i+1]
+
+        L = x.shape[1]
+
+        xs = xsa[:,i:i+1]
+        ##### adds attention interaction term
+        # import pdb; pdb.set_trace()
+        # att = self.att_kernel(xs).matmul(xsa.transpose(2,1)).softmax(-1)
+        # att = att * (self.att_prob(xs)[:,:,0:1].sigmoid())
+        # val = att.matmul(xsa)
+        # dxs = (val).matmul(self.att_energy.weight.T)
+        #
+        #
+        # att = self.att_kernel_2(xs).matmul(xsa.transpose(2,1)).softmax(-1)
+        # att = att * (self.att_prob_2(xs)[:,:,0:1].sigmoid())
+        # val = att.matmul(xsa)
+        # dxs2 = (val).matmul(self.att_energy_2.weight.T)
+
+        # assert 0
+        # xs  = xs+  dxs
+        # xs  = xs + dxs2
+        # + dxs2
+        # val2.matmul(self.att_energy_2.weight.T)
+
+        if i>=1:
+            xsl = xsa[:,i-1:i]
+            xg = xsl.matmul(self.trans_gate.weight).matmul(xs.transpose(2,1)).sigmoid()
+            # xg = xsl.matmul()
+            xs = xs + xg* xsl.matmul(self.transition.weight)
+        if i+1<=L-1:
+            xsl = xsa[:,i+1:i+2]
+            xg = xsl.matmul(self.trans_gate.weight.T).matmul(xs.transpose(2,1)).sigmoid()
+            xs = xs + xg * xsl.matmul(self.transition.weight.T)
+
+        xs = xs + self.updater(xz)
+
+        # att = self.att_kernel(xsa).matmul(xs.transpose(2,1)).softmax(-2)
+        # val = att.transpose(2,1).matmul(xsa)
+        # xs = xs+ val.matmul(self.att_energy.weight)
+        # self.att_energy(val)
+
+        xs = self.norm(xs)
+
+        xkey_static = self.xkey_static.weight[None,:3,:self.embed_dim].repeat((len(z),1,1))
+        # xkey_dynamic= self.xkey_dynamic(y)
+        # xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+        #
+        # sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
+        # cand  = torch.cat([xz,xs,y],dim=1)
+        # lptok = self.vocab(cand).log_softmax(-1)
+        # xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
+
+        # fs   = torch.cat([fs,xq],dim=1)
+        # fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
+        # import pdb; pdb.set_trace()
+        xsa = torch.scatter(xsa,index=(xs*0).long()+i,src=xs,dim=1)
+        fs = xsa
+
+        outer = [zi,x,y,z,fs]
+        inner = [i,sel,xz,xsa]
+        return outer,inner
+
+
+    def _loss(self,zi,x,y,z,out='loss'):
+        assert out in 'loss token traj'.split()
+
+        outer,inner = self._batch_init(zi,x,y,z)
+        ### Uses an explicit RNN to switch between copying z and extract y
+        self.callback_init(outer)
+        L = z.size(1)
+        for i in range(L-2):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L-2):
+            inner[0]=L-1-i-2
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+        for i in range(L-2):
+            inner[0]=i
+            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
+            self.callback_step(outer,inner)
+
+        self.callback_end(outer)
+        (zi,x,y,z,fs) = outer
+
+        emittor = self.xkey_static.weight[:2,:self.embed_dim]
+        lptok = fs.matmul(emittor.transpose(1,0)).log_softmax(-1)
+        # emittor = self.xkey_dynamic(fs[:,-1:])
+        # # emittor = self.xkey_static.weight[:2,:self.embed_dim]
+        # lptok = fs.matmul(emittor.transpose(2,1)).sigmoid()
+        # lptok = (1E-10 + torch.cat([lptok,1-lptok],dim=-1)).log()
+        # log_softmax(-1)
+
+        cent = self.target_energy(lptok,x)[:,:-2]
+        loss  = -cent.mean(-1)
+        # if out=='token': return lptok
+        if out=='token': return lptok
+
+        if out=='loss': return loss
+        assert 0
+
 
 
 class RefillModelRNNAdditiveDirectMixingBidirectionalFixedEmission(RefillModelRNNAdditiveDirectMixingBidirectional):
@@ -1503,542 +2246,6 @@ class RefillModelRNNAdditiveSweeping(RefillModelRNNBase):
 
         if out=='loss': return loss
         assert 0
-
-class RefillModelThreeWayRNNAdditiveSweeping(RefillModelRNNBase):
-    def __init__(self,
-        device,
-        graph_dim,
-        embed_dim,
-        mixture_count,
-        state_count,
-        total_length,
-        min_len,
-        mask_token_idx):
-
-        state_count = 1
-        super().__init__(
-            device,
-            graph_dim,
-            embed_dim,
-            mixture_count,
-            state_count,
-            total_length,
-            min_len,
-            mask_token_idx)
-        # state_count = 15
-        self.device = device
-        self.total_length = total_length
-        self.min_len = min_len
-        self.mixture_count = mixture_count
-        self.embed_dim = embed_dim
-        self.state_count = state_count
-
-        #### share embed usually works
-        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
-        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
-        self.n_step     = min_len
-        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
-        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
-        kernel_size = 5
-        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
-        E = self.embed_dim
-        # self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.transition = nn.Linear(embed_dim,embed_dim*embed_dim).to(self.device)
-        self.W = nn.Parameter(self.transition.weight.reshape((E,E,E)))
-
-        self.transition2 = nn.Linear(embed_dim,embed_dim*embed_dim).to(self.device)
-        self.W2 = nn.Parameter(self.transition.weight.reshape((E,E,E)))
-        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.fs_type    = 'lptok'
-
-    def _batch_init(self,zi,x,y,z):
-        #### batch_init part
-        ### state init
-        z = self.embed(z)
-        y = self.embed(y)
-        # xs = torch.cat([y,init_state],dim=1)
-        xsa = self.init_state.weight.T[None,0:1]
-        xsa = xsa.repeat((len(z),z.size(1),1))
-        xsa = self.norm(xsa)
-
-        xsb = self.init_state.weight.T[None,1:2]
-        xsb = xsb.repeat((len(z),z.size(1),1))
-        xsb = self.norm(xsb)
-
-
-        y  = self.norm(y)
-        z  = self.norm(z)
-        fs = self.vocab(xsa)*0
-        # fs = torch.tensor([],requires_grad=True).to(self.device)
-        # outer,inner = self.batch_init(zi,x,y,z,fs)
-        i = -1
-        sel = None
-        xz = None
-        outer = [zi, x,y,z,fs]
-        inner = [i,sel,xsb,xsa]
-        return outer,inner
-
-    def _step(self,outer,inner):
-        '''
-        Outer should be non-mutable?
-        '''
-
-        (zi,x,y,z,fs) = outer
-        (i,sel,xsb,xsa) = inner
-        sel = None
-        xz  = None
-
-        xz = z[:,i:i+1]
-
-        L = x.shape[1]
-        xs = 0
-        assert  i>=1
-
-        beta = 0.1
-
-        if self.sense ==1:
-            ### infer from left
-            xsl = xsa[:,i-1:i]
-            xx = torch.tensordot(xsl,self.W,1)
-            xxx = (xx * xz [:,:,:,None]).sum(2)
-
-        # xs = xs + xsl.matmul(self.transition.weight)
-        # xsr = xsa[:,i:i+1]
-        # xs = xs + xsl.matmul(self.transition.weight.transpose(1,0   ))
-        # import pdb; pdb.set_trace()
-        # xs = xs + self.updater(xz)
-            xsr = xsa[:,i:i+1]
-            xsr = self.norm(xsr + beta*xxx)
-
-            xx = torch.tensordot(xsl,self.W2,1)
-            xxx = (xx * xsr[:,:,None]).sum(2)
-            xsa = torch.scatter(xsa,index=(xxx*0).long()+i,src=xsr,dim=1)
-
-            # xs = self.norm(xxx+xsb[:,i:i+1])
-            # xsb = torch.scatter(xsb,index=(xs*0).long()+i,src=xs,dim=1)
-            xs = self.norm(xxx)
-            # xsb = torch.scatter(xsb,index=(xs*0).long()+i,src=xs,dim=1)
-            # xsb = torch.scatter
-            # print(i)
-        elif self.sense==-1 :
-            # print(i)
-            xsr = xsa[:,i:i+1]
-            xsl = xsa[:,i-1:i]
-            xx = torch.tensordot(xsr,self.W.transpose(2,0),1)
-            xxx = (xx * xz [:,:,:,None]).sum(2)
-
-        # xs = xs + xsl.matmul(self.transition.weight)
-        # xsr = xsa[:,i:i+1]
-        # xs = xs + xsl.matmul(self.transition.weight.transpose(1,0   ))
-        # import pdb; pdb.set_trace()
-        # xs = xs + self.updater(xz)
-
-            xsl = self.norm(xsl + beta* xxx)
-
-            xx = torch.tensordot(xsl,self.W2,1)
-            xxx = (xx * xsr[:,:,None]).sum(2)
-            # xs = self.norm(xxx)
-            xsa = torch.scatter(xsa,index=(xxx*0).long()+i-1,src=xsl,dim=1)
-
-            # xs = self.norm(xxx+xsb[:,i:i+1])
-            # xsb = torch.scatter(xsb,index=(xs*0).long()+i,src=xs,dim=1)
-            xs = self.norm(xxx)
-
-
-
-        xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
-        xkey_dynamic= self.xkey_dynamic(y)
-        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
-
-        sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
-        cand  = torch.cat([xz,xs,y],dim=1)
-        lptok = self.vocab(cand).log_softmax(-1)
-
-        xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
-        fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
-
-        outer = [zi,x,y,z,fs]
-        inner = [i,sel,xsb,xsa]
-        return outer,inner
-
-
-    def _loss(self,zi,x,y,z,out='loss'):
-        assert out in 'loss token traj'.split()
-
-        outer,inner = self._batch_init(zi,x,y,z)
-        ### Uses an explicit RNN to switch between copying z and extract y
-        self.callback_init(outer)
-        L = z.size(1)
-        self.sense = 1
-        for i in range(1,L):
-            inner[0]=i
-            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-            self.callback_step(outer,inner)
-        self.sense = -1
-        for i in range(0,L-1):
-            inner[0]=L-1-i
-            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-            self.callback_step(outer,inner)
-        # for i in range(L):
-        #     inner[0]=i
-        #     outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-        #     self.callback_step(outer,inner)
-
-        self.callback_end(outer)
-        (zi,x,y,z,lptok) = outer
-
-        cent = self.target_energy(lptok,x)
-        loss  = -cent.mean(-1)
-        # if out=='token': return lptok
-        if out=='token': return lptok
-
-        if out=='loss': return loss
-        assert 0
-
-class RefillModelThreeWayRNNAdditiveSweeping2(RefillModelRNNBase):
-    def __init__(self,
-        device,
-        graph_dim,
-        embed_dim,
-        mixture_count,
-        state_count,
-        total_length,
-        min_len,
-        mask_token_idx):
-
-        state_count = 1
-        super().__init__(
-            device,
-            graph_dim,
-            embed_dim,
-            mixture_count,
-            state_count,
-            total_length,
-            min_len,
-            mask_token_idx)
-        # state_count = 15
-        self.device = device
-        self.total_length = total_length
-        self.min_len = min_len
-        self.mixture_count = mixture_count
-        self.embed_dim = embed_dim
-        self.state_count = state_count
-
-        #### share embed usually works
-        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
-        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
-        self.n_step     = min_len
-        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
-        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
-        kernel_size = 5
-        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
-        E = self.embed_dim
-        # self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.transition = nn.Linear(embed_dim,embed_dim*embed_dim).to(self.device)
-        self.W = nn.Parameter(self.transition.weight.reshape((E,E,E)))
-
-        self.transition2 = nn.Linear(embed_dim,embed_dim*embed_dim).to(self.device)
-        self.W2 = nn.Parameter(self.transition.weight.reshape((E,E,E)))
-        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.fs_type    = 'lptok'
-
-    def _batch_init(self,zi,x,y,z):
-        #### batch_init part
-        ### state init
-        z = self.embed(z)
-        y = self.embed(y)
-        # xs = torch.cat([y,init_state],dim=1)
-        xsa = self.init_state.weight.T[None,0:1]
-        xsa = xsa.repeat((len(z),z.size(1),1))
-        xsa = self.norm(xsa)
-
-        xsb = self.init_state.weight.T[None,1:2]
-        xsb = xsb.repeat((len(z),z.size(1),1))
-        xsb = self.norm(xsb)
-
-
-        y  = self.norm(y)
-        z  = self.norm(z)
-        fs = self.vocab(xsa)*0
-        # fs = torch.tensor([],requires_grad=True).to(self.device)
-        # outer,inner = self.batch_init(zi,x,y,z,fs)
-        i = -1
-        sel = None
-        xz = None
-        outer = [zi, x,y,z,fs]
-        inner = [i,sel,xsb,xsa]
-        return outer,inner
-
-    def _step(self,outer,inner):
-        '''
-        Outer should be non-mutable?
-        '''
-
-        (zi,x,y,z,fs) = outer
-        (i,sel,xsb,xsa) = inner
-        sel = None
-        xz  = None
-
-        xz = z[:,i:i+1]
-
-        L = x.shape[1]
-        xs = 0
-        assert  i>=1
-
-        beta = 0.01
-
-        if self.sense ==1:
-            ### infer from left
-            xsl = xsa[:,i-1:i]
-            xx = torch.tensordot(xsl,self.W,1)
-            xxx = (xx * xz [:,:,:,None]).sum(2)
-
-        # xs = xs + xsl.matmul(self.transition.weight)
-        # xsr = xsa[:,i:i+1]
-        # xs = xs + xsl.matmul(self.transition.weight.transpose(1,0   ))
-        # import pdb; pdb.set_trace()
-        # xs = xs + self.updater(xz)
-            xsr = xsa[:,i:i+1]
-            xsr = self.norm(xsr + beta*xxx)
-
-            xx = torch.tensordot(xsl,self.W2,1)
-            xxx = (xx * xsr[:,:,None]).sum(2)
-            xsa = torch.scatter(xsa,index=(xxx*0).long()+i,src=xsr,dim=1)
-
-            # xs = self.norm(xxx+xsb[:,i:i+1])
-            # xsb = torch.scatter(xsb,index=(xs*0).long()+i,src=xs,dim=1)
-            xs = self.norm(xxx)
-            # xsb = torch.scatter(xsb,index=(xs*0).long()+i,src=xs,dim=1)
-            # xsb = torch.scatter
-            # print(i)
-        elif self.sense==-1 :
-            # print(i)
-            xsr = xsa[:,i:i+1]
-            xsl = xsa[:,i-1:i]
-            xx = torch.tensordot(xsr,self.W.transpose(2,0),1)
-            xxx = (xx * xz [:,:,:,None]).sum(2)
-
-        # xs = xs + xsl.matmul(self.transition.weight)
-        # xsr = xsa[:,i:i+1]
-        # xs = xs + xsl.matmul(self.transition.weight.transpose(1,0   ))
-        # import pdb; pdb.set_trace()
-        # xs = xs + self.updater(xz)
-
-            xsl = self.norm(xsl + beta* xxx)
-
-            xx = torch.tensordot(xsl,self.W2,1)
-            xxx = (xx * xsr[:,:,None]).sum(2)
-            # xs = self.norm(xxx)
-            xsa = torch.scatter(xsa,index=(xxx*0).long()+i-1,src=xsl,dim=1)
-
-            # xs = self.norm(xxx+xsb[:,i:i+1])
-            # xsb = torch.scatter(xsb,index=(xs*0).long()+i,src=xs,dim=1)
-            xs = self.norm(xxx)
-
-
-
-        xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
-        xkey_dynamic= self.xkey_dynamic(y)
-        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
-
-        sel   = xs.matmul(xkey.transpose(2,1)).log_softmax(-1)
-        cand  = torch.cat([xz,xs,y],dim=1)
-        lptok = self.vocab(cand).log_softmax(-1)
-
-        xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
-        fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
-
-        outer = [zi,x,y,z,fs]
-        inner = [i,sel,xsb,xsa]
-        return outer,inner
-
-
-    def _loss(self,zi,x,y,z,out='loss'):
-        assert out in 'loss token traj'.split()
-
-        outer,inner = self._batch_init(zi,x,y,z)
-        ### Uses an explicit RNN to switch between copying z and extract y
-        self.callback_init(outer)
-        L = z.size(1)
-        self.sense = 1
-        for i in range(1,L):
-            inner[0]=i
-            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-            self.callback_step(outer,inner)
-        self.sense = -1
-        for i in range(0,L-1):
-            inner[0]=L-1-i
-            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-            self.callback_step(outer,inner)
-        # for i in range(L):
-        #     inner[0]=i
-        #     outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-        #     self.callback_step(outer,inner)
-
-        self.callback_end(outer)
-        (zi,x,y,z,lptok) = outer
-
-        cent = self.target_energy(lptok,x)
-        loss  = -cent.mean(-1)
-        # if out=='token': return lptok
-        if out=='token': return lptok
-
-        if out=='loss': return loss
-        assert 0
-
-
-class RefillModelCrossRNNAdditiveSweeping(RefillModelRNNBase):
-    def __init__(self,
-        device,
-        graph_dim,
-        embed_dim,
-        mixture_count,
-        state_count,
-        total_length,
-        min_len,
-        mask_token_idx):
-
-        state_count = 1
-        super().__init__(
-            device,
-            graph_dim,
-            embed_dim,
-            mixture_count,
-            state_count,
-            total_length,
-            min_len,
-            mask_token_idx)
-        # state_count = 15
-        self.device = device
-        self.total_length = total_length
-        self.min_len = min_len
-        self.mixture_count = mixture_count
-        self.embed_dim = embed_dim
-        self.state_count = state_count
-
-        #### share embed usually works
-        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
-        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
-        self.n_step     = min_len
-        self.xkey_static = nn.Linear((embed_dim//2)**2, 2).to(self.device)
-        self.xkey_dynamic= nn.Linear(embed_dim, (embed_dim//2)**2).to(self.device)
-        kernel_size = 5
-        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
-        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.updater    = nn.Linear(embed_dim,(embed_dim//2)**2).to(self.device)
-        self.fs_type    = 'lptok'
-
-    def _batch_init(self,zi,x,y,z):
-        #### batch_init part
-        ### state init
-        z = self.embed(z)
-        y = self.embed(y)
-        # xs = torch.cat([y,init_state],dim=1)
-        xsa = self.init_state.weight.T[None,0:1]
-        xsa = xsa.repeat((len(z),z.size(1),1))
-        xsa = self.norm(xsa)
-
-        y  = self.norm(y)
-        z  = self.norm(z)
-        fs = self.vocab(xsa)*0
-        # fs = torch.tensor([],requires_grad=True).to(self.device)
-        # outer,inner = self.batch_init(zi,x,y,z,fs)
-        i = -1
-        sel = None
-        xz = None
-        outer = [zi, x,y,z,fs]
-        inner = [i,sel,xz,xsa]
-        return outer,inner
-
-    def _step(self,outer,inner):
-        '''
-
-        Outer should be non-mutable?
-        '''
-
-        (zi, x,y,z,fs) = outer
-        (i,sel,xz,xsa) = inner
-        sel = None
-        xz  = None
-
-        xz = z[:,i:i+1]
-
-        L = x.shape[1]
-        dx = 0
-        xs = xsa[:,i:i+1]
-        if i>=1:
-            xsl = xsa[:,i-1:i]
-            dx = dx +xsl.matmul(self.transition.weight)
-        if i+1<=L-1:
-            xsl = xsa[:,i+1:i+2]
-            dx = dx + xsl.matmul(self.transition.weight.transpose(1,0   ))
-
-        ### use xz to parametrise the interaction between two state vector
-        E = self.embed_dim
-        B = len(x)
-        xs1,xs2 = xs[:,:,:E//2],xs[:,:,E//2:]
-        W = self.updater(xz).reshape((B,E//2,E//2))
-#        xs1 = xs1+
-        dx1 = dx[:,:,:E//2]+xs2.matmul(W)
-        dx2 = dx[:,:,E//2:]+xs1.matmul(W.transpose(2,1))
-        xs1 = self.norm(xs1 + dx1)
-        xs2 = self.norm(xs2 + dx2)
-
-        xs  = torch.cat([xs1,xs2],dim=-1)
-
-        xkey_static = self.xkey_static.weight[None,:1,:].repeat((len(z),1,1))
-        xkey_dynamic= self.xkey_dynamic(y)
-        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
-        xscross = ( xs1.transpose(2,1)*xs2).reshape((B,1,-1))
-
-        # xp = xs1[:,0].matmul(xkey)
-        # import pdb; pdb.set_trace()
-        sel   = xscross.matmul(xkey.transpose(2,1)).log_softmax(-1)
-        cand  = torch.cat([xz,y],dim=1)
-        lptok = self.vocab(cand).log_softmax(-1)
-
-        xq    = (lptok+sel.transpose(2,1)).logsumexp(1,keepdims=True)
-        fs  = torch.scatter(fs,index=(xq*0).long()+i,src=xq,dim=1)
-        xsa = torch.scatter(xsa,index=(xs*0).long()+i,src=xs,dim=1)
-
-        outer = [zi,x,y,z,fs]
-        inner = [i,sel,xz,xsa]
-        return outer,inner
-
-
-    def _loss(self,zi,x,y,z,out='loss'):
-        assert out in 'loss token traj'.split()
-
-        outer,inner = self._batch_init(zi,x,y,z)
-        ### Uses an explicit RNN to switch between copying z and extract y
-        self.callback_init(outer)
-        L = z.size(1)
-        for i in range(L):
-            inner[0]=i
-            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-            self.callback_step(outer,inner)
-
-        for i in range(L):
-            inner[0]=L-1-i
-            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-            self.callback_step(outer,inner)
-
-        for i in range(L):
-            inner[0]=i
-            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-            self.callback_step(outer,inner)
-
-        self.callback_end(outer)
-        (zi,x,y,z,lptok) = outer
-
-        cent = self.target_energy(lptok,x)
-        loss  = -cent.mean(-1)
-        # if out=='token': return lptok
-        if out=='token': return lptok
-
-        if out=='loss': return loss
-        assert 0
-
 
 
 class RefillModelRNNAdditiveSweepingWithResidual(RefillModelRNNBase):
