@@ -22,6 +22,7 @@ numbered: 0
 1004-diff-expectation.md
 1005-hmm-overview.md
 1006-jacobian-matrix.md
+1007-self-attention.md
 3001-kg-study.md
 8001-intro.md
 8500-pytorch-common-problems.md

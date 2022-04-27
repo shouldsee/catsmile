@@ -111,6 +111,9 @@
   - Google jacobian noise injection <https://www.google.com/search?q=jacobian+noise+injection+in+neural+network>
   - Jacobian正则化 <https://arxiv.org/pdf/1908.02729.pdf>
   - Contractive Autoencoder (2011) <https://icml.cc/2011/papers/455_icmlpaper.pdf>
+  - Gaussian Noise Injection <https://papers.nips.cc/paper/2020/file/c16a5320fa475530d9583c34fd356ef5-Paper.pdf>
+  - Sensitivity and Generalisation <https://static.googleusercontent.com/media/research.google.com/zh-CN//pubs/archive/46649.pdf>
+  - Stabilizing Equilibrium Models by Jacobian Regularization <https://arxiv.org/pdf/2106.14342.pdf>
 
 [pytoch post by pascal](https://discuss.pytorch.org/t/how-to-compute-jacobian-matrix-in-pytorch/14968/14)
 

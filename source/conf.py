@@ -18,8 +18,8 @@
 # -- Project information -----------------------------------------------------
 
 project = 'catsmile'
-copyright = '2022, Feng Geng'
-author = 'Feng Geng'
+copyright = '2022, Feng Geng, shouldsee@qq.com, 沪ICP备2022009527号-1'
+author = 'Feng Geng <shouldsee@qq.com>'
 
 # The full version, including alpha/beta/rc tags
 release = '0.0.1'

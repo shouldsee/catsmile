@@ -53,7 +53,9 @@ E(H,T,R) &= - (H-T)^T \mu_R \\
 \end{align}
 $$
 
-### 其他能量,把R放到关联矩阵里的MRF
+### 其他能量,把R放到关联矩阵里的MRF,也就是RESCAL
+
+[RESCAL,2011,A Three-Way Model for Collective Learning on Multi-Relational Data](http://www.icml-2011.org/papers/438_icmlpaper.pdf)
 
 其实这个应该是最符合MRF的直观感觉的模型,就是可能要做一点Low-Rank近似,不然R的复杂度就变成平方了,或者说就是跟三阶MRF作用量一个意思了.
 
@@ -71,6 +73,9 @@ E(H,T,R) = T^T R R^T H
 \end{align}
 $$
 
+### Bilinear-diag(Dismult) <https://arxiv.org/pdf/1412.6575.pdf>
+
+要求 $W_R$是对角矩阵
 
 
 ## 预训练语言模型中的知识
@@ -119,7 +124,7 @@ $$
 1. [GNN图神经网络2018综述](https://arxiv.org/abs/1812.08434)
     - 解决的问题: !?!
     - 解决的方法: !?!
-    
+
 ![Image](https://pic4.zhimg.com/80/v2-dd4a9ddefad950ece2b4bf48e7575f7f.png)
 
 PS: 中文NLP的论文圈子有点小额...
@@ -185,7 +190,7 @@ Tool for searching related papers:
  - <https://www.connectedpapers.com/>
  - Google Scholar
 
-## Degenerate of Pure Attention 
+## Degenerate of Pure Attention
 
 - [Attention is not all you need](https://arxiv.org/pdf/2103.03404.pdf)
 

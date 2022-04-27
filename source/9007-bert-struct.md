@@ -2,19 +2,36 @@
 
 # 9007: BERT 结构解析
 
-安装huggingface/transformers非常的丝滑
+安装huggingface/transformers非常的顺利
 
-See Also: 
+See Also:
 
 - [Github:huggingface/transformers](https://github.com/huggingface/transformers)
 
 - [Riroaki的关于BERT源码的解析知乎文章](https://zhuanlan.zhihu.com/p/360988428)
+
 
 ## 个人阅读心得
 
 1. 采用了独立的Config类进行传参
 1. 有些forward return type采用了特化的OrderedDict作为ModelOutpu
 1. dataclass看起来是python3的一个新特性,可以方便的自动定义`__init__`方法
+
+## Api for noise injection.
+
+因为做噪声注入的角度比较多,需要整合一下Api. 宏观来讲,考虑几个不同的方向.
+
+
+- 单点噪声注入/多点噪声注入.
+  - 多点噪声输入更加复杂,暂不讨论.仅考虑单点噪声输入.
+  - 这意味着如果要个点都要重新注入.
+- 噪声方差,在确保数值稳定的情况下尽量小,毕竟Jacobian是微分极限
+- 单层噪声观察/多层噪声观察.
+  - 多层噪声观察只需要一次注入
+  - 单层噪声观察需要在每一层重新注入噪声.
+
+
+
 
 ## 核心代码,不考虑Decoding,仅仅考虑前向逻辑
 
@@ -53,7 +70,7 @@ class BertLayer(nn.Module):
         )
         outputs = (layer_output,) + outputs
         return outputs
-        
+
     def feed_forward_chunk(self, attention_output):
         intermediate_output = self.intermediate(attention_output)
         layer_output = self.output(intermediate_output, attention_output)
@@ -91,7 +108,12 @@ class BertOutput(nn.Module):
 ```
 
 
-## 尝试提取中间层输出
+## 尝试用小扰动理解不同位置之间的相关性
+
+1. 标点符号上的扰动不会传到下游节点里
+1. 不同层级的结构不一样,1-3层有很强的局域结构,6-7层附近有类似实体的表征结构
+
+
 
 ```python
 from transformers import AutoTokenizer, AutoModel
