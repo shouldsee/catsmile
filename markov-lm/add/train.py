@@ -136,8 +136,6 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention):
     binds (dataset,model,device)
     '''
 
-
-
     def add_hook_for_output_tensor(model,CONFIG_EXPAND_LEVEL,CONFIG_DETACH, CONFIG_PRINT_CLASS):
         '''
 
