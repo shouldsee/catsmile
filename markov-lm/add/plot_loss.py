@@ -65,6 +65,7 @@ ys = defaultdict(lambda:[])
 HTML_FILE = __file__+'.html'
 # MIN_YS= 0.3
 MIN_YS = -200.
+import pandas as pd
 # MIN_YS = 0.0
 with open(HTML_FILE+'.temp','w') as f:
     plt.figure(figsize=[20,8])
@@ -74,18 +75,21 @@ with open(HTML_FILE+'.temp','w') as f:
         base,epc,loss = x.split('_')
         loss = float(loss)
         epc = int(epc)
-        ys[base].append((epc,loss))
+        ys[base].append((epc,loss,x))
     # print(base,epc,loss)
 
 
+    dfs = []
     for base,ss in sorted(ys.items()):
         ss = sorted(ss)
-        for epc,loss in ss:
-            # print(base,epc,loss)
-            pass
-        xs,ys = zip(*ss)
+        # for epc,loss in ss:
+        #     # print(base,epc,loss)
+        #     pass
+        xs,ys,fns = zip(*ss)
         if (ys[-1]<MIN_YS)*(MIN_YS>0) or (ys[-1]>-MIN_YS)*(MIN_YS<0):
             continue
+        df = pd.DataFrame(dict(xs=xs,ys=ys),index=fns)
+        dfs.append(df)
         # f.write(f'<pre>loss{ys[-1]:.3f}_{base}</pre>')
         # if ys[-1]<MIN_YS:
         #     continue
@@ -102,6 +106,9 @@ with open(HTML_FILE+'.temp','w') as f:
     # plt.ylim(0,1.5)
     plt.legend()
     f.write(write_png_tag(plt.gcf()))
+    df = pd.concat(dfs,axis=0)
+    f.write(df.to_html())
+    # f.write(f'<pre>{fns[-1]}</pre>')
 
 import shutil
 shutil.move(HTML_FILE+".temp",HTML_FILE)
