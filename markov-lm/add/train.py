@@ -163,6 +163,11 @@ def init_conf(CUDA,shuffle):
         # _print = lambda *x,f=f:
             f.write(f'<pre>{"".join(x)}</pre>\n')
 
+        def init_s(self,k,v):
+            s = self.s
+            if k not in s:
+                s[k]=[k,list(v.shape)]
+            return
         def callback_step(self,epoch,indexedItem,loss):
             pass
             tri,item = indexedItem
@@ -195,7 +200,7 @@ def init_conf(CUDA,shuffle):
             f = self.f
             _print = self._print
             _print(f'Epoch{epoch}.Model-{self.model.__class__.__name__}.{loss}')
-            CONFIG_HIDE = 0.01
+            CONFIG_HIDE = -100000000
             def _str(x,s):
                 if isinstance(x,float):
                     if x >CONFIG_HIDE:
@@ -212,8 +217,8 @@ def init_conf(CUDA,shuffle):
                 _print(*[_str(vv,10)+'|'+' '*3 for vv in v])
                 _print('-'*15*len(v))
 
-            x = ['bias.1000']+list((1000*self.model.att_dense.bias).int().cpu().detach().numpy()[:10])
-            _print(*[_str(vv,10)+'|'+' '*3 for vv in x])
+            # x = ['bias.1000']+list((1000*self.model.att_dense.bias).int().cpu().detach().numpy()[:10])
+            # _print(*[_str(vv,10)+'|'+' '*3 for vv in x])
             _print('='*35)
             # _print('-'*35)
             # import pdb; pdb.set_trace()
@@ -302,37 +307,61 @@ def init_conf(CUDA,shuffle):
     # conf.optimizer_factory = torch.optim.Ada
     from markov_lm.Model_add import AddModelWithBert
     conf.mixture_count=3
-    conf.depth = 3
+    conf.depth = 12
+    conf.iter_per_layer=12
     # conf.learning_rate = 0.0001
     # conf.instance = 4;torch.manual_seed(conf.instance)
     conf.model = model = AddModelWithBert(graph_dim = dataset.graph_dim,
         depth=conf.depth,
         # state_count=conf.state_count,
         embed_dim=conf.embed_dim,device=conf.device,
+        iter_per_layer = conf.iter_per_layer,
         mask_token_idx=dataset.mask_token_idx)
 
-    conf.model.__class__.__name__ = f'AddModelWithBert-D{conf.depth}-I{conf.instance}'
-
+    conf.model.__class__.__name__ = f'AddModelWithBert-D{conf.depth}-1I{conf.instance}-Dropout{conf.model.bconf.hidden_dropout_prob:.2f}'
+    #
     from markov_lm.Model_add import AddModelWithAttention
+    class AddModelWithAttention(AddModelWithAttention):
+        bi = 0
+        def callback_step(self,inner,outer,s=conf.s):
+            energy= outer[-2].mean()
+            k = f'energy_{self.bi}'
+            conf.init_s(k,energy)
+            s[k].append(energy.item()*1000)
+
+        def callback_end(self,outer,inner,s=conf.s):
+            self.bi += 1
+        def train(self,*a,**kw):
+            super().train(*a,**kw)
+            self.bi = 0
+
+
+    # AddModelWithAttention.callback_step = callback_step
     conf.kernel_size = 5
     conf.depth = 12
     conf.embed_dim = 40
-    conf.use_dropout= 0
-    conf.use_dense_relu = 1
+    conf.use_dropout= 0.5
+    conf.use_dense_relu = 11
     conf.use_layernorm = 1
+    conf.use_gradnorm = 1
+    conf.step_size = 0.05
     conf.model = model = AddModelWithAttention(graph_dim = dataset.graph_dim,
         depth=conf.depth,
         use_dropout = conf.use_dropout,
         kernel_size = conf.kernel_size,
         use_dense_relu = conf.use_dense_relu,
         use_layernorm = conf.use_layernorm,
+        use_gradnorm = conf.use_gradnorm,
         embed_dim=conf.embed_dim,device=conf.device,
-
-        mask_token_idx=dataset.mask_token_idx)
+        iter_per_layer = conf.iter_per_layer,
+        mask_token_idx=dataset.mask_token_idx,
+        step_size = conf.step_size)
     conf.learning_rate = 0.001
     import math
-    conf.model.__class__.__name__ += f'-D{conf.depth}-1I{conf.instance}-DenseRelu{conf.use_dense_relu}-Layernorm{conf.use_layernorm}-Dropout{conf.use_dropout}-loglr{math.log10(conf.learning_rate):.1f}'
+    conf.model.__class__.__name__ += f'-D{conf.depth}-1I{conf.instance}-DenseRelu{conf.use_dense_relu}-Layernorm{conf.use_layernorm}-Dropout{conf.use_dropout}-Gradnorm{conf.use_gradnorm}-loglr{math.log10(conf.learning_rate):.1f}'
     conf.model.__class__.__name__ += f'-V7'
+
+
     # add_optimizer      =  lambda conf,params:torch.optim.Adam( params, lr=conf.learning_rate,)
     # add_optimizer      =  lambda conf,params:RMSpropDrop( params, lr=conf.learning_rate,)
 
@@ -355,23 +384,6 @@ def init_conf(CUDA,shuffle):
 
     # add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
 
-    # from markov_lm.Model_add import AddModelWithReluAttention
-    # conf.kernel_size = 5
-    # conf.depth = 5
-    # conf.embed_dim = 40
-    # # conf.learning_rate = 0.0001
-    # conf.instance= 6
-    # conf.use_dropout= 1
-    # conf.use_dense_relu = -1
-    # conf.model = model = AddModelWithReluAttention(graph_dim = dataset.graph_dim,
-    #     depth=conf.depth,
-    #     use_dropout = conf.use_dropout,
-    #     kernel_size = conf.kernel_size,
-    #     use_dense_relu = conf.use_dense_relu,
-    #     embed_dim=conf.embed_dim,device=conf.device,
-    #     mask_token_idx=dataset.mask_token_idx)
-    # conf.model.__class__.__name__ += f'-D{conf.depth}-I{conf.instance}-DenseRelu{conf.use_dense_relu}-Dropout{conf.use_dropout}'
-    # AddModelWithAttention
     '''
     RefillModelCopy:     420_0.9066   ### Just copying sequence
     RefillModelCopyWithRandomFill_400_1.07266  ### Copying sequence except at mask copying from set

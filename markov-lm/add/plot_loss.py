@@ -38,6 +38,7 @@ xs = [xx for xx in xs if '-I4-' not in xx]
 # xs = [xx for xx in xs if '-I5-' not in xx]
 xs = [xx for xx in xs if 'SimpleUpdate' not in xx]
 xs = [xx for xx in xs if '-1I'  in xx]
+# xs = [xx for xx in xs if 'DenseRelu1'  in xx]
 xs = [
 xx for xx in xs
 if 0
@@ -50,9 +51,10 @@ if 0
 # or '-1I23' in xx
 # or '-1I24' in xx
 # or '-1I25' in xx  #### NIGHTMARE SEED
-or '-1I26' in xx
-or '-1I27' in xx
-or '-1I28' in xx
+
+# or '-1I26' in xx
+# or '-1I27' in xx
+# or '-1I28' in xx
 or '-1I29' in xx
 
 # or '-1I24' in xx
@@ -95,7 +97,7 @@ with open(HTML_FILE+'.temp','w') as f:
         plt.plot(xs[:-2],ys,label=f'loss{ys[-1]:.3f}-{base}')
     plt.xlim(10,1000)
     # plt.ylim(0,2)
-    plt.ylim(0,0.5)
+    plt.ylim(0,1.0)
     plt.hlines(0.060,0,1000,colors='r',linestyles='--')
     # plt.ylim(0,1.5)
     plt.legend()
