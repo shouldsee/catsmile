@@ -170,3 +170,73 @@ def add_hook_for_output_tensor(model,tokenizer,CONFIG_EXPAND_LEVEL,CONFIG_DETACH
     model.get_all_tensors = get_all_tensors
 
     return model
+
+import torch.nn.functional as F
+import torch.optim._functional as FO
+# from . import _functional as F
+class RMSpropDrop(torch.optim.RMSprop):
+    '''
+    Randomly dropout gradient.... Not sure whether is useful
+    '''
+    @torch.no_grad()
+    def step(self, closure=None):
+        """Performs a single optimization step.
+
+        Args:
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            params_with_grad = []
+            grads = []
+            square_avgs = []
+            grad_avgs = []
+            momentum_buffer_list = []
+
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                params_with_grad.append(p)
+
+                if p.grad.is_sparse:
+                    raise RuntimeError('RMSprop does not support sparse gradients')
+                grads.append(p.grad)
+
+                state = self.state[p]
+
+                # State initialization
+                if len(state) == 0:
+                    state['step'] = 0
+                    state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    if group['momentum'] > 0:
+                        state['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    if group['centered']:
+                        state['grad_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                square_avgs.append(state['square_avg'])
+
+                if group['momentum'] > 0:
+                    momentum_buffer_list.append(state['momentum_buffer'])
+                if group['centered']:
+                    grad_avgs.append(state['grad_avg'])
+
+                state['step'] += 1
+
+            grads = [F.dropout(gradss,0.5) for gradss in grads]
+            FO.rmsprop(params_with_grad,
+                      grads,
+                      square_avgs,
+                      grad_avgs,
+                      momentum_buffer_list,
+                      lr=group['lr'],
+                      alpha=group['alpha'],
+                      eps=group['eps'],
+                      weight_decay=group['weight_decay'],
+                      momentum=group['momentum'],
+                      centered=group['centered'])
+        return loss

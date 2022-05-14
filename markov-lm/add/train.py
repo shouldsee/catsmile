@@ -1,63 +1,109 @@
-
+'''
+- Author: Feng Geng
+- Changelog:
+  - 20220507-20220514: for (dataset=ArithmeticTest, model=AddModelWithAttention),
+  tested different parameters. use_dense_relu=1/11 shows interesting capacity.
+  per-position dropout greatly prevents overfitting for unknown reason.
+'''
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim
 
-# from markov_lm.Dataset.translation_dataset import EnglishToGermanDataset
-from markov_lm.Dataset.translation_dataset import RefillDataset
-
 import os,sys
 
 import numpy as np
-from tqdm import tqdm
 from torch import autograd
 
 from markov_lm.util_html import write_png_tag
 
-# import pandas as pd
 import sys
 import glob
 from pprint import pprint
 import shutil
 from tqdm import tqdm
 
-# device = torch.device('cuda:0' if CUDA else 'cpu')
-
 from markov_lm.Model import cross_entropy
-
-# from markov_lm.Model_Refill import RefillModel
-# from markov_lm.Model_Refill import RefillModelRNNSwitch
-# from markov_lm.Model_Refill import RefillModelRNNAttention
-from markov_lm.Model_Refill import RefillModelRNNAdditive
-from markov_lm.Model_Refill import RefillModelRNNAdditiveDirect
-from markov_lm.Model_Refill import RefillModelRNNGRU
-from markov_lm.Model_Refill import RefillModelNGRAM
-# Additive
-from markov_lm.Model_Refill import RefillModelOld
-from markov_lm.Model_Refill import RefillModelCopy
-from markov_lm.Model_Refill import RefillModelCopyWithRandomFill
-from markov_lm.Model_Refill import RefillModelRNNAdditiveWithPseudoSampling
-from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixing
-from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixingWithGate
-# RefillModelRNNAdditiveDirectMixingWithGate
-from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixingBidirectional
-
-from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectSampling
-from markov_lm.Model_Refill import RefillModelRNNAdditiveSweeping
-from markov_lm.Model_Refill import RefillModelRNNAdditiveSweepingWithResidual
-from markov_lm.Model_Refill import RefillModelMixtureRNNSweepingOldEmission
-from markov_lm.Model_Refill import RefillModelMixtureRNNSweepingOldEmission2
-from markov_lm.Model_Refill import RefillModelMixtureRNNSweepingNewEmission
-from markov_lm.Model_Refill import RefillModelMixtureRNNSweepingOldEmissionDifferentTransition
-from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixingWithAttention
-from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixingWithKAttention
-from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixingWithRegressionAttention
-
-from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectMixingWithGate
-from markov_lm.Model_Refill import RefillModelCrossRNNAdditiveSweeping
-from markov_lm.Model_Refill import RefillModelRNNAdditiveDirectEmission
 from markov_lm.c9007_util import tbuf_cls,fws,recur_detach
+
+from markov_lm.Dataset.translation_dataset import ArithmeticTest
+from markov_lm.Model_add import AddModelWithBert
+from markov_lm.Model_add import AddModelWithAttention
+
+
+import collections
+import math
+
+class ConfigPrototype(object):
+    def __init__(self):
+        self.f = open(__file__+'.log.html','w')
+        self.tbuf = tbuf_cls()
+        self.s = collections.OrderedDict()
+
+        return
+    def _print(self,*x):
+        f=  self.f
+    # _print = lambda *x,f=f:
+        f.write(f'<pre>{"".join(x)}</pre>\n')
+
+    def init_s(self,k,v):
+        s = self.s
+        if k not in s:
+            s[k]=[k,list(v.shape)]
+        return
+
+    def callback_step(self,epoch,indexedItem,loss):
+        pass
+        tri,item = indexedItem
+        f = self.f
+        t = self.handler
+        s = self.s
+        _print = self._print
+        for k,v in t.xdict.items():
+            mae = v.abs().mean().item()
+            # s.setdefault(k,[])
+            if k not in s:
+                s[k]=[k,list(v.shape)]
+            ss = s[k]
+            ss.append(mae*1000)
+            # ss.append(fws('%.3f'%mae,10))
+            # print(v.id)
+            # _print(fws(k,15)+fws(list(v.shape),10)+fws('%.3f'%mae,10))
+
+        opt = self.optimizer
+        for p,v in opt.state.items():
+            k = id(p)
+            if k not in s:
+                s[k] = [id(p),list(getattr(p,'shape',[1]))]
+            s[k].append( (1000*v.get('square_avg',torch.tensor(0.)).mean().item()))
+
+    def callback_start(self,epoch,a,b):
+        pass
+    def callback_end(self,epoch,indexedItem,loss):
+        s = self.s
+        f = self.f
+        _print = self._print
+        _print(f'Epoch{epoch}.Model-{self.model.__class__.__name__}.{loss}')
+        CONFIG_HIDE = -100000000
+        def _str(x,s):
+            if isinstance(x,float):
+                if x >CONFIG_HIDE:
+                    x ='%.3f'%x
+                else:
+                    x = ''
+            else:
+                pass
+            return fws(x,s)
+
+        for k in list(s):
+            v = s.pop(k)
+            _print(*[_str(vv,10)+'|'+' '*3 for vv in v])
+            _print('-'*15*len(v))
+
+        # x = ['bias.1000']+list((1000*self.model.att_dense.bias).int().cpu().detach().numpy()[:10])
+        # _print(*[_str(vv,10)+'|'+' '*3 for vv in x])
+        _print('='*35)
+        f.flush()
 
 
 def parse_checkpoint(sys,):
@@ -81,159 +127,21 @@ def parse_checkpoint(sys,):
         # LOAD = int(LOAD)
     return LOAD
 
-import torch.nn.functional as F
-import torch.optim._functional as FO
-# from . import _functional as F
-class RMSpropDrop(torch.optim.RMSprop):
-    @torch.no_grad()
-    def step(self, closure=None):
-        """Performs a single optimization step.
 
-        Args:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
+def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention):
+    '''
+    Runtime subclassing AddModelWithAttention()
 
-        for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            square_avgs = []
-            grad_avgs = []
-            momentum_buffer_list = []
+    returns a config object that controls training process.
+    binds (dataset,model,device)
+    '''
 
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                params_with_grad.append(p)
-
-                if p.grad.is_sparse:
-                    raise RuntimeError('RMSprop does not support sparse gradients')
-                grads.append(p.grad)
-
-                state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    if group['momentum'] > 0:
-                        state['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    if group['centered']:
-                        state['grad_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
-                square_avgs.append(state['square_avg'])
-
-                if group['momentum'] > 0:
-                    momentum_buffer_list.append(state['momentum_buffer'])
-                if group['centered']:
-                    grad_avgs.append(state['grad_avg'])
-
-                state['step'] += 1
-
-            grads = [F.dropout(gradss,0.5) for gradss in grads]
-            FO.rmsprop(params_with_grad,
-                      grads,
-                      square_avgs,
-                      grad_avgs,
-                      momentum_buffer_list,
-                      lr=group['lr'],
-                      alpha=group['alpha'],
-                      eps=group['eps'],
-                      weight_decay=group['weight_decay'],
-                      momentum=group['momentum'],
-                      centered=group['centered'])
-
-        return loss
-
-import collections
-
-def init_conf(CUDA,shuffle):
-    class Config(object):
-        f = open(__file__+'.log.html','w')
-        tbuf = tbuf_cls()
-        def __init__(self):
-
-            return
-        s = collections.OrderedDict()
-        def _print(self,*x,f=f):
-        # _print = lambda *x,f=f:
-            f.write(f'<pre>{"".join(x)}</pre>\n')
-
-        def init_s(self,k,v):
-            s = self.s
-            if k not in s:
-                s[k]=[k,list(v.shape)]
-            return
-        def callback_step(self,epoch,indexedItem,loss):
-            pass
-            tri,item = indexedItem
-            f = self.f
-            t = self.handler
-            s = self.s
-            _print = self._print
-            for k,v in t.xdict.items():
-                mae = v.abs().mean().item()
-                # s.setdefault(k,[])
-                if k not in s:
-                    s[k]=[k,list(v.shape)]
-                ss = s[k]
-                ss.append(mae*1000)
-                # ss.append(fws('%.3f'%mae,10))
-                # print(v.id)
-                # _print(fws(k,15)+fws(list(v.shape),10)+fws('%.3f'%mae,10))
-
-            opt = self.optimizer
-            for p,v in opt.state.items():
-                k = id(p)
-                if k not in s:
-                    s[k] = [id(p),list(getattr(p,'shape',[1]))]
-                s[k].append( (1000*v.get('square_avg',torch.tensor(0.)).mean().item()))
-            # import pdb; pdb.set_trace()
-        def callback_start(self,epoch,a,b):
-            pass
-        def callback_end(self,epoch,indexedItem,loss):
-            s = self.s
-            f = self.f
-            _print = self._print
-            _print(f'Epoch{epoch}.Model-{self.model.__class__.__name__}.{loss}')
-            CONFIG_HIDE = -100000000
-            def _str(x,s):
-                if isinstance(x,float):
-                    if x >CONFIG_HIDE:
-                        x ='%.3f'%x
-                    else:
-                        x = ''
-                else:
-                    pass
-                return fws(x,s)
-            # import pdb; pdb.set_trace()
-            for k in list(s):
-                v = s.pop(k)
-            # for k,v in s.items():
-                _print(*[_str(vv,10)+'|'+' '*3 for vv in v])
-                _print('-'*15*len(v))
-
-            # x = ['bias.1000']+list((1000*self.model.att_dense.bias).int().cpu().detach().numpy()[:10])
-            # _print(*[_str(vv,10)+'|'+' '*3 for vv in x])
-            _print('='*35)
-            # _print('-'*35)
-            # import pdb; pdb.set_trace()
-            f.flush()
-
-            # import pdb; pdb.set_trace()
-
-            # f.write(f'<pre>{loss}\n</pre>')
-            # tbuf.add_elem(loss)
 
 
     def add_hook_for_output_tensor(model,CONFIG_EXPAND_LEVEL,CONFIG_DETACH, CONFIG_PRINT_CLASS):
         '''
-        Adds to model a method  `model.get_tensors(sent,xdict)`
-        which returns a dict of tensors outputted at each nn.Module with maximum depth of CONFIG_EXPAND_LEVEL.
+
+        returns a temp object with a dict of tensors outputted at each nn.Module with maximum depth of CONFIG_EXPAND_LEVEL.
         '''
         class Temp(object):
             xdict = collections.OrderedDict()
@@ -257,7 +165,6 @@ def init_conf(CUDA,shuffle):
             return hook
 
         '注入灵魂'
-        # for k,v in model.named_modules():
         for k,v in model.named_parameters():
             if k.count('.')<=CONFIG_EXPAND_LEVEL:
                 if CONFIG_PRINT_CLASS:
@@ -266,13 +173,16 @@ def init_conf(CUDA,shuffle):
                 # h = v.register_full_backward_hook(get_backward_hook(k))
                 handles.append(h)
 
-
         return t
 
 
-    conf = Config()
-    conf.instance= 29
+    conf = ConfigPrototype()
 
+    '''
+    Abusing attributes here
+    [TBC]
+    '''
+    conf.instance= 29
 
     torch.manual_seed(conf.instance)
     conf.criterion = cross_entropy
@@ -281,31 +191,24 @@ def init_conf(CUDA,shuffle):
     conf.state_count = 15
     conf.device =  torch.device('cuda:0' if CUDA else 'cpu')
     conf.num_epoch = 5000
-    # model = MixtureOfHMM(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
 
     conf.learning_rate = 0.001
     conf.SAVE_INTERVAL = 10
     conf.batch_size = 60
     conf.tsi_max = 10
-    from markov_lm.Dataset.translation_dataset import ArithmeticTest
-    ### This is a random dataset !!!
-    conf.dataset = dataset = ArithmeticTest(CUDA=CUDA)
 
+    ### This is a random dataset !!!! init after random seed is set
+    conf.dataset = dataset = ArithmeticTest(CUDA=CUDA)
     ### test dataset works
     (conf.dataset[range(5)])
     conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
     # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
-    # conf.model = model = ExtractionAndMarkovTemplateMatching(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device)
-    # add_optimizer      =  lambda conf,params:torch.optim.Adadelta( params, lr=conf.learning_rate)
     add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
     # add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,eps=0.01)
-    # conf.optimizer = torch.optim.Adagrad( params, lr=conf.learning_rate)
-    # conf.optimizer      = torch.optim.RMSprop( params, lr=conf.learning_rate)
-    # conf.optimizer      = torch.optim.Adagrad( params, lr=conf.learning_rate)
-    conf.optimizer_factory = None
-     # torch.optim.RMSprop
-    # conf.optimizer_factory = torch.optim.Ada
-    from markov_lm.Model_add import AddModelWithBert
+
+    '''
+    now specify model
+    '''
     conf.mixture_count=3
     conf.depth = 12
     conf.iter_per_layer=12
@@ -319,9 +222,11 @@ def init_conf(CUDA,shuffle):
         mask_token_idx=dataset.mask_token_idx)
 
     conf.model.__class__.__name__ = f'AddModelWithBert-D{conf.depth}-1I{conf.instance}-Dropout{conf.model.bconf.hidden_dropout_prob:.2f}'
-    #
-    from markov_lm.Model_add import AddModelWithAttention
+
     class AddModelWithAttention(AddModelWithAttention):
+        '''
+        Adds callback to record energy
+        '''
         bi = 0
         def callback_step(self,inner,outer,s=conf.s):
             energy= outer[-2].mean()
@@ -357,57 +262,20 @@ def init_conf(CUDA,shuffle):
         mask_token_idx=dataset.mask_token_idx,
         step_size = conf.step_size)
     conf.learning_rate = 0.001
-    import math
+    '''
+    Class name is used to construct checkpoint filenames. manually record important params here, needs a better system.
+    [TBC]
+    '''
     conf.model.__class__.__name__ += f'-D{conf.depth}-1I{conf.instance}-DenseRelu{conf.use_dense_relu}-Layernorm{conf.use_layernorm}-Dropout{conf.use_dropout}-Gradnorm{conf.use_gradnorm}-loglr{math.log10(conf.learning_rate):.1f}'
     conf.model.__class__.__name__ += f'-V7'
 
 
-    # add_optimizer      =  lambda conf,params:torch.optim.Adam( params, lr=conf.learning_rate,)
-    # add_optimizer      =  lambda conf,params:RMSpropDrop( params, lr=conf.learning_rate,)
-
-    # from markov_lm.Model_add import AddModelWithAttentionSimpleUpdate
-    # conf.kernel_size = 5
-    # conf.depth = 8
-    # conf.embed_dim = 40
-    # conf.use_dropout= 0
-    # conf.use_dense_relu = 1
-    # conf.model = model = AddModelWithAttentionSimpleUpdate(graph_dim = dataset.graph_dim,
-    #     depth=conf.depth,
-    #     use_dropout = conf.use_dropout,
-    #     kernel_size = conf.kernel_size,
-    #     use_dense_relu = conf.use_dense_relu,
-    #     embed_dim=conf.embed_dim,device=conf.device,
-    #     mask_token_idx=dataset.mask_token_idx)
-    # conf.learning_rate = 0.001
-    # import math
-    # conf.model.__class__.__name__ += f'-D{conf.depth}-1I{conf.instance}-DenseRelu{conf.use_dense_relu}-Dropout{conf.use_dropout}-loglr{math.log10(conf.learning_rate):.1f}'
-
-    # add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
-
-    '''
-    RefillModelCopy:     420_0.9066   ### Just copying sequence
-    RefillModelCopyWithRandomFill_400_1.07266  ### Copying sequence except at mask copying from set
-    RefillModelRNNSwitch_240_0.078    ### static selector_q.weight
-    RefillModelRNNSwitch_100_0.11912  ### static selector_q.weight
-    RefillModelRNNSwitch_100_0.21843  ### dynamic select_q.weight
-    '''
-    # conf.mixture_count=3
-    # conf.model= model = RefillModelMixtureRNNSweepingOldEmission2(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
-    # conf.model= model = RefillModelMixtureRNNSweepingNewEmission(graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
-    # conf.model = model = RefillModelRNNAdditiveWithPseudoSampling(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
-    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
-    # conf.model = model = RefillModelRNNGRU(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
-    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
-
-    # conf.model = model = RefillModelCopyWithRandomFill(total_length=dataset.total_length(),min_len=dataset.min_len,graph_dim = dataset.english_vocab_len,mixture_count=conf.mixture_count,
-    #     state_count=conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.english_vocab['<mask>'])
-    ### 180_0.1007
     conf.model = model = model.to(conf.device)
     params = list(model.parameters())
     print(dict(model.named_parameters()).keys())
+
     #### using Adam with high learning_rate is catastrophic
     conf.optimizer = add_optimizer(conf,params)
-    # conf.optimizer      = torch.optim.Adam( params, lr=conf.learning_rate)
     conf.handler = add_hook_for_output_tensor(model,CONFIG_DETACH=1,CONFIG_EXPAND_LEVEL=4,CONFIG_PRINT_CLASS=0)
     return conf
 
@@ -419,19 +287,18 @@ def main():
     dataset
     CKPT = parse_checkpoint(sys,)
     if(CKPT!='-1'):
+
         epoch = CKPT
         # res = glob.glob(os.path.join("Checkpoints",f"{conf.model.__class__.__name__}_{CKPT}_*.pkl"))
         res = glob.glob(os.path.join("Checkpoints",f"{conf.model.__class__.__name__}_{epoch}*.pkl"))
         assert len(res)==1,['Which one to choose?',res]
         print(f'[LOADING]{res[0]}')
 
-        # fn = res[0]        checkpoint   = torch.load(os.path.join("Checkpoints","Checkpoint"+str(LOAD)+".pkl"))
         checkpoint   = torch.load(res[0])
         test_losses  = checkpoint["test_losses"]
         train_losses = checkpoint["train_losses"]
         epoch        = checkpoint["epoch"]
         x            = checkpoint["model"]
-        # import pdb; pdb.set_trace()
         xx = {}
         for k,v in x.items():
             if k in dict(model.named_parameters()):
@@ -444,7 +311,7 @@ def main():
         model.load_state_dict(x,strict=STRICT_LOAD)
         if STRICT_LOAD:
             conf.optimizer.load_state_dict(checkpoint['optimizer'])
-        # optimizer.load_state_dict(checkpoint["optimizer"])
+
     else:
         test_losses = []
         train_losses = []
@@ -487,23 +354,13 @@ def main():
                 break
                 # print(tsi)
 
-
-
         model.train()
         dataset.train()
         model.zero_grad()
         conf.callback_start(epoch,None,None)
         for tri,item in enumerate(tqdm(conf.dataloader)):
-            # print(zi.min())
-            # z = model.encode(x)
-            # y = model.decode(z)
-            # grad_loss = model.grad_loss(item).mean()
             xx = model.grad_loss(item)
-            # grad_loss = model.grad_loss(item).logsumexp(0)
-            # grad_loss = xx.logsumexp(0)+xx.mean(0)
             grad_loss = xx.mean(0)
-            # model.grad_loss(item).logsumexp(0)
-            # mean()
             loss = model.loss(item).mean()
             # loss.mean()
             loss_train_sum += float(loss.item())
@@ -511,7 +368,6 @@ def main():
             conf.optimizer.step()
             conf.callback_step(epoch,(tri,item),loss)
         conf.callback_end(epoch,(tri,item),loss)
-
 
         if hasattr(model,'get_hidden'):
             fs_list = []
