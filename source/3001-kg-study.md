@@ -10,6 +10,8 @@
 
 ## 传统KG视角对实体关系的定义
 
+参考综述文章[Wang2017](https://persagen.com/files/misc/Wang2017Knowledge.pdf)
+
 TransE, 基于线性关系的定义 $H + \mu_R = T$,可以被扩展成为一个高斯形式,也就是假设 $(H-T) \sim Gaussian(\mu_R,\Sigma_R)$ ,也就是一个双线性的能量函数
 
 $$
@@ -77,6 +79,9 @@ $$
 
 要求 $W_R$是对角矩阵
 
+### NTN: Neural Tensor Network
+
+[2013,Reasoning With Neural Tensor Networksfor Knowledge Base Completion](https://proceedings.neurips.cc/paper/2013/file/b337e84de8752b27eda3a12363109e80-Paper.pdf)
 
 ## 预训练语言模型中的知识
 
