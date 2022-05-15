@@ -1,6 +1,6 @@
 (self_attention)=
 
-# 1007: Self Attention 自注意力机制
+# 1007: Self Attention 自注意力机制 20220428
 
 - 函数全称: Self Attention 自注意力
 
@@ -247,8 +247,8 @@ kattention注意力头具有多个参数
 
 $$
 \begin{align}
-E & \text{for embedding dimension}\\
-D &\text{for relational dimension}\\
+E & \text{ for embedding dimension}\\
+D &\text{ for relational dimension}\\
 Q &\in R^{E \times D} \\
 K &\in R^{E \times D} \\
 b &\in R^D
@@ -280,3 +280,9 @@ $$
 - Kattention看起来像是Mean-Squared-Error在线性空间上的推广额.
 
 (timestamp 20220427)
+
+## Transformer and model mixing
+
+Transformer uses a dynamic model to predict the missing word. In practice, selecting the best word is much easier than a
+predicting the exact word.  Here the words candidates are model candidates. For a transformer, the
+candidates are words.

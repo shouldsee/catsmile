@@ -23,7 +23,10 @@ numbered: 0
 1005-hmm-overview.md
 1006-jacobian-matrix.md
 1007-self-attention.md
+1009-cshn.md
 3001-kg-study.md
+3002-seq-hidden-states.md
+3005-neural-nets.md
 8001-intro.md
 8500-pytorch-common-problems.md
 8800-pytorch-debug-utils.md
