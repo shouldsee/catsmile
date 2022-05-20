@@ -1,10 +1,7 @@
 '''
 - Author: Feng Geng
 - Changelog:
-  - 20220507-20220514: for (dataset=ArithmeticTest, model=AddModelWithAttention),
-  tested different parameters. use_dense_relu=1/11 shows interesting capacity.
-  per-position dropout greatly prevents overfitting for unknown reason.
-  - 思考: 模型的内部计算经常是梯度的,但是模型参数的更新一般是基于梯度的.这不知道是否矛盾.
+  - Objective: 对首都模板进行采样
 '''
 import torch
 import torch.nn as nn
@@ -29,103 +26,112 @@ from markov_lm.c9007_util import tbuf_cls,fws,recur_detach
 from markov_lm.Dataset.translation_dataset import ArithmeticTest
 from markov_lm.Model_add import AddModelWithBert
 from markov_lm.Model_add import AddModelWithAttention
-
+from markov_lm.conf_gan import ConfigPrototype
 
 import collections
 import math
 
-class ConfigPrototype(object):
-    def __init__(self,is_sorted=False):
-        self.is_sorted = is_sorted
-        self._session_name = None
-        self.is_model_set = False
-        self.f = open(__file__+'.log.html','w')
-        self.tbuf = tbuf_cls()
-        self.s = collections.OrderedDict()
-        return
+### step1 Load bert-base-chinese
 
-    def data_input_transform(self,item):
-        raise NotImplementedError
-    def get_ckpt_name(self):
-        return self.__class__.__name__
+### Calculate
 
-    def _print(self,*x):
-        f=  self.f
-    # _print = lambda *x,f=f:
-        f.write(f'<pre>{"".join(x)}</pre>\n')
+def score_simple(model, seqs):
+    '''
+    Returns the un-normalised score for a given sequence
+    A higher score means higher probability
+    '''
 
-    def init_s(self,k,v):
-        s = self.s
-        if k not in s:
-            s[k]=[k,list(v.shape)]
-        return
-    def grad_loss(self,*a,**kw):
-        return self.loss(*a,**kw)
-    def loss(self,*a,**kw):
-        raise NotImplementedError
+    ### returns the final layer hidden_states
 
-    def callback_epoch_start(self,epoch):
+    embedded = model.submodel[0].embeddings(seqs)
+    xsa = model.forward(dict(masked=seqs))[-1][-1]
+    ll_per_pos  = (xsa * embedded[:,1:-1]).sum(-1)
+    ll = ll_per_pos.mean(-1)
+    return ll
+
+def score_raw(model, seqs):
+    '''
+    Returns the un-normalised score for a given sequence
+    A higher score means higher probability
+    '''
+
+    ### returns the final layer hidden_states
+
+    embedded = model.submodel[0].embeddings(seqs)
+    # embedded.repeat()
+    xsa = model.forward(dict(masked=seqs))[-1][-1]
+    ll_per_pos  = (xsa * embedded[:,1:-1]).sum(-1)
+    ll = ll_per_pos.mean(-1)
+    return ll
+
+
+#
+from markov_lm.Model_add import AddModelBertInterface, AddModelBertInterfaceConfig
+
+def main():
+
+    CUDA    = ('--cpu' not in sys.argv)
+    # conf    = init_conf(CUDA,shuffle=True)
+    conf    = ConfigPrototype(__file__)
+    # model   = conf.model
+    # dataset = conf.dataset
+
+
+    conf.rngseed= 29
+    torch.manual_seed(conf.rngseed)
+    conf.embed_dim     = 50
+    conf.device        = device =  torch.device('cuda:0' if CUDA else 'cpu')
+    conf.num_epoch     = 5000
+    conf.learning_rate = 0.001
+    conf.batch_size    = 60
+    add_optimizer      = lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
+
+    conf.task = 'refill'
+    conf.shuffle = 0
+    # if conf.task=='refill':
+    #     from markov_lm.Dataset.translation_dataset import RefillDataset
+    #     conf.dataset = dataset =RefillDataset(CUDA=CUDA)
+    #     conf.data_input_transform = lambda item:dict(unmasked = item['english'],masked=item['masked'], mask=item['mask'])
+    #
+    #
+    #     conf.loss = lambda item:conf.model.loss(item)
+    #     conf.grad_loss = lambda item:conf.model.loss(item)
+    #     conf.callback_epoch_start = lambda epoch: conf.dataset.op_extract_and_mask(n_mask=4)
+    #     conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=conf.shuffle)
+
+
+    # CLS[0] = AddModelBertInterface
+    conf.config = AddModelBertInterfaceConfig(
+        embed_dim=100,
+        # graph_dim =-1,# inferfrom pre-trained model
+        # graph_dim=dataset.graph_dim,
+        graph_dim = 1,
+        pretrain_model_name='bert-base-chinese',
+        # mask_token_idx = dataset.mask_token_idx,
+        mask_token_idx = -1,
+        use_original_embedding=0,
+        attach = 0,
+        )
+    class AddModelBertInterface_temp(AddModelBertInterface):
         pass
+    ### use the charset of the model itself
+    conf.model = model = conf.config.to_model(device,charset=None)
+    # score(model, model.tok[0].tokenize('中国的首都是北京'))
+    xtks= '中国的首都是北京,中国的首都是上海,中国的首都是巴黎,法国的首都是巴黎,日本的首都是东京'.split(',')
+    xe = model.tok[0](xtks,return_tensors='pt')['input_ids'][:,1:-1].to(conf.device)
+    for score in [score_simple,score_raw]:
+        # print(score.func_code.__name__)
+        print('-'*20)
+        print(score.__code__.co_name)
+        xs = score(model, xe)
+        for xee,xss in zip(xtks,xs):
+            print(fws('%.3f'%xss,10),xee)
+    assert 0
 
 
-    def callback_step(self,epoch,indexedItem,loss):
-        pass
-        tri,item = indexedItem
-        f = self.f
-        t = self.handler
-        s = self.s
-        _print = self._print
-        for k,v in t.xdict.items():
-            mae = v.abs().mean().item()
-            # s.setdefault(k,[])
-            if k not in s:
-                s[k]=[k,list(v.shape)]
-            ss = s[k]
-            ss.append(mae*1000)
-            # ss.append(fws('%.3f'%mae,10))
-            # print(v.id)
-            # _print(fws(k,15)+fws(list(v.shape),10)+fws('%.3f'%mae,10))
+    lsl = get_model_test_loss(conf)
 
-        opt = self.optimizer
-        for p,v in opt.state.items():
-            k = id(p)
-            if k not in s:
-                s[k] = [id(p),list(getattr(p,'shape',[1]))]
-            s[k].append( (1000*v.get('square_avg',torch.tensor(0.)).mean().item()))
-
-    def callback_start(self,epoch,a,b):
-        pass
-    def callback_end(self,epoch,indexedItem,loss):
-        s = self.s
-        f = self.f
-        is_sorted = self.is_sorted
-        _print = self._print
-        _print(f'Epoch{epoch}.Model-{self._session_name}.{loss}')
-        CONFIG_HIDE = -100000000
-        def _str(x,s):
-            if isinstance(x,float):
-                if x >CONFIG_HIDE:
-                    x ='%.3f'%x
-                else:
-                    x = ''
-            else:
-                pass
-            return fws(x,s)
-
-        wsl = [20,20] + [5]*30
-        ks = list(s)
-        if self.is_sorted:
-            ks = sorted(ks)
-        for k in ks:
-            v = s.pop(k)
-            _print(*[_str(vv,ws)+'|'+' ' for  vv, ws in zip(v,wsl)])
-            _print('-'*15*len(v))
-
-        # x = ['bias.1000']+list((1000*self.model.att_dense.bias).int().cpu().detach().numpy()[:10])
-        # _print(*[_str(vv,10)+'|'+' '*3 for vv in x])
-        _print('='*35)
-        f.flush()
-
+    print(lsl[:,1].mean())
 
 def parse_checkpoint(sys,):
     if '--auto' in sys.argv:
@@ -149,44 +155,37 @@ def parse_checkpoint(sys,):
     return LOAD
 
 
-def add_hook_for_output_tensor(model,CONFIG_EXPAND_LEVEL,CONFIG_DETACH, CONFIG_PRINT_CLASS):
+def get_model_test_loss(conf):
     '''
-
-    returns a temp object with a dict of tensors outputted at each nn.Module with maximum depth of CONFIG_EXPAND_LEVEL.
+    For each test entry, obtain model's prediction loss, as a dict{index:loss}
+    This is for evaluation of models performance
     '''
-    class Temp(object):
-        xdict = collections.OrderedDict()
-        handles = []
-        def __init__(self,):
-            pass
-            # self.xdict= xdict
-        def remove_hooks(self):
-            # ,handles= handles):
-             [h.remove() for h in self.handles]
-    t = Temp()
-    handles = t.handles
-    xdict = t.xdict
+    model                = conf.model
+    dataset              = conf.dataset
+    loss                 = conf.loss
+    data_input_transform = conf.data_input_transform
+    dataloader           = conf.dataloader
+
+    model.eval()
+    dataset.test()
+    index = []
+    lsl = []
+    for tsi,item in enumerate(dataloader):
+        item = data_input_transform(item)
+        _loss = loss(item).detach()
+        if _loss.shape.__len__()>=2:
+            _loss = _loss.mean(item.shape[1:])
+        index.append(item['index'].to(_loss.device))
+        lsl.append(_loss)
+        # item['losses'])
+    index = torch.cat(index,dim=0)
+    lsl   = torch.cat(lsl,dim=0)
+    st = index.argsort()
+    v = torch.stack([index,lsl],dim=1)[st,:]
+    return v
 
 
-    def get_backward_hook(name,xdict=xdict):
-        # def hook(model, input_grad, output_grad):
-        def hook(output_grad):
-            recur_detach(xdict,name,output_grad,CONFIG_DETACH,'/')
-            # xdict[name] = output
-        return hook
-
-    '注入灵魂'
-    for k,v in model.named_parameters():
-        if k.count('.')<=CONFIG_EXPAND_LEVEL:
-            if CONFIG_PRINT_CLASS:
-                print(fws(k,60) ,v.__class__);
-            h = v.register_hook(get_backward_hook(k))
-            # h = v.register_full_backward_hook(get_backward_hook(k))
-            handles.append(h)
-
-    return t
-
-def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONITOR_HOOK=1):
+def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONITOR_HOOK=0):
     '''
     Runtime subclassing AddModelWithAttention()
 
@@ -205,9 +204,9 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
     # conf.task = 'ner1'
     conf.task = 'duie-mlm'
 
-    conf.instance= 29
+    conf.rngseed= 29
 
-    torch.manual_seed(conf.instance)
+    torch.manual_seed(conf.rngseed)
     conf.embed_dim     = 50
     conf.device        =  torch.device('cuda:0' if CUDA else 'cpu')
     conf.num_epoch     = 5000
@@ -218,51 +217,52 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
 
     conf.SAVE_INTERVAL = 5
     conf.tsi_max = -1
-    # print(conf.task)
-    # conf.task='UNK'
 
-    torch.manual_seed(conf.instance)
-    if conf.task=='refill':
-        from markov_lm.Dataset.translation_dataset import RefillDataset
-        conf.dataset = dataset =RefillDataset(CUDA=CUDA)
-        conf.data_input_transform = lambda item:dict(unmasked = item['english'],masked=item['masked'], mask=item['mask'])
+    if 0:
+        pass
+        # torch.manual_seed(conf.rngseed)
+        # if conf.task=='refill':
+        #     from markov_lm.Dataset.translation_dataset import RefillDataset
+        #     conf.dataset = dataset =RefillDataset(CUDA=CUDA)
+        #     conf.data_input_transform = lambda item:dict(unmasked = item['english'],masked=item['masked'], mask=item['mask'])
+        #
+        #     conf.loss = lambda item:conf.model.loss(item)
+        #     conf.grad_loss = lambda item:conf.model.loss(item)
+        #     conf.callback_epoch_start = lambda epoch: conf.dataset.op_extract_and_mask(n_mask=4)
+        #     conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
+        #
+        #
+        # elif conf.task=='add':
+        #     ### This is a random dataset !!!! init after random seed is set
+        #     conf.dataset = dataset = ArithmeticTest(CUDA=CUDA)
+        #     # import pdb;
+        #     conf.data_input_transform = lambda item: dict(unmasked = item['unmasked'],masked=item['masked'], mask=item['mask']);
+        #
+        #     conf.loss = lambda item:conf.model.loss(item)
+        #     conf.grad_loss = lambda item:conf.model.loss(item)
+        #
+        #     ### test dataset works
+        #     conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
+        #     # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
+        # elif conf.task in 'ner1 duie-mlm'.split():
+        #     from markov_lm.Dataset.DUIE_NER import DUIE_NER
+        #     ### This is a random dataset !!!! init after random seed is set
+        #     conf.dataset = dataset = DUIE_NER(CUDA=CUDA,task_mode=conf.task)
+        #     conf.data_input_transform = lambda item: item
+        #     conf.loss = lambda item:conf.model.loss(item)
+        #     conf.grad_loss = lambda item:conf.model.loss(item)
+        #
+        #     ### test dataset works
+        #     conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
+        #     if conf.task=='duie-mlm':
+        #         conf.callback_epoch_start = lambda epoch: conf.dataset.op_sample_mask(n_mask=10)
+        #         # conf.
+        #     # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
+        # else:
+        #     raise NotImplementedError(conf.task)
+        #     # op_extract_and_mask
+        # (conf.dataset[range(5)])
 
-        conf.loss = lambda item:conf.model.loss(item)
-        conf.grad_loss = lambda item:conf.model.loss(item)
-        conf.callback_epoch_start = lambda epoch: conf.dataset.op_extract_and_mask(n_mask=4)
-        conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
-
-
-    elif conf.task=='add':
-        ### This is a random dataset !!!! init after random seed is set
-        conf.dataset = dataset = ArithmeticTest(CUDA=CUDA)
-        # import pdb;
-        conf.data_input_transform = lambda item: dict(unmasked = item['unmasked'],masked=item['masked'], mask=item['mask']);
-
-        conf.loss = lambda item:conf.model.loss(item)
-        conf.grad_loss = lambda item:conf.model.loss(item)
-
-        ### test dataset works
-        conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
-        # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
-    elif conf.task in 'ner1 duie-mlm'.split():
-        from markov_lm.Dataset.DUIE_NER import DUIE_NER
-        ### This is a random dataset !!!! init after random seed is set
-        conf.dataset = dataset = DUIE_NER(CUDA=CUDA,task_mode=conf.task)
-        conf.data_input_transform = lambda item: item
-        conf.loss = lambda item:conf.model.loss(item)
-        conf.grad_loss = lambda item:conf.model.loss(item)
-
-        ### test dataset works
-        conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
-        if conf.task=='duie-mlm':
-            conf.callback_epoch_start = lambda epoch: conf.dataset.op_sample_mask(n_mask=10)
-            # conf.
-        # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
-    else:
-        raise NotImplementedError(conf.task)
-        # op_extract_and_mask
-    (conf.dataset[range(5)])
 
     # '''
     # now specify model
@@ -299,7 +299,7 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
             use_gradnorm   = conf.use_gradnorm,
             use_input_image= conf.use_input_image,
             embed_dim      = conf.embed_dim,device=conf.device,
-            kernel_dim     = conf.kernel_dim,
+            kernel_dim = conf.kernel_dim,
             iter_per_layer = conf.iter_per_layer,
             mask_token_idx = dataset.mask_token_idx,
             n_choice       = conf.n_choice,# RefillLoss()
@@ -365,70 +365,6 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         # model.reset_parameters()
 
 
-    if 0:
-        '''
-        Adapter for RefillModelRNNConvolve
-        '''
-        conf.use_dropout= 0.0
-        conf.use_dense_relu = 13
-        conf.use_layernorm = 0
-        conf.use_gradnorm = 0
-        conf.use_input_image =0
-
-        conf.kernel_size = 5
-        conf.depth = 12
-        conf.embed_dim = 40
-        conf.use_mixture=0
-        assert conf.is_model_set is False
-        conf.is_model_set =True
-
-        from markov_lm.Model_Refill import RefillModelRNNConvolve
-        def _add_model(conf):
-            conf.state_count   = conf.kernel_size
-            conf.mixture_count = conf.kernel_size
-            conf.model = model = RefillModelRNNConvolve(
-                # total_length=conf.dataset.total_length(),
-                total_length=1,
-                # conf.dataset.total_length(),
-                # min_len=dataset.min_len,
-                min_len=-1,
-                    # dataset.min_len,
-
-                graph_dim     = dataset.graph_dim,
-                mixture_count = conf.mixture_count,
-                use_mixture   = conf.use_mixture,
-                state_count   = conf.state_count,embed_dim=conf.embed_dim,device=conf.device,mask_token_idx=dataset.mask_token_idx)
-
-            conf.model.use_mask = True
-            # english_vocab['<mask>'])
-            return model
-        # conf.data_input_transform = lambda item:dict(unmasked = item['english'],masked=item['masked'], mask=item['mask'])
-        conf.data_input_transform = lambda item:item
-        if conf.task=='refill':
-            conf.loss = lambda item:conf.model.loss(
-                x    = item['english'],
-                zi   = item['index'],
-                y    = item['extracted'],
-                z    = item['masked'],
-                mask = item['mask'])
-            conf.grad_loss = conf.loss
-            conf.callback_epoch_start = lambda epoch: conf.dataset.op_extract_and_mask(n_mask=4)
-        elif conf.task in 'add ner1 duie-mlm'.split():
-            conf.loss = lambda item:conf.model.loss(
-                x    = item['unmasked'],
-                # zi   = item['index'],
-                zi = None,
-                y = None,
-                # y    = item['extracted'],
-                z    = item['masked'],
-                mask = item['mask'])
-            conf.grad_loss = conf.loss
-        #lambda item:conf.loss(item)
-        conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
-
-        conf.is_model_set =True
-
-
     # _add_model(conf)
     if isinstance(conf.model,AddModelWithAttention):
         def callback(outer,inner):
@@ -457,7 +393,6 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
                 conf.s[k]  = [k]
                 # for k,v in conf.s.items():
                 #     print(k,len(v))
-
                 # conf._print(*[fws(xx,10) + '  ' for xx in  lptok[i].argmax(-1).detach().cpu().numpy()])
         conf.model.callback_end = callback
 
@@ -466,12 +401,13 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
     [TBC]
     '''
 
-    conf._session_name +=  f'-S{conf.instance}'
+
+    conf._session_name +=  f'-S{conf.rngseed}'
     conf._session_name += f'-task{conf.task}-shuffle{int(shuffle)}'
     conf._session_name += f'-{conf.model.__class__.__name__}-D{conf.depth}-E{conf.embed_dim}-K{conf.kernel_size}-KE{conf.kernel_dim}-IPL{conf.iter_per_layer}-'
     conf._session_name += f'DenseRelu{conf.use_dense_relu}-Layernorm{conf.use_layernorm}-Dropout{conf.use_dropout}-Gradnorm{conf.use_gradnorm}-loglr{math.log10(conf.learning_rate):.1f}'
     conf._session_name += f'-nchoice{conf.model.n_choice}' if conf.n_choice else ''
-    conf._session_name += f'-UseInputImage{conf.use_input_image}-1i{conf.instance}'
+    conf._session_name += f'-UseInputImage{conf.use_input_image}-1i{conf.rngseed}'
     # try:
     #     conf._session_name+= '-'+conf.lconf.to_alias()
     # except:
@@ -494,42 +430,10 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
     assert conf._session_name is not None,'Please set conf._session_name before finish init!'
     return conf
 
-def get_model_test_loss(conf):
-    '''
-    For each test entry, obtain model's prediction loss, as a dict{index:loss}
-    This is for evaluation of models performance
-    '''
-    model                = conf.model
-    dataset              = conf.dataset
-    loss                 = conf.loss
-    data_input_transform = conf.data_input_transform
-    dataloader           = conf.dataloader
 
-    model.eval()
-    dataset.test()
-    index = []
-    lsl = []
-    for tsi,item in enumerate(dataloader):
-        item = data_input_transform(item)
-        _loss = loss(item).detach()
-        if _loss.shape.__len__()>=2:
-            _loss = _loss.mean(item.shape[1:])
-        index.append(item['index'].to(_loss.device))
-        lsl.append(_loss)
-        # item['losses'])
-    index = torch.cat(index,dim=0)
-    lsl   = torch.cat(lsl,dim=0)
-    st = index.argsort()
-    v = torch.stack([index,lsl],dim=1)[st,:]
-
-    return v
         # loss_test_sum +=  float(loss.item())
 
-def main():
-    CUDA    = ('--cpu' not in sys.argv)
-    conf    = init_conf(CUDA,shuffle=True)
-    model   = conf.model
-    dataset = conf.dataset
+def _main():
 
     CKPT = parse_checkpoint(sys,)
     if(CKPT!='-1'):

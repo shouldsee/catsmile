@@ -29,37 +29,48 @@ xs = []
 # # xs += glob('Checkpoints/*Cluster*.pkl')
 # xs += glob('Checkpoints/*RNNMixture*.pkl')
 # xs += glob('Checkpoints/*MixedEmissionMatrix*.pkl')
-xs += glob('Checkpoints/*AddModel*.pkl')
+xs += glob('Checkpoints/*.pkl')
 # print(xs)
 # xs += glob('Checkpoints/*WithBert*.pkl')
 # xs += glob('Checkpoints/*WithLinearAttention*.pkl')
-xs = [xx for xx in xs if '-I3-' not in xx]
-xs = [xx for xx in xs if '-I4-' not in xx]
-# xs = [xx for xx in xs if '-I5-' not in xx]
-xs = [xx for xx in xs if 'SimpleUpdate' not in xx]
-xs = [xx for xx in xs if '-1I'  in xx]
-# xs = [xx for xx in xs if 'DenseRelu1'  in xx]
-xs = [
-xx for xx in xs
-if 0
-# or '-1I18'  in xx
-# or '-1I19' in xx
-# or '-1I20' in xx
-# or '-1I21' in xx
+if 1:
+    # xs = [xx for xx in xs if 'taskrefill' in xx]
+    # xs = [xx for xx in xs if 'taskner1' in xx]
+    xs = [xx for xx in xs if 'duie-mlm' in xx]
+    YLIM = (None,None)
+    YLIM = (0,10)
+# YLIM = (N)
+if 0:
+    YLIM = (None,None)
+    # YLIM = (0,1)
+# None,None)
+    xs = [xx for xx in xs if '-I3-' not in xx]
+    xs = [xx for xx in xs if '-I4-' not in xx]
+    # xs = [xx for xx in xs if '-I5-' not in xx]
+    xs = [xx for xx in xs if 'SimpleUpdate' not in xx]
+    # xs = [xx for xx in xs if '-1I'  in xx]
+    # xs = [xx for xx in xs if 'DenseRelu1'  in xx]
+    xs = [
+    xx for xx in xs
+    if 0
+    # or '-1I18'  in xx
+    # or '-1I19' in xx
+    # or '-1I20' in xx
+    # or '-1I21' in xx
 
-# or '-1I22' in xx
-# or '-1I23' in xx
-# or '-1I24' in xx
-# or '-1I25' in xx  #### NIGHTMARE SEED
+    # or '-1I22' in xx
+    # or '-1I23' in xx
+    # or '-1I24' in xx
+    # or '-1I25' in xx  #### NIGHTMARE SEED
 
-# or '-1I26' in xx
-# or '-1I27' in xx
-# or '-1I28' in xx
-or '-1I29' in xx
+    # or '-1I26' in xx
+    # or '-1I27' in xx
+    # or '-1I28' in xx
+    or '-1I29' in xx.upper()
 
-# or '-1I24' in xx
+    # or '-1I24' in xx
 
-]
+    ]
 xs = sorted(xs)
 ys = defaultdict(lambda:[])
 HTML_FILE = __file__+'.html'
@@ -94,14 +105,17 @@ with open(HTML_FILE+'.temp','w') as f:
         # if ys[-1]<MIN_YS:
         #     continue
         ys = np.array(ys)
-        ys = (ys[:-2] + ys[1:-1] + ys[2:])/3.
+        # ys = (ys[:-2] + ys[1:-1] + ys[2:])/3.
+        # xs = xs[:-2]
+        ys = (0 + ys[:-1] + ys[1:])/2.
+        xs = xs[:-1]
         if not len(ys):
             continue
 
-        plt.plot(xs[:-2],ys,label=f'loss{ys[-1]:.3f}-{base}')
+        plt.plot(xs,ys,label=f'loss{ys[-1]:.3f}-{base}')
     plt.xlim(10,1000)
     # plt.ylim(0,2)
-    plt.ylim(0,1.0)
+    plt.ylim(*YLIM)
     plt.hlines(0.060,0,1000,colors='r',linestyles='--')
     # plt.ylim(0,1.5)
     plt.legend()

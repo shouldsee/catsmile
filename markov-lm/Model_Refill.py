@@ -1557,7 +1557,8 @@ class RefillModelRNNConvolve(RefillModelRNNBase):
         state_count,
         total_length,
         min_len,
-        mask_token_idx):
+        mask_token_idx,
+        use_mixture=1):
 
         state_count = 1
         super().__init__(
@@ -1592,19 +1593,20 @@ class RefillModelRNNConvolve(RefillModelRNNBase):
         self.att_kernel = nn.Linear(embed_dim,embed_dim).to(self.device)
         self.att_energy = nn.Linear(embed_dim,embed_dim).to(self.device)
         self.att_prob   = nn.Linear(embed_dim,embed_dim).to(self.device)
+        self.use_mixture= use_mixture
         self.fs_type    = 'lptok'
 
     def _batch_init(self,zi,x,y,z):
         #### batch_init part
         ### state init
         z = self.embed(z)
-        y = self.embed(y)
         # xs = torch.cat([y,init_state],dim=1)
         xsa = self.init_state.weight.T[None,0:1]
         xsa = xsa.repeat((len(z),z.size(1),1))
         xsa = self.norm(xsa)
-
-        y  = self.norm(y)
+        if y is not None:
+            y = self.embed(y)
+            y  = self.norm(y)
         z  = self.norm(z)
         fs = self.vocab(xsa)*0
         # fs = torch.tensor([],requires_grad=True).to(self.device)
@@ -1645,8 +1647,10 @@ class RefillModelRNNConvolve(RefillModelRNNBase):
         inner = [i,sel,xz,xsa]
         return outer,inner
 
+    def loss(self,zi,x,y,z,mask =None):
+        return self._loss(zi,x,y,z,out='loss',mask =mask)
 
-    def _loss(self,zi,x,y,z,out='loss'):
+    def _loss(self,zi,x,y,z,out='loss',mask =None):
         assert out in 'loss token traj'.split()
 
         outer,inner = self._batch_init(zi,x,y,z)
@@ -1662,7 +1666,7 @@ class RefillModelRNNConvolve(RefillModelRNNBase):
         #     outer,inner = self._step(outer,inner) #### do what ever with your hidden state
         #     self.callback_step(outer,inner)
 
-        self.callback_end(outer)
+        self.callback_end(outer,)
         (zi,x,y,z,lptok) = outer
         (i,sel,xz,xsa) = inner
         # lptok = self.vocab(xsa.matmul(self.updater.weight)).log_softmax(-1)
@@ -1670,18 +1674,25 @@ class RefillModelRNNConvolve(RefillModelRNNBase):
         # # .matmul(self.emittor.weight)
         # f2 = self.vocab(z).log_softmax(-1)
         # sel = self.emittor(xsa)[:,:,0].sigmoid()
-
-        xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
-        xkey_dynamic= self.xkey_dynamic(y)
-        xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+        if self.use_mixture:
+            xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
+            xkey_dynamic= self.xkey_dynamic(y)
+            xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
+            # import pdb; pdb.set_trace()
+            cand= torch.cat([ self.emittor(xsa)[:,:,None], z[:,:,None],y[:,None,:,:].repeat((1,L,1,1))],dim=2)
+            sel = xsa.matmul(xkey.transpose(2,1)).log_softmax(-1)
+            lptok = self.vocab(cand).log_softmax(-1)
+            lptok = (sel[:,:,:,None] + lptok).logsumexp(-2)
         # import pdb; pdb.set_trace()
-        cand= torch.cat([ self.emittor(xsa)[:,:,None], z[:,:,None],y[:,None,:,:].repeat((1,L,1,1))],dim=2)
-        sel = xsa.matmul(xkey.transpose(2,1)).log_softmax(-1)
-        lptok = self.vocab(cand).log_softmax(-1)
-        lptok = (sel[:,:,:,None] + lptok).logsumexp(-2)
-        # import pdb; pdb.set_trace()
-        # lptok = self.vocab(xsa.matmul(self.emittor.weight)).log_softmax(-1)
-
+        else:
+            if self.use_mask:
+                _mask = mask[:,:,None].repeat((1,1, xsa.shape[2]))
+                # lptok= torch.gather(lptok,index=mask[:,:,None].repeat((1,1,lptok.shape[2])),dim=1)
+                lptok = self.vocab(torch.gather(xsa,index=_mask,dim=1).matmul(self.emittor.weight)).log_softmax(-1)
+                x    = torch.gather(x,index=mask[:,:],dim=1)
+                # print(lptok.shape,x.shape)
+            else:
+                lptok = self.vocab(xsa.matmul(self.emittor.weight)).log_softmax(-1)
         cent = self.target_energy(lptok,x)
         loss  = -cent.mean(-1)
         # if out=='token': return lptok

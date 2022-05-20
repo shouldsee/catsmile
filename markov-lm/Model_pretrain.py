@@ -10,15 +10,28 @@ from transformers.models.bert.modeling_bert import BertLayer
 from transformers.models.bert.modeling_bert import BertLayer,BertIntermediate,BertOutput
 
 
-PKL = __file__+'.temp.pkl'
-if os.path.exists(PKL):
-    tokenizer,model = torch.load(PKL)
-else:
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-    model = AutoModel.from_pretrained("bert-base-uncased")
-    torch.save((tokenizer,model),PKL)
-BertTok = tokenizer
-BertModel = model
+modelName = "bert-base-uncased"
+__mode__ = __name__
+def lazy_load_pretrain_model(modelName):
+    PKL =f'{__file__}.{modelName}.pkl'
+    if os.path.exists(PKL):
+        tokenizer,model = torch.load(PKL)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(modelName)
+        model = AutoModel.from_pretrained(modelName)
+        torch.save((tokenizer,model),PKL)
+    return tokenizer,model
+
+if __mode__ =='__test__':
+    modelName = "bert-base-uncased"
+    BertTok,BertModel= BertBaseUncased = lazy_load_pretrain_model(modelName)
+
+    modelName = "bert-base-chinese"
+    BertBaseChinese = lazy_load_pretrain_model(modelName)
+    list_of_sents = '你中,中国,国国,国[MASK]'.split(',')
+    BertBaseChinese[1](BertBaseChinese[0](list_of_sents,return_tensors='pt')['input_ids'])
+
+
 
 class NoAttention(nn.Module):
     '''

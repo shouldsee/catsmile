@@ -83,8 +83,10 @@ class RefillModelRNNBase(nn.Module):
     def callback_step(self,outer,inner):
         [zi,x,y,z,fs],[i,sel,xz,xs] = outer,inner
         return
+
     def callback_init(self,outer,inner):
         return
+
     def callback_end(self,outer,inner):
         return
         # self.callback_init = lambda zi,x,y,z,sel: None
@@ -1630,7 +1632,7 @@ class RefillModelDynamicRNN(RefillModelRNNBase):
         lptok = fs.matmul(emittor.transpose(1,0)).log_softmax(-1)
         outer[4] = lptok
         # import pdb; pdb.set_trace()
-        # outer = (zi,x,y,z,lptok) 
+        # outer = (zi,x,y,z,lptok)
         self.callback_end(outer,inner)
         # emittor = self.xkey_dynamic(fs[:,-1:])
         # # emittor = self.xkey_static.weight[:2,:self.embed_dim]
