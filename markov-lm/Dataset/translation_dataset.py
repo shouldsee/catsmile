@@ -9,6 +9,9 @@ from tqdm import tqdm
 import random
 import time
 
+from markov_lm.Model_pretrain import lazy_load_pretrain_model
+modelName = "bert-base-uncased"
+BertTok,BertModel= BertBaseUncased = lazy_load_pretrain_model(modelName)
 
 # source_lang_file = "German_sentences.pkl"
 # dest_lang_file  = "English_sentences.pkl"
@@ -111,6 +114,8 @@ class RefillDataset(EnglishToGermanDataset):
         self.english_vocab_reversed.append('<mask>')
         self.english_vocab['<mask>'] =idx
         self.op_extract_and_mask(2)
+        self.graph_dim = self.english_vocab_len
+        self.mask_token_idx=idx
 
     def op_extract_and_mask(self,n_mask):
         #### randomly take out tokens and put mask at its position
@@ -121,12 +126,16 @@ class RefillDataset(EnglishToGermanDataset):
         idx = torch.tensor(idx).to(self.device)
         y = torch.gather(x,index=idx,dim=1)
         z = x.clone()
+        # print(idx)
         z = torch.scatter(z,index=idx,dim=1,src=torch.tensor(self.english_vocab['<mask>']).to(self.device)[None,None].repeat(idx.shape))
         # import pdb; pdb.set_trace()
         self.english_extracted_train = y[train_idx]
         self.english_masked_train = z[train_idx]
         self.english_extracted_test = y[test_idx]
         self.english_masked_test = z[test_idx]
+        self.mask_index_train = idx[train_idx]
+        self.mask_index_test  = idx[test_idx]
+        # import pdb; pdb.set_trace()
         # print(z[train_idx].shape,z[test_idx].shape)
         # print(self.english_sentences_train.shape, self.english_sentences_test.shape)
     def __getitem__(self, idx):
@@ -138,12 +147,14 @@ class RefillDataset(EnglishToGermanDataset):
             x = english_item = self.english_sentences_test[idx]
             extracted = self.english_extracted_test[idx]
             masked    = self.english_masked_test[idx]
+            mask_index= self.mask_index_test[idx]
         else:
             # print(f'[training]{idx}')
             german_item = self.german_sentences_train[idx]
             x = english_item = self.english_sentences_train[idx]
             extracted = self.english_extracted_train[idx]
             masked     = self.english_masked_train[idx]
+            mask_index= self.mask_index_train[idx]
         #
         # Tooo slow
         # # gl = german_logits*logit_mask
@@ -156,6 +167,7 @@ class RefillDataset(EnglishToGermanDataset):
                 "masked":masked,
                 "english":x,
                 "german":german_item,
+                "mask":mask_index,
                 }
                     # def __getitem__()
 
@@ -204,11 +216,11 @@ class ArithmeticTest(torch.utils.data.Dataset):
         self.device = torch.device('cpu' if not CUDA else 'cuda:0')
         out = out.to(self.device)
 
-        self.data = out
+        self.data = out.long()
         v = out
         vt = 20+ torch.randint(3,(len(v),1),device=self.device)
-        self.m = m = (1+((v==vt).max(1)[1]))
-        self.vm = torch.scatter(v, src=torch.ones(v.shape,device=self.device).int()*self.mask_token_idx, index=m[:,None],dim=1)
+        self.m = m = (1+((v==vt).max(1)[1]))[:,None].long()
+        self.vm = torch.scatter(v, src=torch.ones(v.shape,device=self.device).int()*self.mask_token_idx, index=m,dim=1).long()
 
 
     def test(self):
@@ -235,7 +247,7 @@ class ArithmeticTest(torch.utils.data.Dataset):
 dat = ArithmeticTest(1000)
 # dat[10:20]
 
-from markov_lm.Model_pretrain import BertTok,BertModel
+# from markov_lm.Model_pretrain import BertTok,BertModel
 import random
 import shutil
 
