@@ -15,6 +15,19 @@ from torch import autograd
 
 from markov_lm.util_html import write_png_tag
 
+
+import markov_lm
+FONT_PATH = os.path.join(markov_lm.__path__[0],'NotoSansCJK-Bold.ttc')
+import matplotlib;matplotlib.use('agg')
+import matplotlib.pyplot as plt
+# plt.style.use('ggplot')
+import matplotlib.font_manager as font_manager
+matplotlib.font_manager.fontManager.addfont(FONT_PATH)
+prop = font_manager.FontProperties(fname=FONT_PATH)
+matplotlib.rcParams['font.family'] = prop.get_name()
+plt.set_cmap('Set1')
+
+
 import sys
 import glob
 from pprint import pprint
@@ -31,19 +44,24 @@ from markov_lm.conf_gan import ConfigPrototype
 import collections
 import math
 
+
+
 ### step1 Load bert-base-chinese
 
 ### Calculate
 
 def score_simple(model, seqs):
     '''
-    Returns the un-normalised score for a given sequence
-    A higher score means higher probability
+    model.submodel[0] is a hugging face pre-trained bert-base-chinese
+    model is a wrapper to call bert forward layer
+    seqs is "input_ids" returned by transformers.AutoTokenizer.from_pretrained("bert-base-chinese")
+
+    mask no position, score with inner product
     '''
 
     ### returns the final layer hidden_states
 
-    embedded = model.submodel[0].embeddings(seqs)
+    embedded = model.submodel[0].embeddings.word_embeddings(seqs)
     xsa = model.forward(dict(masked=seqs))[-1][-1]
     ll_per_pos  = (xsa * embedded[:,1:-1]).sum(-1)
     ll = ll_per_pos.mean(-1)
@@ -51,20 +69,143 @@ def score_simple(model, seqs):
 
 def score_raw(model, seqs):
     '''
-    Returns the un-normalised score for a given sequence
-    A higher score means higher probability
+    mask each position, then score each position with inner product
     '''
 
     ### returns the final layer hidden_states
-
-    embedded = model.submodel[0].embeddings(seqs)
+    xm = model.submodel[0]
+    xt = model.tok[0]
+    embedded = xm.embeddings.word_embeddings(seqs)
+    # embedded = model.submodel[0].embeddings(seqs)
     # embedded.repeat()
-    xsa = model.forward(dict(masked=seqs))[-1][-1]
-    ll_per_pos  = (xsa * embedded[:,1:-1]).sum(-1)
+    B,L = seqs.shape[:2]
+    rseqs = seqs[:,None].repeat((1,L,1))
+    xe = (torch.eye(L,device=model.device).long()).unsqueeze(0)
+    mrseqs = rseqs * (1 - xe) + xe * xt.mask_token_id
+    # import pdb; pdb.set_trace()
+    mrseqs = mrseqs[:,1:-1]
+    xsa = model.forward(dict(masked=mrseqs.reshape(-1,L)))[-1][-1].reshape((B,L-2,L-2,-1))
+
+    xsaa = torch.gather(xsa, index=torch.arange(L-2,device=model.device)[None,:,None,None].repeat(B,1,1,xsa.shape[-1]),dim=2)[:,:,0]
+    ll_per_pos  = (xsaa * embedded[:,1:-1]).sum(-1)
+    ll = ll_per_pos.mean(-1)
+    return ll
+
+def score_norm(model, seqs):
+    '''
+    mask each position, then score each position with normalised log_softmax
+    '''
+
+    ### returns the final layer hidden_states
+    xm = model.submodel[0]
+    xt = model.tok[0]
+    embedded = xm.embeddings.word_embeddings(seqs)
+    # embedded = model.submodel[0].embeddings(seqs)
+    # embedded.repeat()
+    B,L = seqs.shape[:2]
+    rseqs = seqs[:,None].repeat((1,L,1))
+    xe = (torch.eye(L,device=model.device).long()).unsqueeze(0)
+    mrseqs = rseqs * (1 - xe) + xe * xt.mask_token_id
+    # import pdb; pdb.set_trace()
+    mrseqs = mrseqs[:,1:-1]
+    xsa = model.forward(dict(masked=mrseqs.reshape(-1,L)))[-1][-1].reshape((B,L-2,L-2,-1))
+
+    xsaa = torch.gather(xsa, index=torch.arange(L-2,device=model.device)[None,:,None,None].repeat(B,1,1,xsa.shape[-1]),dim=2)[:,:,0]
+    ll_per_pos  = model.target_energy((xsaa @ xm.embeddings.word_embeddings.weight.T).log_softmax(-1),seqs[:,1:-1])
     ll = ll_per_pos.mean(-1)
     return ll
 
 
+def score_4mask(model, seqs):
+    '''
+    mask the spaces to be filled.
+    '''
+    device = model.device
+    masks = torch.tensor([0,1,1,0,0,0,0,1,1,0],device=device).long()
+    ### returns the final layer hidden_states
+    xm = model.submodel[0]
+    xt = model.tok[0]
+    embedded = xm.embeddings.word_embeddings(seqs)
+    B,L = seqs.shape[:2]
+
+    rseqs = seqs
+    xe = masks[None,:]
+    mrseqs = rseqs * (1 - xe) + xe * xt.mask_token_id
+    mrseqs = mrseqs
+
+    xsa = model.forward(dict(masked=mrseqs))[-1][-1]
+    ll_per_pos  = (xsa * embedded[:,1:-1]).sum(-1)
+    ll = ll_per_pos.mean(-1)
+
+    return ll
+'''
+--------------------
+score_simple
+0.352      中国的首都是北京
+-0.345     中国的首都是上海
+0.066      中国的首都是巴黎
+0.156      法国的首都是巴黎
+0.009      日本的首都是东京
+-0.031     日本的首都是大阪
+-0.327     日本的首都是上海
+0.313      韩国的首都是上海
+0.573      韩国的首都是首尔
+-0.606     上海的首都是上海
+-0.160     法本的首都是巴京
+--------------------
+score_raw
+0.145      中国的首都是北京
+-0.304     中国的首都是上海
+-0.353     中国的首都是巴黎
+0.215      法国的首都是巴黎
+0.279      日本的首都是东京
+0.331      日本的首都是大阪
+-0.133     日本的首都是上海
+-0.205     韩国的首都是上海
+0.878      韩国的首都是首尔
+-0.659     上海的首都是上海
+-0.196     法本的首都是巴京
+--------------------
+score_norm
+0.181      中国的首都是北京
+-0.289     中国的首都是上海
+-0.443     中国的首都是巴黎
+0.087      法国的首都是巴黎
+0.178      日本的首都是东京
+0.316      日本的首都是大阪
+-0.035     日本的首都是上海
+-0.142     韩国的首都是上海
+0.846      韩国的首都是首尔
+-0.594     上海的首都是上海
+-0.105     法本的首都是巴京
+--------------------
+score_4mask
+0.025      中国的首都是北京
+-0.032     中国的首都是上海
+-0.068     中国的首都是巴黎
+0.051      法国的首都是巴黎
+-0.001     日本的首都是东京
+-0.194     日本的首都是大阪
+-0.038     日本的首都是上海
+0.060      韩国的首都是上海
+0.097      韩国的首都是首尔
+-0.043     上海的首都是上海
+0.144      法本的首都是巴京
+'''
+
+sents = '''
+0.025      中国的首都是北京
+-0.032     中国的首都是上海
+-0.068     中国的首都是巴黎
+0.051      法国的首都是巴黎
+-0.001     日本的首都是东京
+-0.194     日本的首都是大阪
+-0.038     日本的首都是上海
+0.060      韩国的首都是上海
+0.097      韩国的首都是首尔
+-0.043     上海的首都是上海
+0.144      法本的首都是巴京'''
+sents = [x.split()[1].strip() for x in sents.strip().splitlines()]
 #
 from markov_lm.Model_add import AddModelBertInterface, AddModelBertInterfaceConfig
 
@@ -117,15 +258,29 @@ def main():
     ### use the charset of the model itself
     conf.model = model = conf.config.to_model(device,charset=None)
     # score(model, model.tok[0].tokenize('中国的首都是北京'))
-    xtks= '中国的首都是北京,中国的首都是上海,中国的首都是巴黎,法国的首都是巴黎,日本的首都是东京'.split(',')
-    xe = model.tok[0](xtks,return_tensors='pt')['input_ids'][:,1:-1].to(conf.device)
-    for score in [score_simple,score_raw]:
+    # xtks= '中国的首都是北京,中国的首都是上海,中国的首都是巴黎,法国的首都是巴黎,日本的首都是东京'.split(',')
+    xtks = sents
+    xe = model.tok[0](xtks,return_tensors='pt')['input_ids'].to(conf.device)
+    vs = []
+    for score in [score_simple,score_raw,score_norm,score_4mask]:
         # print(score.func_code.__name__)
         print('-'*20)
-        print(score.__code__.co_name)
+        fn_name = score.__code__.co_name
+        print(fn_name)
         xs = score(model, xe)
+        xs = xs - xs.mean()
+        xs = xs.detach().cpu()
         for xee,xss in zip(xtks,xs):
             print(fws('%.3f'%xss,10),xee)
+        vs.append((fn_name,xs))
+
+    with open(__file__+'.html','w') as f:
+        plt.figure(figsize=[12,12])
+        for fn_name,xs in vs:
+            plt.plot(xs,range(len(xs)),label=fn_name)
+        plt.legend()
+        plt.yticks(range(len(xs)), xtks, rotation='horizontal')
+        f.write(write_png_tag(plt.gcf()))
     assert 0
 
 
