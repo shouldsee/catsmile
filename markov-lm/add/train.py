@@ -203,7 +203,8 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
     # conf.task = 'add'
     # conf.task = 'refill'
     # conf.task = 'ner1'
-    conf.task = 'duie-mlm'
+    # conf.task = 'duie-mlm'
+    conf.task = 'duie-ce'
 
     conf.instance= 29
 
@@ -212,7 +213,7 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
     conf.device        =  torch.device('cuda:0' if CUDA else 'cpu')
     conf.num_epoch     = 5000
     conf.learning_rate = 0.001
-    conf.batch_size    = 60
+    conf.batch_size    = 30
     add_optimizer      = lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
     # add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,eps=0.01)
 
@@ -245,17 +246,74 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         ### test dataset works
         conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
         # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
-    elif conf.task in 'ner1 duie-mlm'.split():
+    elif conf.task in 'ner1 duie-mlm duie-ce'.split():
         from markov_lm.Dataset.DUIE_NER import DUIE_NER
         ### This is a random dataset !!!! init after random seed is set
         conf.dataset = dataset = DUIE_NER(CUDA=CUDA,task_mode=conf.task)
         conf.data_input_transform = lambda item: item
-        conf.loss = lambda item:conf.model.loss(item)
-        conf.grad_loss = lambda item:conf.model.loss(item)
+
+        if conf.task == 'duie-ce':
+            def loss(item,conf=conf):
+                model = conf.model
+                seq1 = item['unmasked']
+                outer,inner = conf.model.forward(dict(masked = seq1 ))
+                out1 = inner[-1]
+
+                repl = torch.randint(conf.model.config.graph_dim,size=item['mask'].shape,device=model.device)
+                seq2 = torch.scatter(item['masked'],src=repl,index=item['mask'],dim=1)
+                out2 = conf.model.forward(dict(masked = seq2 ))[-1][-1]
+
+
+                seq1 = model.norm(model.embed(seq1))
+                # seq2 = model.norm(seq2)
+                out1 = model.norm( model.project(out1))
+
+                seq2 = model.norm(model.embed(seq2))
+                out2 = model.norm( model.project(out2))
+
+                # seq3 = torch.randint(conf.model.config.graph_dim,size=item['masked'].shape,device=model.device)
+                # out3 = conf.model.forward(dict(masked = seq3 ))[-1][-1]
+                # seq3 = model.norm(model.embed(seq3))
+                # out3 = model.norm( model.project(out3))
+
+                # out2 = model.norm(out2)
+
+                ### minimum variation
+
+                v1 = ((seq1) * (out1)).mean(-1).mean(1)
+
+                v2 = 1.0*((seq2)* (out2) ).mean(-1).mean(1)
+
+                ## hard margin hinge loss
+                # margin = 10.
+                # lossVal = torch.relu(-v1 + margin + v2)
+
+                ### log-loss soft hinge
+                # lossVal = torch.log(1+torch.exp(-v1  + v2))
+                # beta = 0.001
+                beta = 1.0
+                lossVal = torch.log(1+torch.exp(beta*(-v1  + v2)))
+
+                # lossVal = -v1 + (conf.last_v1_mean - v1).square() +  v2 #+ 0.5*(seq3*out3).mean(-1).mean(1)
+                # conf.last_v1_mean *= 0.8
+                # conf.last_v1_mean += 0.2*v1.mean().detach()
+
+
+                # lossVal = -(((seq1) * (out1)).mean(-1).mean(1)).sigmoid()  +  (1.0*((seq2)* (out2) ).mean(-1).mean(1)).sigmoid() #+ 0.5*(seq3*out3).mean(-1).mean(1)
+                # lossVal = -(model.embed(seq1) * model.project(out1)).mean(-1).mean(1) + (model.embed(seq2)* model.project(out2) ).mean(-1).mean(1)
+                # import pdb; pdb.set_trace()\
+                return lossVal
+
+            conf.loss = loss
+            conf.grad_loss = loss
+            conf.last_v1_mean = 0.
+        else:
+            conf.loss = lambda item:conf.model.loss(item)
+            conf.grad_loss = lambda item:conf.model.loss(item)
 
         ### test dataset works
         conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
-        if conf.task=='duie-mlm':
+        if conf.task in 'duie-mlm duie-ce':
             conf.callback_epoch_start = lambda epoch: conf.dataset.op_sample_mask(n_mask=10)
             # conf.
         # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
@@ -320,11 +378,11 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         # conf.kernel_size = 15
         # conf.depth = 20
         # conf.embed_dim = 50
-
+        conf.embed_dim = 100
         conf.lconf = LayerConfig(
             kernel_size = 5,
             depth = 4,
-            embed_dim = 200,
+            embed_dim = conf.embed_dim,
             kernel_dim = 10,
             use_dropout= 0.5,
             use_dense_relu = 11,
@@ -339,6 +397,7 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         conf.__dict__.update(conf.lconf.__dict__)
         assert conf.is_model_set is False
         conf.is_model_set =True
+        conf.learning_rate = 0.0001
 
         conf._session_name = ''
 
@@ -347,16 +406,19 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
 
 
         #
-        from markov_lm.Model_add import AddModelBertInterface, AddModelBertInterfaceConfig
-        CLS[0] = AddModelBertInterface
-        conf.lconf = AddModelBertInterfaceConfig(
-            embed_dim=100,
-            graph_dim=dataset.graph_dim,
-            pretrain_model_name='bert-base-chinese',
-            mask_token_idx = dataset.mask_token_idx,
-            use_original_embedding=0,
-            attach = 0,
-            )
+        # from markov_lm.Model_add import AddModelBertInterface, AddModelBertInterfaceConfig
+        # CLS[0] = AddModelBertInterface
+        # conf.lconf = AddModelBertInterfaceConfig(
+        #     embed_dim=conf.embed_dim,
+        #     # embed_dim=200,
+        #     graph_dim=dataset.graph_dim,
+        #     pretrain_model_name='bert-base-chinese',
+        #     mask_token_idx = dataset.mask_token_idx,
+        #     use_original_embedding=0,
+        #     attach = 0,
+        #     )
+        # conf.depth = 4
+
 
         model = _add_model(conf)
 
