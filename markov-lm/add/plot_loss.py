@@ -36,9 +36,11 @@ xs += glob('Checkpoints/*.pkl')
 if 1:
     # xs = [xx for xx in xs if 'taskrefill' in xx]
     # xs = [xx for xx in xs if 'taskner1' in xx]
-    xs = [xx for xx in xs if 'duie-mlm' in xx]
+    # xs = [xx for xx in xs if 'duie-mlm' in xx]
+    xs = [xx for xx in xs if 'duie-ce' in xx]
     YLIM = (None,None)
-    YLIM = (0,10)
+    # YLIM = (0,10)
+    # YLIM = (-350,0)
 # YLIM = (N)
 if 0:
     YLIM = (None,None)

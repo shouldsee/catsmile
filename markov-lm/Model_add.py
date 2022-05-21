@@ -387,6 +387,14 @@ class AddModelWithAttentionStacked(AddModelBase):
             xc.n_choice)
         self.layers = nn.ModuleList([ AddModelWithAttention(device=device, **xc.__dict__).to(device)
          for i in range(xc.depth//xc.iter_per_layer+1)])
+        self.project = nn.Identity()
+         
+    # @property
+    # def project(self):
+    #     return self.layers[0].embed
+    @property
+    def embed(self):
+        return self.layers[0].embed
 
     def _step(self,outer,inner,detach):
         '''
@@ -455,6 +463,7 @@ class AddModelBertInterface(AddModelBase):
             self.proj_charset = 1
 
         bos,v,eos = self.tok[0]('[MASK]')['input_ids']
+        charset = [x.upper() for x in charset]
         toks[charset.index('[MASK]')] = v
 
         self.charset = charset
