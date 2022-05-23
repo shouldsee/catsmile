@@ -7,6 +7,7 @@ import matplotlib; matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
 import numpy as np
+MIN_YS = -2.
 
 xs = []
 # xs = glob('Checkpoints/*Convolve*.pkl')
@@ -39,6 +40,7 @@ if 1:
     # xs = [xx for xx in xs if 'duie-mlm' in xx]
     xs = [xx for xx in xs if 'duie-ce' in xx]
     YLIM = (None,None)
+    MIN_YS = 1.0
     # YLIM = (0,10)
     # YLIM = (-350,0)
 # YLIM = (N)
@@ -77,7 +79,7 @@ xs = sorted(xs)
 ys = defaultdict(lambda:[])
 HTML_FILE = __file__+'.html'
 # MIN_YS= 0.3
-MIN_YS = -200.
+# MIN_YS = -200.
 import pandas as pd
 # MIN_YS = 0.0
 with open(HTML_FILE+'.temp','w') as f:
@@ -99,8 +101,14 @@ with open(HTML_FILE+'.temp','w') as f:
         #     # print(base,epc,loss)
         #     pass
         xs,ys,fns = zip(*ss)
-        if (ys[-1]<MIN_YS)*(MIN_YS>0) or (ys[-1]>-MIN_YS)*(MIN_YS<0):
+
+        if (min(ys)<MIN_YS)*(MIN_YS>0) or (max(ys)>-MIN_YS)*(MIN_YS<0):
+            pass
+        else:
             continue
+        # if (max(ys)<MIN_YS)*(MIN_YS>0) or (min(ys)>-MIN_YS)*(MIN_YS<0):
+        #     continue
+
         df = pd.DataFrame(dict(xs=xs,ys=ys),index=fns)
         dfs.append(df)
         # f.write(f'<pre>loss{ys[-1]:.3f}_{base}</pre>')
@@ -113,8 +121,9 @@ with open(HTML_FILE+'.temp','w') as f:
         xs = xs[:-1]
         if not len(ys):
             continue
+        mys = min(ys) if  MIN_YS> 0 else max(ys)
 
-        plt.plot(xs,ys,label=f'loss{ys[-1]:.3f}-{base}')
+        plt.plot(xs,ys,label=f'loss{mys:.3f}-{base}')
     plt.xlim(10,1000)
     # plt.ylim(0,2)
     plt.ylim(*YLIM)

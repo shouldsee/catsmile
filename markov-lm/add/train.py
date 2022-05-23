@@ -33,98 +33,99 @@ from markov_lm.Model_add import AddModelWithAttention
 
 import collections
 import math
-
-class ConfigPrototype(object):
-    def __init__(self,is_sorted=False):
-        self.is_sorted = is_sorted
-        self._session_name = None
-        self.is_model_set = False
-        self.f = open(__file__+'.log.html','w')
-        self.tbuf = tbuf_cls()
-        self.s = collections.OrderedDict()
-        return
-
-    def data_input_transform(self,item):
-        raise NotImplementedError
-    def get_ckpt_name(self):
-        return self.__class__.__name__
-
-    def _print(self,*x):
-        f=  self.f
-    # _print = lambda *x,f=f:
-        f.write(f'<pre>{"".join(x)}</pre>\n')
-
-    def init_s(self,k,v):
-        s = self.s
-        if k not in s:
-            s[k]=[k,list(v.shape)]
-        return
-    def grad_loss(self,*a,**kw):
-        return self.loss(*a,**kw)
-    def loss(self,*a,**kw):
-        raise NotImplementedError
-
-    def callback_epoch_start(self,epoch):
-        pass
-
-
-    def callback_step(self,epoch,indexedItem,loss):
-        pass
-        tri,item = indexedItem
-        f = self.f
-        t = self.handler
-        s = self.s
-        _print = self._print
-        for k,v in t.xdict.items():
-            mae = v.abs().mean().item()
-            # s.setdefault(k,[])
-            if k not in s:
-                s[k]=[k,list(v.shape)]
-            ss = s[k]
-            ss.append(mae*1000)
-            # ss.append(fws('%.3f'%mae,10))
-            # print(v.id)
-            # _print(fws(k,15)+fws(list(v.shape),10)+fws('%.3f'%mae,10))
-
-        opt = self.optimizer
-        for p,v in opt.state.items():
-            k = id(p)
-            if k not in s:
-                s[k] = [id(p),list(getattr(p,'shape',[1]))]
-            s[k].append( (1000*v.get('square_avg',torch.tensor(0.)).mean().item()))
-
-    def callback_start(self,epoch,a,b):
-        pass
-    def callback_end(self,epoch,indexedItem,loss):
-        s = self.s
-        f = self.f
-        is_sorted = self.is_sorted
-        _print = self._print
-        _print(f'Epoch{epoch}.Model-{self._session_name}.{loss}')
-        CONFIG_HIDE = -100000000
-        def _str(x,s):
-            if isinstance(x,float):
-                if x >CONFIG_HIDE:
-                    x ='%.3f'%x
-                else:
-                    x = ''
-            else:
-                pass
-            return fws(x,s)
-
-        wsl = [20,20] + [5]*30
-        ks = list(s)
-        if self.is_sorted:
-            ks = sorted(ks)
-        for k in ks:
-            v = s.pop(k)
-            _print(*[_str(vv,ws)+'|'+' ' for  vv, ws in zip(v,wsl)])
-            _print('-'*15*len(v))
-
-        # x = ['bias.1000']+list((1000*self.model.att_dense.bias).int().cpu().detach().numpy()[:10])
-        # _print(*[_str(vv,10)+'|'+' '*3 for vv in x])
-        _print('='*35)
-        f.flush()
+from markov_lm.conf_gan import ConfigPrototype
+#
+# class ConfigPrototype(object):
+#     def __init__(self,fn,is_sorted=False):
+#         self.is_sorted = is_sorted
+#         self._session_name = None
+#         self.is_model_set = False
+#         self.f = open(fn+'.log.html','w')
+#         self.tbuf = tbuf_cls()
+#         self.s = collections.OrderedDict()
+#         return
+#
+#     def data_input_transform(self,item):
+#         raise NotImplementedError
+#     def get_ckpt_name(self):
+#         return self.__class__.__name__
+#
+#     def _print(self,*x):
+#         f=  self.f
+#     # _print = lambda *x,f=f:
+#         f.write(f'<pre>{"".join(x)}</pre>\n')
+#
+#     def init_s(self,k,v):
+#         s = self.s
+#         if k not in s:
+#             s[k]=[k,list(v.shape)]
+#         return
+#     def grad_loss(self,*a,**kw):
+#         return self.loss(*a,**kw)
+#     def loss(self,*a,**kw):
+#         raise NotImplementedError
+#
+#     def callback_epoch_start(self,epoch):
+#         pass
+#
+#
+#     def callback_step(self,epoch,indexedItem,loss):
+#         pass
+#         tri,item = indexedItem
+#         f = self.f
+#         t = self.handler
+#         s = self.s
+#         _print = self._print
+#         for k,v in t.xdict.items():
+#             mae = v.abs().mean().item()
+#             # s.setdefault(k,[])
+#             if k not in s:
+#                 s[k]=[k,list(v.shape)]
+#             ss = s[k]
+#             ss.append(mae*1000)
+#             # ss.append(fws('%.3f'%mae,10))
+#             # print(v.id)
+#             # _print(fws(k,15)+fws(list(v.shape),10)+fws('%.3f'%mae,10))
+#
+#         opt = self.optimizer
+#         for p,v in opt.state.items():
+#             k = id(p)
+#             if k not in s:
+#                 s[k] = [id(p),list(getattr(p,'shape',[1]))]
+#             s[k].append( (1000*v.get('square_avg',torch.tensor(0.)).mean().item()))
+#
+#     def callback_start(self,epoch,a,b):
+#         pass
+#     def callback_end(self,epoch,indexedItem,loss):
+#         s = self.s
+#         f = self.f
+#         is_sorted = self.is_sorted
+#         _print = self._print
+#         _print(f'Epoch{epoch}.Model-{self._session_name}.{loss}')
+#         CONFIG_HIDE = -100000000
+#         def _str(x,s):
+#             if isinstance(x,float):
+#                 if x >CONFIG_HIDE:
+#                     x ='%.3f'%x
+#                 else:
+#                     x = ''
+#             else:
+#                 pass
+#             return fws(x,s)
+#
+#         wsl = [20,20] + [5]*30
+#         ks = list(s)
+#         if self.is_sorted:
+#             ks = sorted(ks)
+#         for k in ks:
+#             v = s.pop(k)
+#             _print(*[_str(vv,ws)+'|'+' ' for  vv, ws in zip(v,wsl)])
+#             _print('-'*15*len(v))
+#
+#         # x = ['bias.1000']+list((1000*self.model.att_dense.bias).int().cpu().detach().numpy()[:10])
+#         # _print(*[_str(vv,10)+'|'+' '*3 for vv in x])
+#         _print('='*35)
+#         f.flush()
 
 
 def parse_checkpoint(sys,):
@@ -195,7 +196,7 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
     '''
 
 
-    conf = ConfigPrototype()
+    conf = ConfigPrototype(__file__)
     '''
     Abusing attributes here
     [TBC]
@@ -213,7 +214,7 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
     conf.device        =  torch.device('cuda:0' if CUDA else 'cpu')
     conf.num_epoch     = 5000
     conf.learning_rate = 0.001
-    conf.batch_size    = 30
+    conf.batch_size    = 15
     add_optimizer      = lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
     # add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,eps=0.01)
 
@@ -259,31 +260,51 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
                 outer,inner = conf.model.forward(dict(masked = seq1 ))
                 out1 = inner[-1]
 
+                def get_energy(model,seq1):
+                    seq1_embed = model.norm(model.embed(seq1))
+                    # seq2 = model.norm(seq2)
+                    out1 = model.forward(dict(masked = seq1))[-1][-1]
+                    out1 = model.norm( model.project(out1))
+                    v1 = ((seq1_embed) * (out1)).mean(-1).mean(1)
+                    return v1
+                #
+                # seq2 = model.norm(model.embed(seq2))
+                # out2 = model.norm( model.project(out2))
+                #
+                # # seq3 = torch.randint(conf.model.config.graph_dim,size=item['masked'].shape,device=model.device)
+                # # out3 = conf.model.forward(dict(masked = seq3 ))[-1][-1]
+                # # seq3 = model.norm(model.embed(seq3))
+                # # out3 = model.norm( model.project(out3))
+                #
+                # # out2 = model.norm(out2)
+                #
+                # ### minimum variation
+                #
+                # v1 = ((seq1) * (out1)).mean(-1).mean(1)
+                #
+                # v2 = 1.0*((seq2)* (out2) ).mean(-1).mean(1)
+
+
                 repl = torch.randint(conf.model.config.graph_dim,size=item['mask'].shape,device=model.device)
+                # repl = 0 * item['mask'] + model.config.mask_token_idx
                 seq2 = torch.scatter(item['masked'],src=repl,index=item['mask'],dim=1)
-                out2 = conf.model.forward(dict(masked = seq2 ))[-1][-1]
+                # out2 = conf.model.forward(dict(masked = seq2 ))[-1][-1]
+
+                repl = torch.randint(conf.model.config.graph_dim,size=item['mask'].shape,device=model.device)
+                seq3 = torch.scatter(item['masked'],src=repl,index=item['mask'],dim=1)
+
+                repl = torch.randint(conf.model.config.graph_dim,size=item['mask'].shape,device=model.device)
+                seq4 = torch.scatter(item['masked'],src=repl,index=item['mask'],dim=1)
 
 
-                seq1 = model.norm(model.embed(seq1))
-                # seq2 = model.norm(seq2)
-                out1 = model.norm( model.project(out1))
-
-                seq2 = model.norm(model.embed(seq2))
-                out2 = model.norm( model.project(out2))
-
-                # seq3 = torch.randint(conf.model.config.graph_dim,size=item['masked'].shape,device=model.device)
-                # out3 = conf.model.forward(dict(masked = seq3 ))[-1][-1]
-                # seq3 = model.norm(model.embed(seq3))
-                # out3 = model.norm( model.project(out3))
-
-                # out2 = model.norm(out2)
-
-                ### minimum variation
-
-                v1 = ((seq1) * (out1)).mean(-1).mean(1)
-
-                v2 = 1.0*((seq2)* (out2) ).mean(-1).mean(1)
-
+                beta = 1.0
+                v1 = get_energy(model,seq1)
+                v2 = get_energy(model,seq2)
+                vs = torch.stack([v1,v2,
+                get_energy(model,seq3),
+                get_energy(model,seq4),
+                ],-1)
+                lossVal = - vs.log_softmax(-1)[:,0]
                 ## hard margin hinge loss
                 # margin = 10.
                 # lossVal = torch.relu(-v1 + margin + v2)
@@ -291,8 +312,14 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
                 ### log-loss soft hinge
                 # lossVal = torch.log(1+torch.exp(-v1  + v2))
                 # beta = 0.001
-                beta = 1.0
-                lossVal = torch.log(1+torch.exp(beta*(-v1  + v2)))
+                # lossVal = torch.log(1+torch.exp(beta*(-v1  + v2)))
+                '''
+                #### log-loss is just log_softmax of the positive samples
+                #### from-scratch model seems to be overfitting this means the
+                the problems proposed by the generator is too easy
+                to solve and does not require semantic knowledge to solve.
+                Hence it's essential to build harder problems to
+                '''
 
                 # lossVal = -v1 + (conf.last_v1_mean - v1).square() +  v2 #+ 0.5*(seq3*out3).mean(-1).mean(1)
                 # conf.last_v1_mean *= 0.8
@@ -380,30 +407,32 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         # conf.embed_dim = 50
         conf.embed_dim = 100
         conf.lconf = LayerConfig(
-            kernel_size = 5,
+            kernel_size = 10,
             depth = 4,
             embed_dim = conf.embed_dim,
-            kernel_dim = 10,
-            use_dropout= 0.5,
+            kernel_dim = 11,
+            use_dropout= 0.48,
             use_dense_relu = 11,
             use_layernorm = 1,
             use_gradnorm = 1,
             use_input_image =0,
             step_size = 0.05,
-            iter_per_layer= 1,
-            mask_token_idx = -1,
+            iter_per_layer= 100,
+            mask_token_idx = dataset.mask_token_idx,
             graph_dim=dataset.graph_dim
         )
         conf.__dict__.update(conf.lconf.__dict__)
         assert conf.is_model_set is False
         conf.is_model_set =True
-        conf.learning_rate = 0.0001
+        # conf.learning_rate = 0.00001
+        conf.batch_size = 60
 
         conf._session_name = ''
 
         from markov_lm.Model_add import AddModelWithAttentionStacked,AddModelBertInterface
         CLS[0] = AddModelWithAttentionStacked
 
+        # add_optimizer      = lambda conf,params:torch.optim.SGD( params, lr=conf.learning_rate,)
 
         #
         # from markov_lm.Model_add import AddModelBertInterface, AddModelBertInterfaceConfig
@@ -417,7 +446,7 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         #     use_original_embedding=0,
         #     attach = 0,
         #     )
-        # conf.depth = 4
+        # conf.depth = 5
 
 
         model = _add_model(conf)
@@ -531,7 +560,8 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
     conf._session_name +=  f'-S{conf.instance}'
     conf._session_name += f'-task{conf.task}-shuffle{int(shuffle)}'
     conf._session_name += f'-{conf.model.__class__.__name__}-D{conf.depth}-E{conf.embed_dim}-K{conf.kernel_size}-KE{conf.kernel_dim}-IPL{conf.iter_per_layer}-'
-    conf._session_name += f'DenseRelu{conf.use_dense_relu}-Layernorm{conf.use_layernorm}-Dropout{conf.use_dropout}-Gradnorm{conf.use_gradnorm}-loglr{math.log10(conf.learning_rate):.1f}'
+    # conf._session_name += f'DenseRelu{conf.use_dense_relu}-Layernorm{conf.use_layernorm}-Dropout{conf.use_dropout}-Gradnorm{conf.use_gradnorm}-loglr{math.log10(conf.learning_rate):.1f}'
+    conf._session_name += f'DenseRelu{conf.use_dense_relu}-Layernorm{conf.use_layernorm}-Dropout{conf.use_dropout}-Gradnorm{conf.use_gradnorm}-loglr{-4:.1f}'
     conf._session_name += f'-nchoice{conf.model.n_choice}' if conf.n_choice else ''
     conf._session_name += f'-UseInputImage{conf.use_input_image}-1i{conf.instance}'
     # try:

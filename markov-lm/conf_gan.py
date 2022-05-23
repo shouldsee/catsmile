@@ -7,13 +7,22 @@ import shutil
 import collections
 
 class ConfigPrototype(object):
-    def __init__(self,fn,is_sorted=False):
+    def __init__(self,fn,is_sorted=False,
+    field_width = [20,20] + [5]*30,
+    section_ender = None):
         self.is_sorted = is_sorted
         self._session_name = None
         self.is_model_set = False
+        if fn.endswith('.py'):
+            fn = fn+'.html'
         self.f = open(fn,'w')
         self.tbuf = tbuf_cls()
         self.s = collections.OrderedDict()
+        self.field_width = field_width[:]
+        if section_ender is None:
+            section_ender = '-'*15*len(field_width)
+        self.section_ender = section_ender
+            # sele.ct
         return
 
     def data_input_transform(self,item):
@@ -88,14 +97,16 @@ class ConfigPrototype(object):
                 pass
             return fws(x,s)
 
-        wsl = [20,20] + [5]*30
+        # wsl = [20,20] + [5]*30
+        # field_width
         ks = list(s)
         if self.is_sorted:
             ks = sorted(ks)
         for k in ks:
             v = s.pop(k)
-            _print(*[_str(vv,ws)+'|'+' ' for  vv, ws in zip(v,wsl)])
-            _print('-'*15*len(v))
+            _print(*[_str(vv,ws)+'|'+' ' for  vv, ws in zip(v,self.field_width)])
+
+            _print(self.section_ender) if len(self.section_ender) else None
 
         # x = ['bias.1000']+list((1000*self.model.att_dense.bias).int().cpu().detach().numpy()[:10])
         # _print(*[_str(vv,10)+'|'+' '*3 for vv in x])
