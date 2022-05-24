@@ -7,7 +7,8 @@ import matplotlib; matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
 import numpy as np
-MIN_YS = -2.
+# MIN_YS = -2.
+MIN_YS = 0.2
 
 xs = []
 # xs = glob('Checkpoints/*Convolve*.pkl')
@@ -30,8 +31,19 @@ xs = []
 # # xs += glob('Checkpoints/*Cluster*.pkl')
 # xs += glob('Checkpoints/*RNNMixture*.pkl')
 # xs += glob('Checkpoints/*MixedEmissionMatrix*.pkl')
-xs += glob('Checkpoints/*.pkl')
+# xs += glob('Checkpoints/*.pkl')
+# xs += glob('Checkpoints/*-KE*-IPL100-DenseRelu1-Layernorm1-*')
+
+# xs += glob('Checkpoints/*-KE*-IPL100-DenseRelu1-Layernorm1-*')
+
+xs += glob('Checkpoints/*-KE*-IPL100-DenseRelu11-Layernorm1-*')
+xs += glob('Checkpoints/*AddModelBertInterface*')
+# xs += glob('Checkpoints/*-KE*-IPL1-DenseRelu11-Layernorm1-*')
 # print(xs)
+xs += glob('Checkpoints/*-S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D4-E100-K5-KE21-IPL1-DenseRelu1-Layernorm1-Dropout0.52-Gradnorm1-loglr-4.0-UseInputImage0-1i29*')
+xs += glob('Checkpoints/*-S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D4-E100-K5-KE11-IPL1-DenseRelu1-Layernorm1-Dropout0.002-Gradnorm1-loglr-4.0-UseInputImage0-1i29*')
+# xs += glob('Checkpoints/*-S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D4-E100-K5-KE11-IPL1-DenseRelu1-Layernorm1-Dropout0.521-Gradnorm1-loglr-4.0-UseInputImage0-1i29*')
+
 # xs += glob('Checkpoints/*WithBert*.pkl')
 # xs += glob('Checkpoints/*WithLinearAttention*.pkl')
 if 1:
@@ -39,9 +51,12 @@ if 1:
     # xs = [xx for xx in xs if 'taskner1' in xx]
     # xs = [xx for xx in xs if 'duie-mlm' in xx]
     xs = [xx for xx in xs if 'duie-ce' in xx]
+    # xs = [xx for xx in xs
+    # if '-KE11-IPL100-DenseRelu1-Layernorm1-' in xx]
     YLIM = (None,None)
     MIN_YS = 1.0
-    # YLIM = (0,10)
+    MIN_YS = 0.15
+    YLIM = (0,0.05)
     # YLIM = (-350,0)
 # YLIM = (N)
 if 0:
