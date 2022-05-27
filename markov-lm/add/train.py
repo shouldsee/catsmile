@@ -123,7 +123,7 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
     conf.device        =  torch.device('cuda:0' if CUDA else 'cpu')
     conf.num_epoch     = 5000
     conf.learning_rate = 0.001
-    conf.batch_size    = 30
+    conf.batch_size    = 15
     add_optimizer      = lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
     # add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,eps=0.01)
 
@@ -131,6 +131,7 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
     conf.tsi_max = -1
     # print(conf.task)
     # conf.task='UNK'
+    conf.n_mask = 10
 
     torch.manual_seed(conf.instance)
     if conf.task=='refill':
@@ -165,12 +166,32 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         if conf.task == 'duie-ce':
             from markov_lm.loss_contrast_seq import get_recovered_corrupted_seq
             def loss(item,conf=conf):
-                ss = get_recovered_corrupted_seq(conf.model,item['unmasked'],item['mask'],method='score')
+                '''
+                Naive corruption
+                '''
+                ss = get_recovered_corrupted_seq(conf.model,item['unmasked'],item['mask'],method='score',sample_method='simple')
+                lossVal = -ss.log_softmax(-1)[:,0]
+                return lossVal
+
+
+            def grad_loss(item,conf=conf):
+                '''
+                More difficult corruption that yields similar score
+                Instead of asking the model to discriminate between data and corrupted data
+                ask it to discriminate data and its extrapolation of data
+                so that at the end the model cannot tell between the data and the extrapolation.
+
+                At the end, the model should learns to extrapolate between data points and forget
+                everything that is not included in data.
+                '''
+                # ss = get_recovered_corrupted_seq(conf.model,item['unmasked'],item['mask'],method='score',sample_method=conf.sample_method)
+                ss = get_recovered_corrupted_seq(conf.model,item['unmasked'],item['mask'],method='score',sample_method='simple',K=24)
+                # conf.sample_method)
                 lossVal = -ss.log_softmax(-1)[:,0]
                 return lossVal
 
             conf.loss = loss
-            conf.grad_loss = loss
+            conf.grad_loss = grad_loss
             conf.last_v1_mean = 0.
         else:
             conf.loss = lambda item:conf.model.loss(item)
@@ -179,7 +200,7 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         ### test dataset works
         conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
         if conf.task in 'duie-mlm duie-ce':
-            conf.callback_epoch_start = lambda epoch: conf.dataset.op_sample_mask(n_mask=10)
+            conf.callback_epoch_start = lambda epoch: conf.dataset.op_sample_mask(n_mask=conf.n_mask)
             # conf.
         # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
     else:
@@ -224,12 +245,12 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         # conf.embed_dim = 50
         conf.embed_dim = 100
         conf.lconf = LayerConfig(
-            kernel_size = 10,
+            kernel_size = 50,
             depth = 8,
             embed_dim = conf.embed_dim,
             kernel_dim = 11,
             use_dropout= 0.00,
-            use_dense_relu = 1,
+            use_dense_relu = 11,
             use_layernorm = 1,
             use_gradnorm = 0,
             use_input_image =0,
@@ -243,14 +264,35 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         conf.is_model_set =True
         conf.learning_rate = 0.0001
         # conf.batch_size = 120
+        conf.sample_method = 'simple-effective'
 
         conf._session_name = ''
+        conf._session_name += f'sampleMethod-{conf.sample_method}-'
+        # conf._session_name += f'NM{conf.n_mask}-'
+
+        conf.n_mask        = 10
+        conf._session_name += f'NM{conf.n_mask}-'
+        # conf._session_name += f'NM10-'
 
         from markov_lm.Model_add import AddModelWithAttentionStacked,AddModelBertInterface
         CLS[0] = AddModelWithAttentionStacked
 
         # add_optimizer      = lambda conf,params:torch.optim.SGD( params, lr=conf.learning_rate,)
 
+
+        # from markov_lm.Model_add import AddModelBertInterface, AddModelBertInterfaceConfig
+        # CLS[0] = AddModelBertInterface
+        # conf.lconf = AddModelBertInterfaceConfig(
+        #     embed_dim=conf.embed_dim,
+        #     # embed_dim=200,
+        #     graph_dim=dataset.graph_dim,
+        #     pretrain_model_name='bert-base-chinese',
+        #     mask_token_idx = dataset.mask_token_idx,
+        #     use_original_embedding=1,
+        #     attach = 1,
+        #     )
+        # conf.depth = 5
+        #
         #
         # from markov_lm.Model_add import AddModelBertInterface, AddModelBertInterfaceConfig
         # CLS[0] = AddModelBertInterface
@@ -264,6 +306,8 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         #     attach = 0,
         #     )
         # conf.depth = 5
+        # conf._session_name += '-detach'
+        #
 
 
         model = _add_model(conf)
