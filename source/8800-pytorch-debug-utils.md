@@ -1,3 +1,4 @@
+#! https://zhuanlan.zhihu.com/p/500856805
 # 8800: PyTorch调试小工具 20220418
 
 <http://catsmile.info/8800-pytorch-debug-utils.html>

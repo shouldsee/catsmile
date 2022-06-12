@@ -1,4 +1,19 @@
-# 1004: 期望函数的梯度计算
+---
+jupytext:
+  cell_metadata_filter: -all
+  formats: md:myst
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+    jupytext_version: 1.11.5
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
+# [TBC]1004: 期望函数的梯度计算
 
 - 不使用的后果：哦天哪，你没法往神经网络里塞期望函数了，所以强化学习没戏了，AlphaGo/AlphaZero/AlphaStar集体阵亡。
 - 具体形式：TBC
