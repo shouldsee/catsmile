@@ -20,17 +20,19 @@ mathjax: true
   - 结构操作B：跳过空格(-)连接标签
   - 一般的标签比对损失模型:
 
+      $$
       \begin{align}
       \text{loss} &=  \sum_{_{bik}}  l_{bik} \log  \pi_{bik} \\   
       &= \sum_{bi} \log P(\Pi_{bi}  = L_{bi} |x_{b},\theta) \\  
       &= \sum_{b} \log P(\{ \Pi_{bi} \}  = \{ L_{bi} \} |x_{b},\theta) \\
       \text{where} \ \pi_{bik}&= P(\Pi_{bi}  = k |x_{b},\theta)
       \end{align}
+      $$
 
     可以看出，在做交叉熵计算的时候，已经做出了，给定隐变量后，标签生成是条件独立的假设。
     其中b为batch，i为监督向量位置索引，k为监督向量维度索引，这个交叉熵比较常见，CTC的主要贡献在于重写了后面的概率P
 
-
+      $$
       \begin{align}
       P( \{\Pi_{bi} \} |x_{b},\theta)
       &= \sum_{\{z_{bjk}\}\in B^{-1}(\{\Pi_{bi} \})}  P( \{\Pi_{bi} \}\},\{{z_{bjk}}\}|x_b,\theta) \\
@@ -38,6 +40,7 @@ mathjax: true
       \\ &= \sum_{\{z_{bjk}\}\in B^{-1}(\{\Pi_{bi} \})}  P( \{\Pi_{bi} \}\},\{{z_{bjk}}\}|x_b,\theta)
       \\ & =\sum_{\{z_{bjk}\}\in B^{-1}(\{\Pi_{bi} \}\})}  P(\{{z_{bjk}}\}|x_b,\theta)
       \end{align}
+      $$
 
      （由于 $\Pi = B^{-1}(Z)$ 是多对一映射，可以省略 $\Pi$ ）
       由于穷举序列 $\{z_{jk}\}$   的复杂度为指数级别 $O(K^J)$，
