@@ -56,65 +56,23 @@ xs += glob('Checkpoints/*.pkl')
 
 
 
-if 0:
-    # xs = [xx for xx in xs if 'taskrefill' in xx]
-    # xs = [xx for xx in xs if 'taskner1' in xx]
-    # xs = [xx for xx in xs if 'duie-mlm' in xx]
-    # xs = [xx for xx in xs if 'duie-ce' in xx]
-    xs = [xx for xx in xs if 'duie-mlm' in xx]
-    # xs = [xx for xx in xs
-    # if '-KE11-IPL100-DenseRelu1-Layernorm1-' in xx]
-    YLIM = (None,None)
-    MIN_YS = 10.0
-    # MIN_YS = 0.15
-    # YLIM = (0,0.15)
-    # YLIM = (-350,0)
 
 if 1:
     # xs = [xx for xx in xs if 'taskrefill' in xx]
     # xs = [xx for xx in xs if 'taskner1' in xx]
     # xs = [xx for xx in xs if 'duie-mlm' in xx]
-    xs = [xx for xx in xs if 'duie-ce' in xx]
+    # xs = [xx for xx in xs if 'duie-ce' in xx]
+    xs = [xx for xx in xs if 'taskfashion' in xx]
+    # xs = [xx for xx in xs if 'NM1-' in xx]
+    # xs = [xx for xx in xs if 'NM10-' in xx]
+    # xs = [xx for xx in xs if 'TS5-' in xx]
     # xs = [xx for xx in xs
     # if '-KE11-IPL100-DenseRelu1-Layernorm1-' in xx]
-    YLIM = (None,None)
-    MIN_YS = 1.0
-    MIN_YS = 0.15
-    YLIM = (0,0.0015)
-    # YLIM = (0,0.15)
+    YLIM = (None,2000)
+    MIN_YS = 1100.0
+    # MIN_YS = 0.15
+    # YLIM = (0,5)
     # YLIM = (-350,0)
-# YLIM = (N)
-if 0:
-    YLIM = (None,None)
-    # YLIM = (0,1)
-# None,None)
-    xs = [xx for xx in xs if '-I3-' not in xx]
-    xs = [xx for xx in xs if '-I4-' not in xx]
-    # xs = [xx for xx in xs if '-I5-' not in xx]
-    xs = [xx for xx in xs if 'SimpleUpdate' not in xx]
-    # xs = [xx for xx in xs if '-1I'  in xx]
-    # xs = [xx for xx in xs if 'DenseRelu1'  in xx]
-    xs = [
-    xx for xx in xs
-    if 0
-    # or '-1I18'  in xx
-    # or '-1I19' in xx
-    # or '-1I20' in xx
-    # or '-1I21' in xx
-
-    # or '-1I22' in xx
-    # or '-1I23' in xx
-    # or '-1I24' in xx
-    # or '-1I25' in xx  #### NIGHTMARE SEED
-
-    # or '-1I26' in xx
-    # or '-1I27' in xx
-    # or '-1I28' in xx
-    or '-1I29' in xx.upper()
-
-    # or '-1I24' in xx
-
-    ]
 xs = sorted(xs)
 ys = defaultdict(lambda:[])
 HTML_FILE = __file__+'.html'
@@ -127,7 +85,11 @@ with open(HTML_FILE+'.temp','w') as f:
     for x in xs:
         x = os.path.basename(x)
         x = x[:-len('.pkl')]
-        base,epc,loss = x.split('_')
+        try:
+            base,epc,loss = x.split('_')
+        except Exception as e:
+            print(x)
+            raise e
         loss = float(loss)
         epc = int(epc)
         ys[base].append((epc,loss,x))

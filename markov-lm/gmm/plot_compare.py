@@ -73,11 +73,13 @@ def main():
     We can verify whether a model is good at discriminating a mutated sentence from a real sentence
     '''
 
-    f1 = 'Checkpoints/-S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D8-E100-K50-KE11-IPL100-DenseRelu11-Layernorm1-Dropout0.0-Gradnorm0-loglr-4.0-UseInputImage0-1i29_75_0.00001.pkl'
+    # f1 = 'Checkpoints/-S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D8-E100-K50-KE11-IPL100-DenseRelu11-Layernorm1-Dropout0.0-Gradnorm0-loglr-4.0-UseInputImage0-1i29_75_0.00001.pkl'
+    f1 = 'Checkpoints/sampleMethod-mixed-NM10-maxPos0-SSK1.0--S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D4-E100-K47-KE11-IPL1-DenseRelu13-Layernorm1-Dropout0.0-Gradnorm0-loglr-4.0-UseInputImage0-1i29_100_*'
 
     # f1 = 'Checkpoints/-S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D4-E100-K5-KE11-IPL100-DenseRelu1-Layernorm1-Dropout0.49-Gradnorm1-loglr-4.0-UseInputImage0-1i29_310_0.05324*'
     # f1 = 'Checkpoints/-S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D4-E100-K5-KE11-IPL100-DenseRelu1-Layernorm1-Dropout0.49-Gradnorm1-loglr-4.0-UseInputImage0-1i29_360*'
-    f2 = 'Checkpoints/-S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D4-E100-K5-KE11-IPL100-DenseRelu1-Layernorm1-Dropout0.49-Gradnorm1-loglr-4.0-UseInputImage0-1i29_110_0.24106*'
+    f2 = 'Checkpoints/sampleMethod-mixed-NM10-maxPos49-SSK0.0-CK4--S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D1-E50-K1-KE12-IPL1-DenseRelu26-Layernorm1-Dropout0.0-Gradnorm0-loglr-4.0-UseInputImage0-1i29_300_*'
+    # f2 = 'Checkpoints/-S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D4-E100-K5-KE11-IPL100-DenseRelu1-Layernorm1-Dropout0.49-Gradnorm1-loglr-4.0-UseInputImage0-1i29_110_0.24106*'
     # f2 = 'Checkpoints/-S29-taskduie-ce-shuffle1-AddModelWithAttentionStacked-D4-E100-K5-KE11-IPL100-DenseRelu1-Layernorm1-Dropout0.49-Gradnorm1-loglr-4.0-UseInputImage0-1i29_500_*'
     # f1= 'Checkpoints/S29-taskduie-mlm-shuffle1-AddModelBertInterface-D4-E100-K5-KE10-IPL1-DenseRelu11-Layernorm1-Dropout0.1-Gradnorm1-loglr-3.0-UseInputImage0-1i29_180_3.93135.pkl'
     # f2 = 'Checkpoints/S29-taskduie-mlm-shuffle1-AddModelWithAttentionStacked-D4-E100-K5-KE10-IPL1-DenseRelu11-Layernorm1-Dropout0.5-Gradnorm1-loglr-3.0-UseInputImage0-1i29_155_4.11078.pkl'
@@ -255,7 +257,7 @@ def main():
                 continue
             for model in [m1,m2]:
                 # meseqs,meidx,ss = get_resample_seq(model,item['unmasked'][idx],item['mask'][idx],method='hardmax')
-                meseqs,meidx,ss = get_resample_seq(model,item['unmasked'][idx],item['mask'][idx],method='softmax_sample')
+                meseqs,meidx,ss = get_resample_seq(model,item['unmasked'][idx],item['mask'][idx],method='softmax-sample')
                 # add_masked_words(conf,alias,masked,i,channel='word',transform=tok2char)
                 # import pdb; pdb.set_trace()
                 # print(model.alias,ss.log_softmax(-1)[:,0].mean().item(),meidx.ravel())
