@@ -4,6 +4,7 @@ def get_high_score_seq(model,unmasked,mask,method='hardmax'):
 def get_resample_seq(model,unmasked,mask,method='softmax-sample'):
     return get_recovered_corrupted_seq(model,unmasked,mask,method=method)
 
+import numpy as np
 def get_recovered_corrupted_seq(model,unmasked,mask,K=4,method='softmax-sample',sample_method='simple',max_iter=5):
     '''
     Mix target with corrupted samples and select the
@@ -19,10 +20,20 @@ def get_recovered_corrupted_seq(model,unmasked,mask,K=4,method='softmax-sample',
             # seqs = torch.stack(+[
             #     seq_sample_noise(model,unmasked,mask) for _ in range(K)]
             # ,dim=1)
-
             B,K,L = seqs.shape
             seqss=  seqs.reshape((seqs.shape[0]*seqs.shape[1],L))
             ss = get_score(model,seqss).reshape((B,K))
+        elif sample_method == 'shuffle':
+
+            sampled = torch.stack([ unmasked[:, torch.randperm(unmasked.shape[1])] for _ in range(K)],dim=1)
+            seqs = torch.cat([seqs, sampled],dim=1)
+            # seqs = torch.stack(+[
+            #     seq_sample_noise(model,unmasked,mask) for _ in range(K)]
+            # ,dim=1)
+            B,K,L = seqs.shape
+            seqss=  seqs.reshape((seqs.shape[0]*seqs.shape[1],L))
+            ss = get_score(model,seqss).reshape((B,K))
+
         elif sample_method == 'simple-effective':
             i = 0
             while True:
@@ -74,7 +85,7 @@ def get_recovered_corrupted_seq(model,unmasked,mask,K=4,method='softmax-sample',
 
 
 
-def get_score(model,seq1):
+def get_score(model,seq1,method='xsa'):
     '''
     Score a given sequence
     '''
@@ -90,6 +101,9 @@ def seq_sample_noise(model,masked,mask):
     '''
     Sample random tokens to replace masked positions
     '''
+    if mask is None:
+        mask= torch.arange(masked.shape[1],device=masked.device)[None,:].repeat((masked.shape[0],1))
+        # mask =
     repl = torch.randint(model.config.graph_dim,size=mask.shape,device=model.device)
     # repl = 0 * item['mask'] + model.config.mask_token_idx
     seq = torch.scatter(masked,src=repl,index=mask,dim=1)

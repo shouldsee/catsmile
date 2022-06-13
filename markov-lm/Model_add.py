@@ -3,9 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim
 
-
 from markov_lm.Model_pretrain import lazy_load_pretrain_model
-# import pdb; pdb.set_trace()
+
+#from markov_lm.Model_gmm import
 from transformers.models.bert.modeling_bert import BertLayer,BertConfig
 import math
 
@@ -23,6 +23,7 @@ class AddModelBase(nn.Module):
         iter_per_layer,
         mask_token_idx,
         n_choice,
+        use_first_mask
                 ):
 
         super().__init__()
@@ -39,6 +40,7 @@ class AddModelBase(nn.Module):
         self.emittor    = nn.Linear(embed_dim,embed_dim,device=device)
         # self.emittor    = nn.Identity()
         self.kchoice    = nn.Linear(embed_dim,embed_dim*n_choice,device=device)
+        self.use_first_mask = use_first_mask
 
 
     def callback_step(self,outer,inner):
@@ -88,6 +90,7 @@ class AddModelBase(nn.Module):
         item.mask:     position of mask
         '''
         masked   = item['masked']
+        summer = item.get('summer',None)
         if out not in 'forward'.split():
             unmasked = item['unmasked']
             mask     = item['mask']
@@ -116,12 +119,20 @@ class AddModelBase(nn.Module):
         xsa = inner[-1]
 
 
+        if self.use_first_mask>0:
+            mask = mask[:,:self.use_first_mask]
         cent,lptok,x = self.callback_cent(xsa,mask,unmasked)
 
         self.callback_end(None,(item,lptok, x))
 
-        loss  = -cent.mean(-1)
         if out=='token': return lptok
+
+        assert summer is not None
+        if summer is not None:
+            # assert 0
+            loss = -(cent*summer).sum(-1)/summer.sum(-1).clip(1,None)
+        else:
+            loss  = -cent.mean(-1)
 
         if out=='loss': return loss
         assert 0
@@ -351,6 +362,11 @@ class LayerConfig(object):
     step_size:float = 0.05
     eps:float = 1.
     n_choice:int =0
+    max_position_length: int=0
+    step_size_keep: float=1.0
+    use_first_mask: int = -1
+    mixture_count :int =1
+
     def to_model(self,device,charset,cls=None):
         if cls is None:
             cls = AddModelWithAttentionStacked
@@ -384,11 +400,12 @@ class AddModelWithAttentionStacked(AddModelBase):
             xc.depth,
             xc.iter_per_layer,
             xc.mask_token_idx,
-            xc.n_choice)
+            xc.n_choice,
+            xc.use_first_mask)
         self.layers = nn.ModuleList([ AddModelWithAttention(device=device, **xc.__dict__).to(device)
          for i in range(xc.depth//xc.iter_per_layer+1)])
         self.project = nn.Identity()
-         
+
     # @property
     # def project(self):
     #     return self.layers[0].embed
@@ -544,6 +561,99 @@ class AddModelBertInterface(AddModelBase):
         return outer,inner
 
 
+class AddModelWithAttentionMixed(AddModelBase):
+    def __init__(self,
+        device,
+        config = None,
+        *a,
+        **kw
+        ):
+        '''
+        use_gradnorm: wheteher to normlise pseudo-gradient
+        use_dropout: 0.5 seems good enough for now
+        use_dense_relu: switch between modes. empirical best are mode 1 and mode 11
+            - 1: QK Attention -> Dense -> Relu -> Denes -> per-position dropout
+            - 11: CK attention -> Dense -> Relu -> CV attention -> PP dropout
+        '''
+
+        state_count = 1
+        if config is None:
+            xc = LayerConfig(**kw)
+        else:
+            xc = config
+        self.config = xc
+        super().__init__(device,
+            xc.graph_dim,
+            xc.embed_dim,
+            xc.depth,
+            xc.iter_per_layer,
+            xc.mask_token_idx,
+            xc.n_choice,
+            xc.use_first_mask)
+        self.layers = nn.ModuleList([ AddModelWithAttentionStacked(device=device, **xc.__dict__).to(device)
+         for i in range(xc.mixture_count)])
+        self.project = nn.Identity()
+        # self.K = len(self.layers)
+
+    # @property
+    # def project(self):
+    #     return self.layers[0].embed
+    @property
+    def embed(self):
+        return self.layers[0].embed
+
+    def _batch_init(self,*a,**kw):
+        K = len(self.layers)
+        xsas = []
+        for k in range(K):
+            outer,inner = self.layers[k]._batch_init(*a,**kw)
+            xsas.append(inner[-1])
+        # inner
+        inner[-1] = xsas[0][None].repeat((K,1,1,1))
+        return outer,inner
+
+    def _step(self,outer,inner,detach):
+        '''
+        Outer should be non-mutable?
+        '''
+        K = len(self.layers)
+        i = inner[0]
+        xsas = inner[-1]
+        xsas_new = xsas * 0
+        idx = torch.ones(xsas[0:1].shape,device=self.device).long()
+        for k in range(K):
+            inner[-1] =xsas[k]
+            outer,inner = self.layers[k]._step(outer,inner,detach)
+            xsas_new = torch.scatter(xsas_new,src=inner[-1][None],dim=0,index=k*idx)
+        inner[-1] =xsas_new
+        return outer,inner
+
+    def forward(self,item,detach=False):
+        outer, inner =  self._loss(item,out='forward',detach=detach)
+        inner[-1] = inner[-1][0]
+        return outer,inner
+
+    def callback_cent(self,xsa,mask,unmasked):
+        K =len(self.layers)
+
+        lptok = torch.gather(xsa,index=mask[None,:,:,None].repeat((K,1,1,xsa.shape[-1])),dim=2)
+
+        lptokk = self.vocab(lptok).logsumexp(0).log_softmax(-1)
+
+        # lptokk = self.vocab(lptok).logsumexp(0).relu()
+        # lptokk = (lptokk).log_softmax(-1)
+
+        # lptokk = (-lptokk).log_softmax(-1)
+
+        # lptokk = 0*lptokk
+        # lptokk = lptokk.log_softmax(-1)
+
+        # lptok = self.vocab(lptok.matmul(self.emittor.weight)).log_softmax(-1)
+
+        x = torch.gather(unmasked,index=mask,dim=1).long()
+        cent = self.target_energy(lptokk,x)
+        return cent, lptokk, x
+
 
 class AddModelWithAttention(AddModelBase):
     def __init__(self,
@@ -564,6 +674,10 @@ class AddModelWithAttention(AddModelBase):
         step_size = 0.05,
         eps = 1.,
         n_choice=0,
+        max_position_length=0,
+        step_size_keep=1.0,
+        use_first_mask=0,
+
         **kw
         ):
         '''
@@ -581,9 +695,11 @@ class AddModelWithAttention(AddModelBase):
             depth,
             iter_per_layer,
             mask_token_idx,
-            n_choice)
+            n_choice,
+            use_first_mask)
         self.device = device
 
+        self.step_size_keep = step_size_keep
         self.use_input_image = use_input_image
         self.use_dropout = use_dropout
         self.use_dense_relu = use_dense_relu
@@ -597,10 +713,13 @@ class AddModelWithAttention(AddModelBase):
         self.D = depth
         if kernel_dim is None:
             kernel_dim = embed_dim
-        self.KE = KE = kernel_dim
+        self.kernel_dim = self.KE = KE = kernel_dim
 
         #### share embed usually works
+        self.max_position_length =max_position_length
+
         self.embed      = nn.Embedding(graph_dim,embed_dim,)
+        self.pos_embed  = nn.Embedding(self.max_position_length,embed_dim)
         self.xkey_static = nn.Linear(embed_dim, 2)
         self.xkey_dynamic= nn.Linear(embed_dim, embed_dim)
         self.kernel_size = kernel_size
@@ -614,22 +733,46 @@ class AddModelWithAttention(AddModelBase):
         # self.KE = KE = embed_dim//kernel_size//2
         self.E = E = embed_dim
         self.D = depth
+        if self.use_dense_relu<=10:
+            self.attention = QKV_Attention(embed_dim,kernel_size,embed_dim)
+            # self.attention_list = nn.ModuleList([QKV_Attention(embed_dim,kernel_size,embed_dim) for _ in range(1)])
+            # self.attention = Gaussian_Attention(embed_dim,kernel_size,embed_dim)
+            # self.attq = nn.Linear(embed_dim,kernel_size*embed_dim)
+            # self.attk = nn.Linear(embed_dim,kernel_size*embed_dim)
+            self.attv = nn.Linear(embed_dim,kernel_size*embed_dim)
+            self.atto = nn.Linear(embed_dim,kernel_size*embed_dim)
+            # self.att_dropout = nn.Dropout(0.1)
+            self.att_dense = nn.Linear(kernel_size*embed_dim,kernel_size*KE)
+        elif self.use_dense_relu in (35,36,37,38,39,40,41):
+            self.attv = nn.Linear(embed_dim,kernel_dim*5*embed_dim)
+            self.atto = nn.Linear(embed_dim,kernel_dim*5*embed_dim)
 
-        self.attention = QKV_Attention(embed_dim,kernel_size,embed_dim)
-        # self.attention_list = nn.ModuleList([QKV_Attention(embed_dim,kernel_size,embed_dim) for _ in range(1)])
-        # self.attention = Gaussian_Attention(embed_dim,kernel_size,embed_dim)
-        # self.attq = nn.Linear(embed_dim,kernel_size*embed_dim)
-        # self.attk = nn.Linear(embed_dim,kernel_size*embed_dim)
-        self.attv = nn.Linear(embed_dim,kernel_size*embed_dim)
-        self.atto = nn.Linear(embed_dim,kernel_size*embed_dim)
-        self.att_dropout = nn.Dropout(0.1)
-        self.att_dense = nn.Linear(kernel_size*embed_dim,kernel_size*KE)
+
+        if self.use_dense_relu in (11,34):
+
+            self.att_dense = nn.Linear(kernel_size*embed_dim,kernel_size*KE)
         # embed_dim)
 
-        self.muk = nn.Linear(embed_dim,kernel_size)
-        self.vk = nn.Linear(embed_dim,kernel_size)
+        if self.use_dense_relu in (11,34) or self.use_dense_relu>=20:
+            self.muk = nn.Linear(embed_dim,kernel_size)
+            self.vk = nn.Linear(embed_dim,kernel_size)
+            self.muk2 = nn.Linear(embed_dim,kernel_size)
+            self.vk2 = nn.Linear(embed_dim,kernel_size)
+        if self.use_dense_relu == 22:
+            self.wk = nn.Linear(embed_dim,kernel_size*embed_dim)
+        if self.use_dense_relu == 24:
+            self.vkk2 = nn.Linear(embed_dim,kernel_size)
+            self.vkk = nn.Linear(embed_dim,kernel_size)
+            # self.wk = nn.Linear(embed_dim,kernel_size)
 
-        self.update_dropout = nn.Dropout(self.use_dropout)
+        if self.use_dense_relu in (26,27,28):
+            assert self.max_position_length!=0
+
+            self.wq = nn.Linear(max_position_length*embed_dim, kernel_size*embed_dim)
+            self.wv = nn.Linear(max_position_length*embed_dim, kernel_size*embed_dim)
+
+
+        self.update_dropout = nn.Dropout(max(0,self.use_dropout))
 
         self.fs_type    = 'lptok'
 
@@ -656,9 +799,14 @@ class AddModelWithAttention(AddModelBase):
                 return x.detach()
             else:
                 return x
-        ### local connection
-        xsad = xsad + (xsa.roll(1,1) @ _d(self.transition.weight)).relu()@_d(self.transcore.weight)
-        xsad = xsad + (xsa.roll(-1,1) @ _d(self.transcore.weight.T)).relu() @ _d(self.transition.weight.T)
+
+        if self.use_dense_relu<20:
+            ### local connection
+            xsad = xsad + (xsa.roll(1,1) @ _d(self.transition.weight)).relu()@_d(self.transcore.weight)
+            xsad = xsad + (xsa.roll(-1,1) @ _d(self.transcore.weight.T)).relu() @ _d(self.transition.weight.T)
+
+
+
         if self.use_input_image:
         # xsad = xsad + xsa.roll(0,1).matmul(self.transcore2.weight)
             xsad = xsad + z.matmul(self.updater.weight.T)
@@ -671,6 +819,8 @@ class AddModelWithAttention(AddModelBase):
             # _attention = self.attention_list[0]
             xid,pijk = _attention(xsa)
 
+
+
         if self.use_dense_relu==1:
             '''
             Dense -> Relu -> Dense
@@ -679,7 +829,7 @@ class AddModelWithAttention(AddModelBase):
             xidact =  xid @ self.att_dense.weight.T
             xidact = xidact.relu()
             xid = xidact @ self.atto.weight.T.T[:xidact.size(-1)]
-
+            xsadd  = xid
 
         elif self.use_dense_relu==2:
             '''
@@ -687,13 +837,14 @@ class AddModelWithAttention(AddModelBase):
             '''
             # xid = (xid @ self.attk2.weight.T /(E*K)**0.5).softmax(-1) @ self.attv2.weight.T.T
             xid = (xid @ self.att_dense.weight.T /(E*K)**0.5).softmax(-1) @ self.atto.weight.T.T
-            pass
+            xsadd  = xid
 
         elif self.use_dense_relu==3:
             '''
             Use attq transpose to approx gradient of logsumexp
             '''
             xid = xid@ _attention.attq.weight
+            xsadd  = xid
 
         elif self.use_dense_relu==4:
             '''
@@ -711,21 +862,30 @@ class AddModelWithAttention(AddModelBase):
             xp  = xp + (((1-pijk)*pijk).reshape((B,L*K,L))* val).transpose(2,1) @ xw.reshape((B,L*K,E))/KE**0.5
 
             xid = xid + xp
+            xsadd  = xid
 
         elif self.use_dense_relu==5:
 
             '### No RELU activation'
             xid = xid @ self.atto.weight.T.T
+            xsadd  = xid
+
+
         elif self.use_dense_relu==6:
             '''
             Recover gradient then rotate
             '''
             xid = xid@_attention.attq.weight @ self.atto.weight[:E,:E]
+            xsadd  = xid
+
         elif self.use_dense_relu==7:
             '''
             Recover gradient then rotate
             '''
             xid = xid@_attention.attq.weight @ self.atto.weight[:E,].relu() @ self.atto.weight[:E,].T
+            xsadd  = xid
+
+
         elif self.use_dense_relu==8:
             '''
             Linear output with a different matrix
@@ -733,6 +893,7 @@ class AddModelWithAttention(AddModelBase):
             # xidact = self.att_dense(xid).sin()
             xidact =  xid
             xid = xidact @ self.atto.weight.T.T
+            xsadd  = xid
 
         elif self.use_dense_relu==9:
             '''
@@ -740,10 +901,12 @@ class AddModelWithAttention(AddModelBase):
             '''
             xidact =  xid.relu()
             xid = xidact @ self.atto.weight.T.T
+            xsadd  = xid
 
         elif self.use_dense_relu==10:
             '''
-            K vector to extract context, transformed into bias,RELU, dense
+            K vector to extract context, transformed into bias,RELU, dense            xsadd  = xid
+
             then distributed according to K vectors
             '''
 
@@ -757,6 +920,7 @@ class AddModelWithAttention(AddModelBase):
 
             pik = hik.softmax(-1)
             xid = pik @ ykd.reshape((B,K,E))
+            xsadd  = xid
 
         elif self.use_dense_relu==11:
             '''
@@ -781,11 +945,41 @@ class AddModelWithAttention(AddModelBase):
             ykd = (yk.reshape((B,K*E)) @ _d(self.att_dense.weight.T)).relu() @ _d(self.att_dense.weight.T.T)
 
             xid = pikv @ ykd.reshape((B,K,E))
+            xsadd  = xid
+
+        elif self.use_dense_relu==34:
+            '''
+            K vector to extract context, transformed into bias,RELU
+            then distributed according to V vectors
+            '''
+
+            muk = self.muk.weight.T
+            muk = _norm(muk)
+            vk = self.vk.weight.T
+            vk = _norm(vk)
+
+            hik = xsa @ _d(muk)
+            # pik = hik.softmax(1)
+            pik = hik.relu()
+            pki = pik.transpose(2,1)
+
+            hikv = xsa @ _d(vk)
+            # pikv = hikv.softmax(-1)
+            pikv = hikv.relu()
+            # xid = pikv @ ( pki @xsa )
+            # yk  = pki @ xsa
+            yk  = pki @ xsa
+            ykd = (yk.reshape((B,K*E)) @ _d(self.att_dense.weight.T)).relu() @ _d(self.att_dense.weight.T.T)
+
+            xid = pikv @ ykd.reshape((B,K,E))
+            xsadd  = xid
 
         elif self.use_dense_relu==12:
             '''
             Same as 11 without the transposed dense
             '''
+            # xsad = xsad + (xsa.roll(1,1) @ _d(self.transition.weight)).relu()@_d(self.transcore.weight)
+            # xsad = xsad + (xsa.roll(-1,1) @ _d(self.transcore.weight.T)).relu() @ _d(self.transition.weight.T)
 
             muk = self.muk.weight.T
             muk = _norm(muk)
@@ -797,15 +991,293 @@ class AddModelWithAttention(AddModelBase):
 
             pik = hik.softmax(-1)
             xid = pik @ ykd.reshape((B,K,E))
+            xsadd  = xid
+
         elif self.use_dense_relu == 13:
             xid = 0.
+            xsadd  = xid
+
+        elif self.use_dense_relu==21:
+            ### local connection
+            muk = self.muk.weight.T
+            muk = _norm(muk)
+            vk = self.vk.weight.T
+            vk = _norm(vk)
+
+            # xsl = xsa.roll(1,1)
+            xsr = xsa.roll(-1,1)
+            hik = xsa @ muk  + xsr @ vk
+            hik = hik*0.1
+            pik = hik.softmax(-1)
+
+            xid = pik @ muk.T + (pik @ vk.T).roll(1,1)
+            xsadd  = xid
+
+        elif self.use_dense_relu==22:
+            ### local connection
+            muk = self.muk.weight.T
+            muk = _norm(muk)
+            vk = self.vk.weight.T
+            vk = _norm(vk)
+            muk2 = self.muk2.weight.T
+            muk2 = _norm(muk2)
+            vk2 = self.vk2.weight.T
+            vk2 = _norm(vk2)
+
+            # xsl = xsa.roll(1,1)
+            xsr = xsa.roll(-1,1)
+            hik = xsa @ muk  + xsr @ vk
+            pik = hik.softmax(-1)
+            wk = self.wk.weight.T.reshape((E*E,K))
+            pikw  = (pik @ wk.T).reshape((B,L,E,E))
+            # import pdb; pdb.set_trace()
+            xid = pik @ muk2.T + (pik @ vk2.T).roll(1,1) + (pikw*xsr.unsqueeze(-1)).sum(-2)
+            xsadd  = xid
+
+        elif self.use_dense_relu==23:
+            ### local connection
+            muk = self.muk.weight.T
+            muk = _norm(muk)
+            vk = self.vk.weight.T
+            vk = _norm(vk)
+
+
+            muk2 = self.muk2.weight.T
+            muk2 = _norm(muk2)
+            vk2 = self.vk2.weight.T
+            vk2 = _norm(vk2)
+
+            # xsl = xsa.roll(1,1)
+            xsr = xsa.roll(-1,1)
+            hik = xsa @ muk  + xsr @ vk
+            hik = hik*0.1
+            pik = hik.softmax(-1)
+
+            xid = pik @ muk2.T + (pik @ vk2.T).roll(1,1) #+ (pikw*xsr.unsqueeze(-1)).sum(-2)
+
+            # xid = pik @ muk.T + (pik @ vk.T).roll(1,1)
+            xsadd  = xid
+
+        elif self.use_dense_relu==24:
+            ### local connection
+            muk = self.muk.weight.T
+            muk = _norm(muk)
+            vk = self.vk.weight.T
+            vk = _norm(vk)
+            vkk = self.vkk.weight.T
+            vkk = _norm(vkk)
+
+
+            muk2 = self.muk2.weight.T
+            muk2 = _norm(muk2)
+            vk2 = self.vk2.weight.T
+            vk2 = _norm(vk2)
+            vkk2 = self.vkk2.weight.T
+            vkk2 = _norm(vkk2)
+
+            # xsl = xsa.roll(1,1)
+            xsr = xsa.roll(-1,1)
+            xsrr= xsa.roll(-2,1)
+            hik = xsa @ muk  + xsr @ vk + xsrr@vkk
+            hik = hik*0.1
+            pik = hik.softmax(-1)
+
+            xid = pik @ muk2.T + (pik @ vk2.T).roll(1,1) + (pik@vkk2.T).roll(2,1)
+
+            # xid = pik @ muk.T + (pik @ vk.T).roll(1,1)
+            xsadd  = xid
+
+
+
+        elif self.use_dense_relu==25:
+            '''
+            K vector to extract context, transformed into bias,RELU
+            then distributed according to V vectors
+            '''
+            xsad = xsad + (xsa.roll(1,1) @ _d(self.transition.weight)).relu()@_d(self.transcore.weight)
+            xsad = xsad + (xsa.roll(-1,1) @ _d(self.transcore.weight.T)).relu() @ _d(self.transition.weight.T)
+
+            # import pdb; pdb.set_trace()
+            xid = xsa.roll(1,1) * xsa.roll(2,1) * self.vk.weight[None, 0:1,:]
+            # self.vk.weight.T[None, :,0:1]
+
+            xsadd  = xid
+
+        elif self.use_dense_relu==26:
+            '''
+            KID parametrisation
+            KID cannot discriminate between shuffled and unshuffled sequences
+            because they look equally unprobable to KID.
+            '''
+            y_k = xsa.reshape((B,L*E)) @ self.wq.weight.T
+            xsadd = (y_k.relu() @ self.wv.weight).reshape((B,L,E))
+
+        elif self.use_dense_relu==27:
+            '''
+            KID parametrisation with Alignemnt
+            '''
+            xsaa = torch.stack([xsa.roll(i,1) for i in range(L)],dim=1)
+            y_k = xsaa.reshape((B,L,L*E)) @ self.wq.weight.T
+            xsal = _norm((y_k @ self.wv.weight).reshape((B,L,L,E)))
+            hl = (xsaa*xsal).mean((-1,-2))
+            pl = hl.softmax(-1)
+            xsadd = (pl[:,:,None,None]*xsal).sum(1)
+            # e = xsaa
+            # .reshape((L*B,L,E))
+        elif self.use_dense_relu==28:
+            '''
+            KID parametrisation
+            KID cannot discriminate between shuffled and unshuffled sequences
+            because they look equally unprobable to KID.
+            '''
+            y_k = xsa.reshape((B,L*E)) @ self.wq.weight.T
+            # xsadd = (y_k.relu() @ self.wv.weight).reshape((B,L,E)) * xsa
+            xsadd = (y_k @ self.wv.weight).reshape((B,L,E)) * xsa
+
+        elif self.use_dense_relu==30:
+            ### local connection
+            xsad = xsad + (xsa.roll(1,1) @ _d(self.transition.weight))@_d(self.transcore.weight)
+            xsad = xsad + (xsa.roll(-1,1) @ _d(self.transcore.weight.T))@ _d(self.transition.weight.T)
+            xsadd = xsad * xsa
+        elif self.use_dense_relu==31:
+            ### local connection
+            xsad = xsad + (xsa.roll(1,1) @ _d(self.transition.weight))@_d(self.transcore.weight)
+            xsad = xsad + (xsa.roll(-1,1) @ _d(self.transcore.weight.T))@ _d(self.transition.weight.T)
+            xsadd = xsad
+
+        elif self.use_dense_relu==35:
+            ### local connection
+            xsas = torch.stack([
+                xsa.roll(2,1),
+                xsa.roll(1,1),
+                xsa.roll(0,1),
+                xsa.roll(-1,1),
+                xsa.roll(-2,1),
+                 ],dim=-1)
+            wx = self.atto.weight.reshape((E*5,-1))[:E*5,:self.kernel_dim]
+            wy = self.attv.weight.reshape((-1,E))[:self.kernel_dim,:E]
+            score = (xsas.reshape((B,L,E*5)) @ wx).relu()
+            xsadd = score@ wy
+
+        elif self.use_dense_relu==36:
+            ### local connection
+            xsas = torch.stack([
+                xsa.roll(2,1),
+                xsa.roll(1,1),
+                xsa.roll(0,1),
+                xsa.roll(-1,1),
+                xsa.roll(-2,1),
+                 ],dim=-1)
+            wx = self.atto.weight.reshape((E*5,-1))[:E*5,:self.kernel_dim]
+            wy = self.attv.weight.reshape((-1,E))[:self.kernel_dim,:E]
+            score = (xsas.reshape((B,L,E*5)) @ wx.relu()).relu()
+            xsadd = score@ wy
+
+        elif self.use_dense_relu==37:
+            ### local connection
+            xsas = torch.stack([
+                xsa.roll(2,1),
+                xsa.roll(1,1),
+                xsa.roll(0,1),
+                xsa.roll(-1,1),
+                xsa.roll(-2,1),
+                 ],dim=-1)
+            wx = self.atto.weight.reshape((E*5,-1))[:E*5,:self.kernel_dim]
+            wy = self.attv.weight.reshape((-1,E))[:self.kernel_dim,:E]
+            score = xsas.reshape((B,L,E*5)) @ wx
+            xsadd = score@ wy
+
+        elif self.use_dense_relu==38:
+            ### local connection
+            xsas = torch.stack([
+                xsa.roll(2,1),
+                xsa.roll(1,1),
+                xsa.roll(0,1),
+                xsa.roll(-1,1),
+                xsa.roll(-2,1),
+                 ],dim=-1)
+            wx = self.atto.weight.reshape((E*5,-1))[:E*5,:self.kernel_dim]
+            wy = self.attv.weight.reshape((-1,E))[:self.kernel_dim,:E]
+            score = (xsas.reshape((B,L,E*5)) @ wx.relu()).relu()
+            xsadd = score@ wy.relu()
+
+
+        elif self.use_dense_relu==39:
+            ### local connection
+            xsas = torch.stack([
+                xsa.roll(4,1),
+                xsa.roll(3,1),
+                xsa.roll(2,1),
+                xsa.roll(1,1),
+                xsa.roll(0,1),
+                # xsa.roll(-1,1),
+                # xsa.roll(-2,1),
+                 ],dim=-1)
+            wx = self.atto.weight.reshape((E*5,-1))[:E*5,:self.kernel_dim]
+            wy = self.attv.weight.reshape((-1,E))[:self.kernel_dim,:E]
+            score = xsas.reshape((B,L,E*5)) @ wx
+            xsadd = score@ wy
+
+
+        elif self.use_dense_relu==40:
+            '''
+            Left to right auto-regression
+            '''
+            ### local connection
+            xsas = torch.stack([
+                xsa.roll(4,1),
+                xsa.roll(3,1),
+                xsa.roll(2,1),
+                xsa.roll(1,1),
+                xsa.roll(0,1),
+                # xsa.roll(-1,1),
+                # xsa.roll(-2,1),
+                 ],dim=-1)
+            wx = self.atto.weight.reshape((E*5,-1))[:E*5,:self.kernel_dim]
+            wy = self.attv.weight.reshape((-1,E))[:self.kernel_dim,:E]
+            score = xsas.reshape((B,L,E*5)) @ wx
+            score = score * 0.1
+            xsadd = score.softmax(-1)@ wy
+
+        elif self.use_dense_relu==41:
+            ### local connection
+            xsas = torch.stack([
+                xsa.roll(4,1),
+                xsa.roll(3,1),
+                xsa.roll(2,1),
+                xsa.roll(1,1),
+                xsa.roll(0,1),
+                # xsa.roll(-1,1),
+                # xsa.roll(-2,1),
+                 ],dim=-1)
+            wx = self.atto.weight.reshape((E*5,-1))[:E*5,:self.kernel_dim]
+            wy = self.attv.weight.reshape((-1,E))[:self.kernel_dim,:E]
+            score = xsas.reshape((B,L,E*5)) @ wx.abs()
+            score = score * 0.1
+            xsadd = score.softmax(-1)@ wy.abs()
+            #
+            #
+            # torch.stack([xsa.roll(0,1) ])
+            # xsad = xsad + (xsa.roll(2,1) @ _d(self.transition.weight))
+            # xsad = xsad + (xsa.roll(1,1) @ _d(self.transition.weight))@_d(self.transcore.weight)
+            # xsad = xsad + (xsa.roll(-1,1) @ _d(self.transcore.weight.T))@ _d(self.transition.weight.T)
+            # xsad = xsad + (xsa.roll(-2,1) @ _d(self.transcore.weight.T))@ _d(self.transition.weight.T)
+            # xsadd = xsad
+
+            # xsadd = xsad
 
         else:
             assert 0,self.use_dense_relu
-        xsad = xsad+ xid
+        xsad = xsad+ xsadd
 
-        mask = torch.ones(xsa.shape[:2]+(1,),device=self.device)
-        mask = self.update_dropout(mask)
+        if self.use_dropout>=0:
+            mask = torch.ones(xsa.shape[:2]+(1,),device=self.device)
+            mask = self.update_dropout(mask)
+            noise = 0.
+        elif self.use_dropout<0:
+            mask = 1.
+            noise = _norm(torch.normal(0,1,size=xsa.shape,device=self.device) * -self.use_dropout)
+
 
         if self.use_gradnorm:
             xsad = _norm(xsad)
@@ -813,7 +1285,7 @@ class AddModelWithAttention(AddModelBase):
         energy = (xsa*xsad).mean(-1)
         xsad = self.step_size* xsad
 
-        xsa = xsa + xsad * mask
+        xsa = self.step_size_keep * xsa + xsad * mask + noise
         if self.use_layernorm:
             xsa = _norm(xsa)
 
@@ -822,11 +1294,17 @@ class AddModelWithAttention(AddModelBase):
 
         return outer,inner
 
+    # def embed(self,z):
+    #     z = self._embed(z)
+    #     # z = z + self.pos_embed(torch.arange(z.shape[1],device=self.device)[None,:])
+    #     return z
     def _batch_init(self,zi,masked):
         #### batch_init part
         ### state init
         z = masked
         z = self.embed(z)
+        if self.max_position_length>0:
+            z = z + self.pos_embed(torch.arange(z.shape[1],device=self.device)[None,:])
         z = self.norm(z)
         y = None
         # z = self.
