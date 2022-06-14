@@ -261,6 +261,165 @@ class GlobalMixtureEncoderEOL(nn.Module):
         else:
             assert 0,ret
 
+
+
+
+class LLGAE(nn.Module):
+    '''
+    Locally Linear Generative Autoencoder
+    '''
+    def __init__(self,
+        device,
+        config, _=None):
+        self.device = device
+        self.config = config
+        super().__init__()
+        self.G = G = config.graph_dim
+        self.E = E = config.embed_dim
+        self.K = K = config.kernel_size
+
+        x = nn.Linear(config.graph_dim,config.kernel_size)
+        self.mu = nn.Parameter(x.weight.T)
+        x = nn.Linear(config.graph_dim*config.embed_dim*config.kernel_size,1)
+        self.w  = nn.Parameter(x.weight.T.reshape((K,G,E)))
+        self.beta = config.beta
+
+
+    def loss(self,item):
+        images = item['images']
+        lat = self.encode(images)
+        #### decode the latent to an ensemble with weight
+        images_recon = self.decode(lat,ret='rec')
+        loss = (images_recon - images)**2
+        loss = loss.mean(-1)
+        return loss
+
+    grad_loss = loss
+    #
+    # def grad_loss(self,item):
+    #     images = item['images']
+    #     lat = self.encode(images)
+    #
+    #     #### decode the latent to an ensemble with weight
+    #     xp, irec = self.decode(lat)
+    #     ### calculate expectation of likelihood
+    #     loss = xp * (irec.unsqueeze(0) - images.unsqueeze(1)).square().mean(-1)
+    #     loss = loss.sum(-1)
+    #     return loss
+
+
+    def norm_w(self,):
+        return self.w / ( 0.01 + self.w.std(dim=1,keepdims=True) )
+    def encode(self,images):
+        beta = self.beta
+        G = self.config.graph_dim
+        # xw = w  = self.norm_w()
+        w  = self.w              #(K,G,E)
+        mu = self.mu.T.unsqueeze(0)#(1,K,G)
+        x = images[:,None]         #(B,1,G)
+        B = len(x)
+        z = torch.zeros((B,  self.K, self.E),device=self.device)
+        for i in range(self.config.n_step):
+            '''
+            For each possible components, finds the optimal z
+            '''
+            # (B,K,G)
+            # import pdb; pdb.set_trace()
+
+            dx = (x - mu - (z.unsqueeze(2) * w[None]).sum(-1))
+            # (B,K,G,E)
+            wdx = dx.unsqueeze(-1) * w.unsqueeze(0)
+            z = z + beta * (wdx.sum(2) - z)
+
+        dxsq = -dx.square().mean(-1)
+        kmax = dxsq.argmax(-1)
+        #(B,)
+        # zmax = z[:,kmax]
+        # import pdb; pdb.set_trace()
+        zmax = torch.gather(z,index=kmax[:,None,None].expand((-1,-1,self.E)),dim=1)
+
+        return zmax,kmax
+        wimg = self.project.weight.T
+        wrec = self.rec.weight.T
+        xh = -(images.unsqueeze(-1) - wimg[None])**2
+        xh = xh.mean(1)
+        xh = xh * beta
+        xp = xh.softmax(-1)
+        lat  = xp @ wrec
+        return lat
+
+    def decode(self,lat,ret='tup'):
+        zmax,kmax = lat
+        zmax                     #(B,1,E)
+        # w  = self.norm_w()[kmax]
+        w  = self.w   [kmax]     #(B,G,E)
+        mu = self.mu.T[kmax,:,]  #(B,G,1)
+        y = (zmax @ w.transpose(2,1))[:,0] + mu
+        return y
+
+
+
+class GaussianGenerativeAutoEncoderLEOP(nn.Module):
+    def __init__(self,
+        device,
+        config, _=None):
+        self.device = device
+        self.config = config
+        super().__init__()
+
+        self.project = nn.Linear(config.graph_dim,config.kernel_size)
+        self.rec = nn.Linear(config.kernel_size,config.embed_dim)
+#        self.rec = nn.Linear(config.graph_dim,config.embed_dim)
+        # self.beta = config.beta
+        self.beta = getattr(config,'beta',0.001)
+        # self.beta = 0.001
+
+    def loss(self,item):
+        images = item['images']
+        lat = self.encode(images)
+        images_recon = self.decode(lat)
+        loss = (images_recon - images)**2
+        loss = loss.mean(-1)
+        return loss
+    grad_loss = loss
+
+    def encode(self,images):
+        '''
+        Perform Gradient Descent or zero-gradient method to find the optimal code
+        '''
+        beta = self.beta
+        wimg = self.project.weight.T
+        wrec = self.rec.weight.T
+        xh  = -(images.unsqueeze(-1) - wimg[None])**2
+        xh  = xh.mean(1)
+        xh  = xh * beta
+        xp  = xh.softmax(-1)
+        '''
+        this is p_{bk}, needs to match with latent
+        '''
+
+        lat = xp @ wrec
+        return lat
+
+    def decode(self,lat,ret='rec'):
+        beta = self.beta
+        wimg = self.project.weight.T
+        wrec = self.rec.weight.T
+        # wrec = wrec - wrec.mean(0,keepdims=True)
+
+        xh = -(lat.unsqueeze(-1) - wrec.T[None]).square()
+        xh = xh.mean(1)
+        xh = xh * beta
+        xp = xh.softmax(-1)
+        # print((100*xp[:2,:170]).int())
+        # print((100*xp[:2,:170]).cumsum(-1).int())
+        # print((100*xp[:2,:170]).sum(-1).int())
+        # print((100*xp[:2,100:200]).int())
+        images_recon = xp @ wimg.T
+        #tempself.project.weight
+        return images_recon
+
+
 class GlobalMixtureEncoderStratifiedEOL(nn.Module):
     '''
     Change loss function to expectation of probability
@@ -954,7 +1113,9 @@ class GlobalMixtureEncoderDiffEOL(nn.Module):
             conf.learning_rate = 0.001
             # conf.learning_rate = 0.1
             conf.optimizer = add_optimizer(conf, conf.params)
-            
+
+
+
 import sys
 class GlobalMixtureEncoderDiffEOLGrad(GlobalMixtureEncoderDiffEOL):
 

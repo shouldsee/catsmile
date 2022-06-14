@@ -182,13 +182,12 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
             graph_dim = conf.dataset.graph_dim,
             # embed_dim = 20,
             iter_per_layer=-1,
-            kernel_size = 20,
+            kernel_size = 50,
             n_step = 5,
             beta = 0.01,
-            # beta = 10.,
             # beta = 1,
             embed_dim = 20,
-            model_name = 'LLGAE',
+
             # beta = 1.,
             # beta = 1.,
 
@@ -199,7 +198,7 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
             # model_name = 'GlobalMixtureEncoderDiffEOL',
 
             # 'Checkpoints/-S28-taskfashion-mnist-compress-shuffle1-depth1-graph-dim784-embed-dim20-iter-per-layer-1-kernel-size40-model-nameGlobalMixtureEncoderDiffEOLGrad-beta0.01-n-step5-loglr-1.0_30_936.48840.pkl'
-            # model_name = 'GlobalMixtureEncoderDiffEOLGrad',
+            model_name = 'GlobalMixtureEncoderDiffEOLGrad',
             # model_name = 'NLAutoEncoder',
             # model_name = 'SKPCA',
             # kernel_size = 10,
@@ -227,9 +226,9 @@ def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONI
         '''
 
         # conf.learning_rate = 0.0001
-        conf.learning_rate = 0.001
+        # conf.learning_rate = 0.001
         # conf.learning_rate = 1.0
-        # conf.learning_rate = 0.1
+        conf.learning_rate = 0.1
         # conf.learning_rate = 0.0001
         # conf.learning_rate = 0.001
         def _callback(epoch):
