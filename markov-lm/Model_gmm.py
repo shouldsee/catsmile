@@ -442,22 +442,12 @@ class GlobalMixtureEncoderStratifiedEOL(nn.Module):
                 # .transpose(2,1)
             else:
                 assert 0,ret
-        # else:
-        #     B = len(lat1)
-        #     _,idx=  xp.max(dim=-1)
-        #     xwimg = torch.gather( wimg2[None].repeat((B,1,1,1)),index=idx[:,None,None,None].repeat((1,G,1,K+1)),dim=2)[:,:,0]
-        #     # xp2 =
-        #     import pdb; pdb.set_trace()
-        #
 
 
 class GlobalMixtureEncoderEOLGrad(GlobalMixtureEncoderEOL):
     '''
     Change loss function to expectation of probability
     '''
-
-
-
     def grad_loss(self,item):
         images = item['images']
         lat = self.encode(images)
@@ -501,21 +491,6 @@ class GlobalMixtureEncoderEOLGrad(GlobalMixtureEncoderEOL):
         #     print( loss.mean().item())
         # print('done')
         return lat
-
-    def _callback(epoch):
-        '''
-        Disable gradient in first 10 steps to initialise prototypes
-        '''
-        n_epoch = 10
-        if epoch<n_epoch:
-            conf.model.n_step = 0
-        elif epoch == n_epoch:
-            conf.model.n_step = conf.lconf.n_step
-            # conf.model.n_step = 5
-            # conf.lconf.n_step
-            conf.learning_rate = 0.001
-            # conf.learning_rate = 0.1
-            conf.optimizer = add_optimizer(conf, conf.params)
 
 
 class GlobalMixtureEncoderLEOP(GlobalMixtureEncoderEOL):
@@ -964,6 +939,22 @@ class GlobalMixtureEncoderDiffEOL(nn.Module):
             return images_recon
         else:
             assert 0, ret
+
+    def _callback(epoch):
+        '''
+        Disable gradient in first 10 steps to initialise prototypes
+        '''
+        n_epoch = 10
+        if epoch<n_epoch:
+            conf.model.n_step = 0
+        elif epoch == n_epoch:
+            conf.model.n_step = conf.lconf.n_step
+            # conf.model.n_step = 5
+            # conf.lconf.n_step
+            conf.learning_rate = 0.001
+            # conf.learning_rate = 0.1
+            conf.optimizer = add_optimizer(conf, conf.params)
+            
 import sys
 class GlobalMixtureEncoderDiffEOLGrad(GlobalMixtureEncoderDiffEOL):
 
