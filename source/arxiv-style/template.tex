@@ -1,0 +1,252 @@
+\documentclass{article}
+
+\usepackage{arxiv}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{amsmath}
+\usepackage{cleveref}       % smart cross-referencing
+\usepackage{lipsum}         % Can be removed after putting your text content
+\usepackage{graphicx}
+\usepackage{natbib}
+\usepackage{doi}
+
+\newcommand{\mytitle}{
+	From Determinisitc to Bayesian Autoencoders}
+
+\title{
+\mytitle
+%A Connection Between Determinisitc and Bayesian Autoencoders
+}
+
+% Here you can change the date presented in the paper title
+%\date{September 9, 1985}
+% Or remove it
+%\date{}
+
+\author{ 
+ \hspace{1mm} Feng Geng \\
+ \texttt{shouldsee@qq.com} 
+ \thanks{
+	\href{http://www.catsmile.info}{http://www.catsmile.info}
+     }
+	%% examples of more authors
+	\And
+	Hua Zong Ban
+	%% \href{https://orcid.org/0000-0000-0000-0000}{\includegraphics[scale=0.06]{orcid.pdf}\hspace{1mm}Elias D.~Striatum} \\
+	%% \texttt{stariate@ee.mount-sheikh.edu} \\
+	%% \AND
+	%% Coauthor \\
+	%% Affiliation \\
+	%% Address \\
+	%% \texttt{email} \\
+	%% \And
+	%% Coauthor \\
+	%% Affiliation \\
+	%% Address \\
+	%% \texttt{email} \\
+	%% \And
+	%% Coauthor \\
+	%% Affiliation \\
+	%% Address \\
+	%% \texttt{email} \\
+}
+
+% Uncomment to override  the `A preprint' in the header
+%\renewcommand{\headeright}{Technical Report}
+%\renewcommand{\undertitle}{Technical Report}
+\renewcommand{\shorttitle}{\textit{arXiv} Template}
+
+%%% Add PDF metadata to help others organize their library
+%%% Once the PDF is generated, you can check the metadata with
+%%% $ pdfinfo template.pdf
+\hypersetup{
+pdftitle={\mytitle
+},
+pdfsubject={csml},
+pdfauthor={Feng Geng},
+pdfkeywords={Bayesian,Machine Learning},
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+	Since the famous paper on denoising autoencoder (DAE), 
+	AutoEncoder mainly referes to usage
+	of neural networks to extract meaningful hidden 
+	representations, with its performance measured with 
+	resconstruction error or generative capabilities,
+	enchanceable with denoising or entropic
+    regularisiation. Here we show modern autoencoder 
+	objectives connect to traditional approximation
+	objectives like PCA through a simple framework,
+	which unifys the determinisitc and probabilistic views.
+\end{abstract}
+
+
+
+\section{Introduction}
+	Ideas of autoencoders trace back to resricted boltzmann machines. 
+	Later research showed denoising objectives prevent overfitting when 
+	latent space is bigger than the original space in 
+	feedforward neural nets. The addition of noise in latent 
+	space is further formalised under the framework of variational
+	inference. The core idea is to approximate the intractable
+	posterior latent distribution with a neural network, 
+	so that we do not have to invert the decoder using Bayes theorem.
+
+	
+	\begin{equation} \label{eq1}
+	z = f(x)  
+    \end{equation}
+  	
+    \begin{equation} \label{eq2}
+	L(\theta,\phi) = E_{z\sim q_{\theta}(z|x)}[p(x|z)] +  KL( q_{\theta}(z|x) || p_\phi(z|x) )
+	\end{equation}
+	
+	On the other hands, non-probabilistic algorithms 
+	exist for producing linear and nonlinear embeddings
+	under an error minimisation framework,
+	such as principal components analyses (PCA), locally linear 
+	embeddings, Isomap, tSNE, UMAP. Many of the nonlinear
+	embedding algorithms, however, do not include a decoding process,
+	and is thus a one-way process constrained to preseve information.
+	For the two way algorithms, such as PCA, the sample-wise objective 
+	can be written as 
+
+
+    \begin{align*} 
+	L(m) &= \sum_b l(m,x_b) \\
+	     &= \sum_b \max_{z_b} \left(-||g_m(z_b) - x_b||^2  
+		 \right) \\ 
+	l(m,z_b,x_b) &= \left(-||g_m(z_b) - x_b||^2  
+		 \right) 
+	\end{align*}
+	
+	note we denote autoencoding process as finding the $z$ 
+	that optimise the reconstruction loss. To summarise the autoencoding
+	process and model fitting in a single expression,
+	consider the sum of all possible per-sample decoding errors.
+
+    \begin{align*} 
+	L(m,Z) &= \sum_x l(m,z_b,x_b)  \\
+	&\leq \sum_x \max_{z_b} l(m,z_b,x_b)  
+	\\
+	&\leq \max_{m} \sum_x \max_{z_b} l(m,z_b,x_b) \\
+	&= \max_{m,Z} L(m,Z)
+	\end{align*}
+
+	where the max over $m$ means fitting the model.
+
+	\label{sec:headings}
+
+\lipsum[4] See Section \ref{sec:headings}.
+
+\subsection{Headings: second level}
+\lipsum[5]
+\begin{equation}
+	\xi _{ij}(t)=P(x_{t}=i,x_{t+1}=j|y,v,w;\theta)= {\frac {\alpha _{i}(t)a^{w_t}_{ij}\beta _{j}(t+1)b^{v_{t+1}}_{j}(y_{t+1})}{\sum _{i=1}^{N} \sum _{j=1}^{N} \alpha _{i}(t)a^{w_t}_{ij}\beta _{j}(t+1)b^{v_{t+1}}_{j}(y_{t+1})}}
+\end{equation}
+
+\subsubsection{Headings: third level}
+\lipsum[6]
+
+\paragraph{Paragraph}
+\lipsum[7]
+
+
+
+\section{Examples of citations, figures, tables, references}
+\label{sec:others}
+
+\subsection{Citations}
+Citations use \verb+natbib+. The documentation may be found at
+\begin{center}
+	\url{http://mirrors.ctan.org/macros/latex/contrib/natbib/natnotes.pdf}
+\end{center}
+
+Here is an example usage of the two main commands (\verb+citet+ and \verb+citep+): Some people thought a thing \citep{kour2014real, hadash2018estimate} but other people thought something else \citep{kour2014fast}. Many people have speculated that if we knew exactly why \citet{kour2014fast} thought this\dots
+
+\subsection{Figures}
+\lipsum[10]
+See Figure \ref{fig:fig1}. Here is how you add footnotes. \footnote{Sample of the first footnote.}
+\lipsum[11]
+
+\begin{figure}
+	\centering
+	\fbox{\rule[-.5cm]{4cm}{4cm} \rule[-.5cm]{4cm}{0cm}}
+	\caption{Sample figure caption.}
+	\label{fig:fig1}
+\end{figure}
+
+\subsection{Tables}
+See awesome Table~\ref{tab:table}.
+
+The documentation for \verb+booktabs+ (`Publication quality tables in LaTeX') is available from:
+\begin{center}
+	\url{https://www.ctan.org/pkg/booktabs}
+\end{center}
+
+
+\begin{table}
+	\caption{Sample table title}
+	\centering
+	\begin{tabular}{lll}
+		\toprule
+		\multicolumn{2}{c}{Part}                   \\
+		\cmidrule(r){1-2}
+		Name     & Description     & Size ($\mu$m) \\
+		\midrule
+		Dendrite & Input terminal  & $\sim$100     \\
+		Axon     & Output terminal & $\sim$10      \\
+		Soma     & Cell body       & up to $10^6$  \\
+		\bottomrule
+	\end{tabular}
+	\label{tab:table}
+\end{table}
+
+\subsection{Lists}
+\begin{itemize}
+	\item Lorem ipsum dolor sit amet
+	\item consectetur adipiscing elit.
+	\item Aliquam dignissim blandit est, in dictum tortor gravida eget. In ac rutrum magna.
+\end{itemize}
+
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}  %%% Uncomment this line and comment out the ``thebibliography'' section below to use the external .bib file (using bibtex) .
+
+
+%%% Uncomment this section and comment out the \bibliography{references} line above to use inline references.
+% \begin{thebibliography}{1}
+
+% 	\bibitem{kour2014real}
+% 	George Kour and Raid Saabne.
+% 	\newblock Real-time segmentation of on-line handwritten arabic script.
+% 	\newblock In {\em Frontiers in Handwriting Recognition (ICFHR), 2014 14th
+% 			International Conference on}, pages 417--422. IEEE, 2014.
+
+% 	\bibitem{kour2014fast}
+% 	George Kour and Raid Saabne.
+% 	\newblock Fast classification of handwritten on-line arabic characters.
+% 	\newblock In {\em Soft Computing and Pattern Recognition (SoCPaR), 2014 6th
+% 			International Conference of}, pages 312--318. IEEE, 2014.
+
+% 	\bibitem{hadash2018estimate}
+% 	Guy Hadash, Einat Kermany, Boaz Carmeli, Ofer Lavi, George Kour, and Alon
+% 	Jacovi.
+% 	\newblock Estimate and replace: A novel approach to integrating deep neural
+% 	networks with existing applications.
+% 	\newblock {\em arXiv preprint arXiv:1804.09028}, 2018.
+
+% \end{thebibliography}
+
+
+\end{document}
