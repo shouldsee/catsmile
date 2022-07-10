@@ -1,3 +1,8 @@
+#! https://zhuanlan.zhihu.com/p/519465520
+
+# 8501-20220524:模型复现与分布式建模
+
+
 ---
 jupytext:
   cell_metadata_filter: -all
@@ -14,9 +19,7 @@ kernelspec:
 ---
 
 
-#! https://zhuanlan.zhihu.com/p/519465520
 
-# 8501-20220524:模型复现与分布式建模
 
 静态站:<http://catsmile.info/8501-model-recover.html>
 

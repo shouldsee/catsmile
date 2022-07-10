@@ -52,27 +52,28 @@
   - 给定线性近似 $y=f(x)=J \cdot x$, 考虑微小扰动通过函数后产生的映射函数 $e \sim N(0, \sigma^2 I)$
   - 考虑变量替换 $ (y-y_0) = (f(x_0+e) - y_0)=(J x_0 + J e - y_0) = (J e)$  
   - $E(Je) = J E(e) = 0$
-  -
-    $$
-    \begin{align}
-    E(|J e|^2) &= E((J e)^T J e) \\
-    &= E(e^T J^T J e) \\
-    &= E(e^T K e )  \\
-    &= E(\sum_{ij} e_i e_j K_{ij} ) \\
-    &= \sum_{ij}E(e_i e_j ) K_{ij} \\
+
+$$
+\begin{align}
+E(|J e|^2) &= E((J e)^T J e) \\
+&= E(e^T J^T J e) \\
+&= E(e^T K e )  \\
+&= E(\sum_{ij} e_i e_j K_{ij} ) \\
+&= \sum_{ij}E(e_i e_j ) K_{ij} \\
 \text{(since off-diagonal elements are zero for e) }
-    &= \sum_{i} \sigma^2 K_{ii}   \\
-    \\
-    K &= J^T J = \sum_{k} J_{ki} J_{kj} \\
+&= \sum_{i} \sigma^2 K_{ii}   \\
+\\
+K &= J^T J = \sum_{k} J_{ki} J_{kj} \\
 \text{(this is the sum of 2-norm of the row vectors )}   
-     K_{ii} &= \sum_{k} J_{ki} J_{ki}  \\
-    &= \sum_{i} \sigma^2 K_{ii}  \\
-    \\
-    E(|J e|^2) &= \sum_{i} \sigma^2 (\sum_{k} J_{ki} J_{ki})\\
-    \text{(this is the squared Frobenius norm scaled)}   
-    E(|J e|^2) &= \sigma^2 \sum_{i,k}  J_{ki}^2\\
-    \end{align}
-    $$
+  K_{ii} &= \sum_{k} J_{ki} J_{ki}  \\
+&= \sum_{i} \sigma^2 K_{ii}  \\
+\\
+E(|J e|^2) &= \sum_{i} \sigma^2 (\sum_{k} J_{ki} J_{ki})\\
+\text{(this is the squared Frobenius norm scaled)}   
+E(|J e|^2) &= \sigma^2 \sum_{i,k}  J_{ki}^2\\
+\end{align}
+$$
+    
   - 这说明,在线性情况下,注入高斯分布微扰得到的响应扰动的MSE大小$E_e(|f(x+e)-f(x)|^2)/E_e(|e|^2)$
   由$J$的[F范数,FrobeniusNorm](https://en.wikipedia.org/wiki/Matrix_norm#Frobenius_norm)完全刻画,
   这个比Jacobian的行列式要好算很多.
