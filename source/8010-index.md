@@ -20,6 +20,16 @@ numbered: 0
 1011-ncsn.md
 1012-softargmax.md
 1013-mixture-and-em.md
+1014-gae.md
+1015-bae.md
+1016-torus.md
+1017-glgae.md
+1018-aae.md
+1019-vaml.md
+1022-llgae.md
+1024-ddpm-math.md
+1025-dsm.md
+1026-recent-sm.md
 3001-kg-study.md
 3002-seq-hidden-states.md
 3005-neural-nets.md
@@ -39,6 +49,7 @@ numbered: 0
 9006-discriminative-refill.md
 9007-bert-struct.md
 9008-bert-latent-dist.md
+9013-ddpm.md
 --jbex-markdown
 --jbex-notebooks
 jbex-markdown-notebooks.md
