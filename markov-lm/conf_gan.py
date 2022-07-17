@@ -5,7 +5,7 @@ from markov_lm.c9007_util import tbuf_cls,fws,recur_detach
 import shutil
 
 import collections
-
+import math
 class ConfigPrototype(object):
     def __init__(self,fn,is_sorted=False,
     field_width = [20,20] + [5]*30,
@@ -24,6 +24,19 @@ class ConfigPrototype(object):
         self.section_ender = section_ender
             # sele.ct
         return
+
+    def get_cache_name(conf):
+        '''
+        Class name is used to construct checkpoint filenames. manually record important params here, needs a better system.
+        [TBC]
+        '''
+        conf._session_name = ''
+        conf._session_name +=  f'-S{conf.instance}'
+        conf._session_name += f'-task{conf.task}-shuffle{int(conf.shuffle)}'
+        conf._session_name += conf.lconf.to_str()
+        conf._session_name += f'-loglr{math.log10(conf.learning_rate):.1f}'
+        return conf._session_name
+
 
     def data_input_transform(self,item):
         raise NotImplementedError
@@ -49,9 +62,9 @@ class ConfigPrototype(object):
         pass
 
 
-    def callback_step(self,epoch,indexedItem,loss):
+    def callback_step(self,epoch,tri,item,loss):
         pass
-        tri,item = indexedItem
+        # tri,item = indexedItem
         f = self.f
         t = self.handler
         s = self.s
@@ -80,7 +93,7 @@ class ConfigPrototype(object):
 
     def callback_start(self,epoch,a,b):
         pass
-    def callback_end(self,epoch,indexedItem,loss):
+    def callback_end(self,epoch,tri,item,loss):
         s = self.s
         f = self.f
         is_sorted = self.is_sorted
@@ -112,6 +125,47 @@ class ConfigPrototype(object):
         # _print(*[_str(vv,10)+'|'+' '*3 for vv in x])
         _print('='*35)
         f.flush()
+
+
+
+    def add_hook_for_output_tensor(self,model,CONFIG_EXPAND_LEVEL,CONFIG_DETACH, CONFIG_PRINT_CLASS):
+        '''
+
+        returns a temp object with a dict of tensors outputted at each nn.Module with maximum depth of CONFIG_EXPAND_LEVEL.
+        '''
+        class Temp(object):
+            xdict = collections.OrderedDict()
+            handles = []
+            def __init__(self,):
+                pass
+                # self.xdict= xdict
+            def remove_hooks(self):
+                # ,handles= handles):
+                 [h.remove() for h in self.handles]
+        t = Temp()
+        handles = t.handles
+        xdict = t.xdict
+
+
+        def get_backward_hook(name,xdict=xdict):
+            # def hook(model, input_grad, output_grad):
+            def hook(output_grad):
+                recur_detach(xdict,name,output_grad,CONFIG_DETACH,'/')
+                # xdict[name] = output
+            return hook
+
+        '注入灵魂'
+        for k,v in model.named_parameters():
+            if k.count('.')<=CONFIG_EXPAND_LEVEL:
+                if CONFIG_PRINT_CLASS:
+                    print(fws(k,60) ,v.__class__);
+                h = v.register_hook(get_backward_hook(k))
+                # h = v.register_full_backward_hook(get_backward_hook(k))
+                handles.append(h)
+
+        return t
+
+
 
 @dataclass
 class GANConfigPrototype(ConfigPrototype):

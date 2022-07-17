@@ -34,8 +34,7 @@ from markov_lm.Model_add import AddModelWithAttention
 import collections
 import math
 from markov_lm.conf_gan import ConfigPrototype
-from markov_lm.conf_data import ConfigDataset
-dconf = ConfigDataset()
+
 
 
 def parse_checkpoint(sys,):
@@ -59,239 +58,61 @@ def parse_checkpoint(sys,):
         # LOAD = int(LOAD)
     return LOAD
 
-if 1:
-    from markov_lm.Model_gmm import GMMLayerConfig
-    # from markov_lm.Model_gmm import GlobalPCA
-    # CLS = []
-#    CLS = [AddModelWithAttention]
-    def _add_model(conf,):
-        # conf.lconf  =lconf= GMMLayerConfig(
-        #     depth = 1,
-        #     graph_dim = conf.dataset.graph_dim,
-        #     # embed_dim = 20,
-        #     iter_per_layer=-1,
-        #     kernel_size = 11,
-        #     n_step = 5,
-        #     beta = 0.01,
-        #     # beta = 10.,
-        #     # beta = 1,
-        #     embed_dim = 20,
-        #     model_name = 'LLGAE',
-        #     # model_name = 'GLGAE',
-        #     # model_name = 'GLGAEGrad',
-        #     p_null = 0.,
-        #     # model_name = 'GLGAEGradEOL',
-        #     # beta = 1.,
-        #     # beta = 1.,
-        # )
 
-        # conf.lconf  =lconf= GMMLayerConfig(
-        #     depth = 1,
-        #    # graph_dim = conf.dataset.graph_dim,
-        #
-        #     # embed_dim = (14,14),
-        #     # model_name = 'CGAE',
-        #
-        #     iter_per_layer=-1,
-        #     # kernel_size = 100,
-        #     n_step = 1,
-        #     beta = 1.001,
-        #
-        #     kernel_size = (21,5),
-        #     graph_dim = (28,28),
-        #     embed_dim = (28,28),
-        #     model_name = 'GibbsGGAE',
-        #     # embed_dim =
-        #     # model_name = 'KMEANS',
-        #     # model_name = 'RandomKMEANS',
-        #     p_null = 0.,
-        # )
-        # conf.learning_rate = 0.01
+def add_hook_for_output_tensor(model,CONFIG_EXPAND_LEVEL,CONFIG_DETACH, CONFIG_PRINT_CLASS):
+    '''
 
-        #
-        # conf.lconf  =lconf= GMMLayerConfig(
-        #     depth = 1,
-        #     iter_per_layer=-1,
-        #     n_step = 5,
-        #     # beta = 1.001,
-        #     beta = 0.01001,
-        #     graph_dim = conf.dataset.graph_dim,
-        #     embed_dim = 20,
-        #     kernel_size = 15,
-        #     model_name = 'LLGAEWithResidual',
-        #     p_null = 0.,
-        # )
-        # conf.learning_rate = 0.0001
-
-        # conf.lconf  =lconf= GMMLayerConfig(
-        #     depth = 1,
-        #     iter_per_layer=-1,
-        #     n_step = 15,
-        #     # beta = 1.001,
-        #     beta = 0.01001,
-        #     graph_dim = conf.dataset.graph_dim,
-        #     embed_dim = 20,
-        #     kernel_size = 15,
-        #     model_name = 'LLGAE',
-        #     p_null = 0.,
-        # )
-        # conf.learning_rate = 0.0001
+    returns a temp object with a dict of tensors outputted at each nn.Module with maximum depth of CONFIG_EXPAND_LEVEL.
+    '''
+    class Temp(object):
+        xdict = collections.OrderedDict()
+        handles = []
+        def __init__(self,):
+            pass
+            # self.xdict= xdict
+        def remove_hooks(self):
+            # ,handles= handles):
+             [h.remove() for h in self.handles]
+    t = Temp()
+    handles = t.handles
+    xdict = t.xdict
 
 
-        conf.lconf  =lconf= GMMLayerConfig(
-            depth = 1,
-            iter_per_layer=-1,
-            n_step = 1,
-            # beta = 1.001,
-            beta = 1.,
-            graph_dim = conf.dataset.graph_dim,
-            embed_dim = 20,
-            kernel_size = 15,
-            model_name = 'LLGAE',
-            p_null = 0.,
-        )
-        conf.learning_rate = 0.0001
-        #
-        # conf.lconf  =lconf= GMMLayerConfig(
-        #     depth = 1,
-        #     iter_per_layer=-1,
-        #     n_step = 1,
-        #     # beta = 1.001,
-        #     beta = 1.,
-        #     graph_dim = conf.dataset.graph_dim,
-        #     embed_dim = 20,
-        #     kernel_size = 30,
-        #     model_name = 'LLGAE',
-        #     p_null = 0.,
-        # )
-        # conf.learning_rate = 0.0001
-        #
+    def get_backward_hook(name,xdict=xdict):
+        # def hook(model, input_grad, output_grad):
+        def hook(output_grad):
+            recur_detach(xdict,name,output_grad,CONFIG_DETACH,'/')
+            # xdict[name] = output
+        return hook
 
-        # conf.lconf  =lconf= GMMLayerConfig(
-        #     depth = 1,
-        #     iter_per_layer=-1,
-        #     n_step = 5,
-        #     # beta = 1.001,
-        #     beta = 0.01001,
-        #     graph_dim = conf.dataset.graph_dim,
-        #     embed_dim = 20,
-        #     kernel_size = 30,
-        #     model_name = 'LLGAE',
-        #     p_null = 0.,
-        # )
-        # conf.learning_rate = 0.0001
-        #
+    '注入灵魂'
+    for k,v in model.named_parameters():
+        if k.count('.')<=CONFIG_EXPAND_LEVEL:
+            if CONFIG_PRINT_CLASS:
+                print(fws(k,60) ,v.__class__);
+            h = v.register_hook(get_backward_hook(k))
+            # h = v.register_full_backward_hook(get_backward_hook(k))
+            handles.append(h)
 
+    return t
+def attach_dataset_fashion_mnist_compress(conf):
+    '''
+    Image recover for fashion mnist
+    '''
 
-        conf.lconf  =lconf= GMMLayerConfig(
-            depth = 1,
-            iter_per_layer=-1,
-            n_step = 5,
-            # beta = 1.001,
-            beta = 0.01001,
-            graph_dim = (1,28,28),
-            # conf.dataset.graph_dim,
-            # graph_dim = conf.dataset.graph_dim,
-            embed_dim = 20,
-            kernel_size = 30,
-            model_name = 'BetaVAEConvLocalNoNoise',
-            p_null = 0.,
-        )
-        conf.learning_rate = 0.0001
-        # #
-        # #
-        # conf.lconf  =lconf= GMMLayerConfig(
-        #     depth = 1,
-        #     iter_per_layer=-1,
-        #     n_step = 5,
-        #     # beta = 1.001,
-        #     beta = 0.01001,
-        #     graph_dim = (1,28,28),
-        #     # conf.dataset.graph_dim,
-        #     # graph_dim = conf.dataset.graph_dim,
-        #     embed_dim = 20,
-        #     kernel_size = 0,
-        #     # model_name = 'BetaVAENoNoise',
-        #     model_name = 'AutoEncoderBakeOff',
-        #     p_null = 0.,
-        # )
-        # conf.learning_rate = 0.0001
+    from markov_lm.Dataset.fashion_mnist import fashion_mnist
+    conf.dataset = fashion_mnist(CUDA=conf.CUDA)
+    conf.dataloader = torch.utils.data.DataLoader(conf.dataset, batch_size=conf.batch_size, shuffle=conf.shuffle)
+    conf.data_input_transform = lambda item:[item.__setitem__('epoch',conf.epoch),item][-1]
+    conf.loss = lambda *a,**kw: conf.model.loss(*a,**kw)
+    # conf.loss = lambda *a,**kw: conf.model.grad_loss(*a,**kw)
+    conf.grad_loss = lambda *a,**kw: conf.model.grad_loss(*a,**kw)
+    # conf.grad_loss = lambda *a,**kw: conf.model.loss(*a,**kw)
+    # conf.grad_loss = lambda : conf.model.loss
+    #dict(unmasked = item['english'],masked=item['masked'], mask=item['mask'])
+    # import pdb; pdb.set_trace()
 
-        #
-        #
-        #
-        # conf.lconf  =lconf= GMMLayerConfig(
-        #     depth = 1,
-        #     iter_per_layer=-1,
-        #     n_step = 5,
-        #     beta = 0.010,
-        #     # beta = 0.001001,
-        #     # graph_dim = (1,28,28),
-        #     graph_dim = conf.dataset.graph_dim,
-        #     # graph_dim = conf.dataset.graph_dim,
-        #     embed_dim = 20,
-        #     kernel_size = 0,
-        #     # model_name = 'BetaVAENoNoise',
-        #     model_name = 'SOGAE2',
-        #     p_null = 0.,
-        # )
-        # conf.learning_rate = 0.0001
-
-
-        # conf.lconf  =lconf= GMMLayerConfig(
-        #     depth = 3,
-        #     iter_per_layer=-1,
-        #     n_step = 1,
-        #     beta = 1.001,
-        #     # embed_dim =
-        #     # graph_dim = conf.dataset.graph_dim,
-        #     graph_dim = (28,28),
-        #     embed_dim = 7,
-        #     kernel_size = (7,7),
-        #     model_name = 'ConvLocalAutoEncoder',
-        #     p_null = 0.,
-        # )
-        # conf.learning_rate = 0.0001
-
-
-
-
-        '''
-        AutoEncoder          E20 1225.872217235451
-        SKPCA                E20 1207
-        GME                  E20 K80  120_1009.56818
-        GME                  E20 K160 80_900
-        ConvGME              E20 K160 80_830 380_809 420_800
-        '''
-
-        # conf.learning_rate = 0.0001
-        # conf.learning_rate = 0.01
-        # conf.learning_rate = 1.0
-        # conf.learning_rate = 0.01
-        # conf.learning_rate = 0.0001
-        # conf.learning_rate = 0.01
-        # conf.learning_rate = 0.001
-
-        def _callback(epoch):
-            '''
-            Disable gradient in first 10 steps to initialise prototypes
-            '''
-            n_epoch = 10
-            if epoch<n_epoch:
-                conf.model.n_step = 0
-            elif epoch == n_epoch:
-                conf.model.n_step = conf.lconf.n_step
-                # conf.model.n_step = 5
-                # conf.lconf.n_step
-                conf.learning_rate = 0.001
-                # conf.learning_rate = 0.1
-                conf.optimizer = add_optimizer(conf, conf.params)
-        # conf.callback_epoch_start  = _callback
-        conf.model = model = lconf.to_model(conf.device).to(conf.device)
-        return model
-
-
-def init_conf(CUDA,shuffle,ADD_MONITOR_HOOK=1):
+def init_conf(CUDA,shuffle, AddModelWithAttention=AddModelWithAttention,ADD_MONITOR_HOOK=1):
     '''
     Runtime subclassing AddModelWithAttention()
 
@@ -314,7 +135,7 @@ def init_conf(CUDA,shuffle,ADD_MONITOR_HOOK=1):
     conf.task = 'fashion-mnist-compress'
     # conf.task = 'duie-ce'
 
-    conf.instance= 29
+    conf.instance= 28
 
     torch.manual_seed(conf.instance)
     conf.embed_dim     = 50
@@ -322,16 +143,14 @@ def init_conf(CUDA,shuffle,ADD_MONITOR_HOOK=1):
     conf.num_epoch     = 600
     # 5000
     conf.learning_rate = 0.001
-    conf.batch_size    = 280
+    conf.batch_size    = 360
     add_optimizer      = lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
     # add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,eps=0.01)
-    # add_optimizer      = lambda conf,params:torch.optim.Adam( params, lr=conf.learning_rate,)
-    # conf._session_name += 'opt-adam-'
 
     if '--save' in sys.argv:
         v= sys.argv[sys.argv.index('--save')+1]
     else:
-        v = 10
+        v = 30
     v = int(v)
     conf.SAVE_INTERVAL = v
     conf.tsi_max = -1
@@ -341,27 +160,133 @@ def init_conf(CUDA,shuffle,ADD_MONITOR_HOOK=1):
     conf.thin_sep = 5
     conf.max_len = 50
 
-
     torch.manual_seed(conf.instance)
-    'Setting Dataset'
-    dconf.attach_task_to_conf(conf,'fashion-mnist-compress')
-    'Setting Model'
-    _add_model(conf)
-    'Setting Name'
-    'Optimizer is not included in the name'
-    conf.get_cache_name()
-    conf.model = model = conf.model.to(conf.device)
+    if 0:
+        pass
+    elif conf.task == 'fashion-mnist-compress':
+        attach_dataset_fashion_mnist_compress(conf)
 
-    'Check Parameters'
+    else:
+        raise NotImplementedError(conf.task)
+        # op_extract_and_mask
+    # (conf.dataset[range(5)])
+
+
+    from markov_lm.Model_gmm import GMMLayerConfig
+    # from markov_lm.Model_gmm import GlobalPCA
+    CLS = []
+#    CLS = [AddModelWithAttention]
+    def _add_model(conf,cls = CLS):
+        conf.lconf  =lconf= GMMLayerConfig(
+            depth = 1,
+            graph_dim = conf.dataset.graph_dim,
+            # embed_dim = 20,
+            iter_per_layer=-1,
+            kernel_size = 50,
+            n_step = 5,
+            beta = 0.01,
+            # beta = 1,
+            embed_dim = 20,
+
+            # beta = 1.,
+            # beta = 1.,
+
+            # model_name = 'GlobalMixtureEncoder',
+            # model_name = 'GlobalMixtureEncoderEOL',
+            # model_name = 'AutoEncoder',
+            # model_name = 'MixedDiffEncoder',
+            # model_name = 'GlobalMixtureEncoderDiffEOL',
+
+            # 'Checkpoints/-S28-taskfashion-mnist-compress-shuffle1-depth1-graph-dim784-embed-dim20-iter-per-layer-1-kernel-size40-model-nameGlobalMixtureEncoderDiffEOLGrad-beta0.01-n-step5-loglr-1.0_30_936.48840.pkl'
+            model_name = 'GlobalMixtureEncoderDiffEOLGrad',
+            # model_name = 'NLAutoEncoder',
+            # model_name = 'SKPCA',
+            # kernel_size = 10,
+
+            # embed_dim = 20,
+            # model_name = 'GlobalMixtureEncoderEOL',
+
+            # embed_dim = 20,
+            # model_name = 'GlobalMixtureEncoderStratifiedEOL',
+
+           # model_name = 'GlobalMixtureEncoderEOLGrad',
+           # model_name = 'GlobalMixtureEncoderLEOP',
+           # model_name = 'GlobalMixtureEncoderLEOPMLP',
+           # model_name = 'GlobalGradMixtureEncoder',
+           # model_name = 'GlobalGradMixtureDiffEncoder',
+           # model_name = 'Conv2DMixtureEncoder',
+           # model_name = 'Conv2DMixtureV1',
+        )
+        '''
+        AutoEncoder          E20 1225.872217235451
+        SKPCA                E20 1207
+        GME                  E20 K80  120_1009.56818
+        GME                  E20 K160 80_900
+        ConvGME              E20 K160 80_830 380_809 420_800
+        '''
+
+        # conf.learning_rate = 0.0001
+        # conf.learning_rate = 0.001
+        # conf.learning_rate = 1.0
+        conf.learning_rate = 0.1
+        # conf.learning_rate = 0.0001
+        # conf.learning_rate = 0.001
+        def _callback(epoch):
+            '''
+            Disable gradient in first 10 steps to initialise prototypes
+            '''
+            n_epoch = 10
+            if epoch<n_epoch:
+                conf.model.n_step = 0
+            elif epoch == n_epoch:
+                conf.model.n_step = conf.lconf.n_step
+                # conf.model.n_step = 5
+                # conf.lconf.n_step
+                conf.learning_rate = 0.001
+                # conf.learning_rate = 0.1
+                conf.optimizer = add_optimizer(conf, conf.params)
+
+        conf.callback_epoch_start  = _callback
+
+        conf.model = model = lconf.to_model(conf.device).to(conf.device)
+        return model
+
+
+    conf._session_name = ''
+    # add_optimizer      = lambda conf,params:torch.optim.Adam( params, lr=conf.learning_rate,)
+    # conf._session_name += 'opt-adam-'
+
+
+    _add_model(conf)
+
+    '''
+    Class name is used to construct checkpoint filenames. manually record important params here, needs a better system.
+    [TBC]
+    '''
+
+    conf._session_name +=  f'-S{conf.instance}'
+    conf._session_name += f'-task{conf.task}-shuffle{int(shuffle)}'
+
+    for k,v in conf.lconf.__dict__.items():
+        k = k.replace('_','-')
+        #k = k.replace('_','-')
+        conf._session_name+= f'-{k}{v}'
+    conf._session_name += f'-loglr{math.log10(conf.learning_rate):.1f}'
+    # try:
+    #     conf._session_name+= '-'+conf.lconf.to_alias()
+    # except:
+    #     raise
+
+    conf.model = model = conf.model.to(conf.device)
     conf.params = params = list(model.parameters())
     print(dict(model.named_parameters()).keys())
+
     #### using Adam with high learning_rate is catastrophic
-    'Set Parameter'
     conf.optimizer = add_optimizer(conf,params)
 
 
     if ADD_MONITOR_HOOK:
-        conf.handler = conf.add_hook_for_output_tensor(model,CONFIG_DETACH=1,CONFIG_EXPAND_LEVEL=4,CONFIG_PRINT_CLASS=0)
+        conf.handler = add_hook_for_output_tensor(model,CONFIG_DETACH=1,CONFIG_EXPAND_LEVEL=4,CONFIG_PRINT_CLASS=0)
     else:
         class NullHanlder(object):
             xdict = {}
@@ -401,9 +326,6 @@ def get_model_test_loss(conf):
         # loss_test_sum +=  float(loss.item())
 
 def main():
-    '''
-    A shared main loop
-    '''
     CUDA    = ('--cpu' not in sys.argv)
     conf    = init_conf(CUDA,shuffle=True)
     model   = conf.model
