@@ -1571,12 +1571,12 @@ class RefillModelRNNConvolve(RefillModelRNNBase):
             min_len,
             mask_token_idx)
         # state_count = 15
-        self.device = device
-        self.total_length = total_length
-        self.min_len = min_len
+        self.device        = device
+        self.total_length  = total_length
+        self.min_len       = min_len
         self.mixture_count = mixture_count
-        self.embed_dim = embed_dim
-        self.state_count = state_count
+        self.embed_dim     = embed_dim
+        self.state_count   = state_count
 
         #### share embed usually works
         # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)

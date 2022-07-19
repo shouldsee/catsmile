@@ -67,11 +67,12 @@ import shutil
 DIR = os.path.dirname(os.path.realpath(__file__))
 
 
+import sys
 
 
 class DUIE_NER(torch.utils.data.Dataset):
 
-    def __init__(self,CUDA=False,max_len=50,thin_sep=50,task_mode = 'mlm'):
+    def __init__(self,CUDA=False,max_len=50,thin_sep=50,task_mode = 'mlm', method='text'):
         super().__init__()
         self.max_len = max_len
         self.thin_sep = thin_sep
@@ -99,7 +100,7 @@ class DUIE_NER(torch.utils.data.Dataset):
 
 
 
-        self.src, self.target = self.get_cached_data(xd,max_len,thin_sep)
+        self.src, self.target,self.length = self.get_cached_data(xd,max_len,thin_sep, method)
 
         B,L = self.src.shape[:2]
 
@@ -133,10 +134,23 @@ class DUIE_NER(torch.utils.data.Dataset):
         B,L = self.src.shape[:2]
         # n_mask = 10
         v = self.src[:,:-1].long()
-        self.mask = m = torch.randint(L-1,(B,n_mask),device=self.device).long().sort(dim=1)[0]
+
+        if n_mask == -1:
+            n_mask = torch.randint(1,L-1,(1,))[0].item()
+
+        # self.mask = m = torch.randint(L-1,(B,n_mask),device=self.device).long().sort(dim=1)[0]
+        device= self.device
+        self.length = self.length.clip(0,L-1,)
+        bar = torch.arange(1,L+1,device=device).unsqueeze(0).repeat((B,1)).unsqueeze(-1)/self.length[:,None,None]
+        self.mask = m = (torch.rand((B,1,n_mask),device=self.device)<bar).max(1)[1]
+        # self.mask = m = torch.randint(self.length,(B,n_mask),device=self.device).long().sort(dim=1)[0]
+
         # self.m = m = (1+((v==vt).max(1)[1]))[:,None].long()
         self.masked = torch.scatter(v, src=torch.ones(v.shape,device=self.device).long()*self.mask_token_idx, index=m,dim=1).long()
         self.unmasked = v
+        self.summer = torch.gather(self.unmasked,index=self.mask,dim=1)!=self.char2idx('[sep]')
+        # item['summer']  = torch.gather(item['unmasked'],index=item['mask'],dim=1)!=self.char2idx('[sep]')
+
         # print(m.shape,self.masked.shape,v.shape)
         # import pdb; pdb.set_trace()
     def test(self):
@@ -155,49 +169,140 @@ class DUIE_NER(torch.utils.data.Dataset):
             idx = idx
         else:
             idx = self.test_index_start+idx
-        return dict(
+        item = dict(
             index       = idx,
             unmasked    = self.unmasked[idx],
             masked      = self.masked[idx],
-            mask        = self.mask[idx],)
+            mask        = self.mask[idx],
+            summer = self.summer[idx],
+            )
+
+        return item
 
         # import pdb; pdb.set_trace()
         ### simple binary classificaiton model without instance boundary
-    def get_cached_data(self,xd,max_len,thin_sep):
+    def get_cached_data(self,xd,max_len,thin_sep,method):
         # self.max_len = max_len = 50
-        OUTPUT_PICKLE = __file__+f'.get_cached_data.{max_len}.{thin_sep}.pkl'
+        OUTPUT_PICKLE = __file__+f'.get_cached_data.{max_len}.{thin_sep}.{method}.pkl'
         if os.path.exists(OUTPUT_PICKLE):
-            x,y = torch.load(OUTPUT_PICKLE,map_location=self.device)
+            x,y,l = torch.load(OUTPUT_PICKLE,map_location=self.device)
         else:
             outv = []
             outy = []
+            outl = []
             for xx in xd['data'][::thin_sep]:
-                for xxx in xx['entity_list']:
-                    entidx= self.ent2idx(xxx['type'])
-                    v = list(map(self.char2idx,xx['text'][:max_len-1])) + [0]*(max_len-1-len(xx['text'])) +  [self.ent2idx(xxx['type'])]
-                    y = [0]*max_len
-                    # entok = self.char2idx('[ent]')
-                    entok = self.ent2idx(xxx['type'])
-                    for span in xxx['span_list']:
-                        span = list(span)
-                        span[0]=min(span[0],max_len)
-                        span[1]=min(span[1],max_len)
-                        y[span[0]:span[1]]=[entok]*(span[1]-span[0])
-                    if sum(y)==0:
-                        continue
+                if method=='concat':
+                    for xxx in xx['entity_list']:
+                        entidx= self.ent2idx(xxx['type'])
+                        v = list(map(self.char2idx, xx['text'][:max_len-1])) + [self.char2idx('[sep]')]*(max_len-1-len(xx['text'])) +  [self.ent2idx(xxx['type'])]
+                        y = [0]*max_len
+                        # entok = self.char2idx('[ent]')
+                        entok = self.ent2idx(xxx['type'])
+                        for span in xxx['span_list']:
+                            span    = list(span)
+                            span[0] = min(span[0],max_len)
+                            span[1] = min(span[1],max_len)
+                            y[span[0]:span[1]]=[entok]*(span[1]-span[0])
+                        if sum(y)==0:
+                            continue
+                        outv.append(v)
+                        outy.append(y)
+                        outl.append(len(xx['text']))
+                elif method =='text':
+                    v = list(map(self.char2idx, xx['text'][:max_len-1])) + [self.char2idx('[sep]')]*(max_len-1-len(xx['text']))
+                    y = 0
                     outv.append(v)
                     outy.append(y)
+                    outl.append(len(xx['text']))
+
                     # outm.append()
 
             x = torch.tensor(outv).to(self.device).long()
             y = torch.tensor(outy).to(self.device).long()
+            l = torch.tensor(outl).to(self.device).long()
             # mask = torch.arange(x.shape[1]).
-            with open(OUTPUT_PICKLE+'.temp','wb') as f: torch.save((x,y),f)
+            with open(OUTPUT_PICKLE+'.temp','wb') as f: torch.save((x,y,l),f)
             shutil.move(OUTPUT_PICKLE+'.temp',OUTPUT_PICKLE)
-        return x,y
+        return x,y,l
         # import pdb; pdb.set_trace()
         # xd['data'][0]['text']
         # sents = []
+    @staticmethod
+    def preprocess_template():
+        #### Separate the schema from the tokens
+        #### so that one hot vector can be constructed
+        OUTPUT_PICKLE = __file__+'.output.template.pkl'
+        if os.path.exists(OUTPUT_PICKLE) and '--force' not in sys.argv:
+            xd = torch.load(OUTPUT_PICKLE)
+        else:
+            print('[Init] Dataset')
+            fn  = os.path.join(DIR,'data/duie_schema/duie_schema.json')
+            with open(fn,'rb') as f:
+                schema = map(json.loads,f.readlines())
+                schema = list(schema)
+            xd={}
+            xd['object_type'] = list(sum([ list(x['object_type'].values()) for x in schema],[]))
+            xd['subject_type']= list([x['subject_type'] for x in schema])
+            xd['entity_type'] = list(set(xd['object_type']) | set(xd['subject_type']))
+            from pprint import pprint
+            # pprint((xd['entity_type']))
+            charset = set()
+            xd['data'] = []
+            for fn in '''
+    data/duie_dev.json/duie_dev.json
+    data/duie_train.json/duie_train.json
+    data/duie_sample.json/duie_sample.json'''.strip().splitlines():
+                with open(os.path.join(DIR,fn.strip()),'rb') as f:
+            # fn = 'data/duie_dev.json/duie_dev.json'
+                    valBuffer = ''
+
+                    suc = 0
+                    total = 0
+                    fail = 0
+                    xd['list'] = lst = []
+                    for xl in tqdm(f.readlines()):
+                        xll = json.loads(xl)
+                            #     # print(typ,val)
+                        try:
+                            # it  = re.finditer(val,xll['text'])
+                            # it  = [x.span() for x in it]
+                            # lst = out['entity_dict'].setdefault(typ,[])
+
+                            it  = (re.finditer('之前的一个',xll['text']))
+                            it  = [x.span() for x in it]
+                            xs  = it
+                            it  = re.finditer('每一个',xll['text'])
+                            it  = [x.span() for x in it]
+                            ys  = it
+                            # if len(xs) and len(ys):
+                            if len(ys):
+                                idx = ys[0][0]
+                                # if xs[0][0] < ys[0][0]:
+                                lst.append(
+                                    dict(
+                                    # xs=xs[0][0],
+                                    ys=ys[0][0],
+                                    text1=xll['text'][ max(0,idx-10):  idx+10 ],
+                                    # text=xll['text']
+                                    ))
+                            # lst.extend(it)
+                            suc+=1
+                        except Exception as e:
+                            raise e
+                            fail+=1
+                        total += 1
+                        valBuffer +=xll['text']+'\n'
+                    charset =  charset | set(valBuffer)
+                    print(total,suc,suc*100//total)
+
+                        # print(len(charset))
+                    xd['charset']=list(charset)
+                    with open(__file__+'.output.template.txt','w') as f: f.write(valBuffer)
+                    with open(OUTPUT_PICKLE+'.temp','wb') as f: torch.save(xd,f)
+                    shutil.move(OUTPUT_PICKLE+'.temp',OUTPUT_PICKLE)
+                    pprint(lst[:20])
+                    import pdb; pdb.set_trace()
+                    return
 
     def preprocess(self):
         #### Separate the schema from the tokens
@@ -267,4 +372,6 @@ class DUIE_NER(torch.utils.data.Dataset):
         return xd
 
 if __name__=='__main__':
+    DUIE_NER.preprocess_template()
     DUIE_NER()
+    # DUIE_NER()
