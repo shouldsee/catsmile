@@ -30,6 +30,7 @@ numbered: 0
 1024-ddpm-math.md
 1025-dsm.md
 1026-recent-sm.md
+1028-hellinger-kl.md
 3001-kg-study.md
 3002-seq-hidden-states.md
 3005-neural-nets.md
@@ -50,6 +51,7 @@ numbered: 0
 9007-bert-struct.md
 9008-bert-latent-dist.md
 9013-ddpm.md
+9015-why-cnn.md
 --jbex-markdown
 --jbex-notebooks
 jbex-markdown-notebooks.md

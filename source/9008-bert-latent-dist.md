@@ -1,8 +1,17 @@
 #! https://zhuanlan.zhihu.com/p/517156488
 
-# 9008-20220526：对于BERT模型隐式分布的一些思考
+# 9008：对于BERT模型隐式分布的一些思考
 
-<http://catsmile.info/9008-bert-latent-dist.html>
+[CATSMILE-9008](http://catsmile.info/9008-bert-latent-dist.html)
+
+- 目标: 描述BERT函数的性质
+- 关键词: BERT
+- 动机: 
+- 应用:
+- CHANGLOG:
+    - 20220713 加入有关等变性的推导
+    - 20220526 加入代码和图片
+
 
 ## 引言
 
@@ -76,6 +85,29 @@ bert的内部是基于qkv注意力和pe的，要理解其对于delta函数的表
 计算的，也就是说p（甲甲乙乙）=p（甲）p（甲）p（乙）p（乙）这显然是不可能的
 ，因为p（中国北京）>p(中国北黎）。听说spanBERT专门采样了连续mask，可
 以深入思考一下如何表征给定模板后的p（甲甲乙乙）。
+
+## 举例分析:弱等变性(Weak Equivariance)
+
+(灵感来自[CATSMILE-9015](./9015-why-cnn),及AGI咖啡馆关于Predicate Logic上等变性的讨论)
+
+考虑如下函数变换
+
+```
+BERT(X) = Y
+BERT(中国的首都是MM) = 北京
+BERT(法国的首都是MM) = 巴黎
+BERT(Replace(中国,法国)(X))=Replace(北京,巴黎)(Y)
+```
+
+我们可以发现,主语上的变换`Replace(中国,法国)`被映射到输出上的变换`Replace(北京,巴黎)`,
+这近似于一个(不严格的)等变性质.所以对于语句中存在关联性的两点A和B(蛋白质序列中的相关位置),
+在A点的一个变换群,会被映射到B点的一个变换群.需要注意的是,与CNN的平移等变性的区别在于,
+CNN的输入上的平移变换群,会被映射到输出上的平移变换群. 而在模板已确定了的Transformer函数中,
+A点的变换群,被函数映射后,得到的B点的变换群,其性质并不是全等的,而是取决于模板的一个关系.这种蕴藏
+在数据中的近似等变性,表现为一套抽象的关系规则"X国家-首都Y". 因此我们有理由相信,如果
+在感知路径上计算 $||\nabla_X Y(X)||^2$ ,相关位置的XY,应当表现出比无关位置的XY更大的差异值.
+我们猜测Transformer的架构之所以能够高效地适配NLP语料,可能就是因为具有一个善于构造等变关系的结构先验.
+
 
 ## 理论实验1: 输出层对多掩码位的表征特性
 
@@ -472,3 +504,5 @@ transformer模型整体来讲都使用了qkv expectation，这样的好处是确
 [Exposing the Implicit Energy Networks behind Masked Language Models via Metropolis--Hastings​](https://arxiv.org/abs/2106.02736)
 
 [Residual Energy-Based Models for Text Generation​](https://arxiv.org/abs/2004.11714)
+
+[D3PM:Structured Denoising Diffusion Models in Discrete State-Spaces](https://arxiv.org/abs/2107.03006)

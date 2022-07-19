@@ -1,4 +1,5 @@
-# 9015-卷积神经网络有什么好? Why CNN is better?
+#! https://zhuanlan.zhihu.com/p/539976666
+# 9015-卷积神经网络有什么好? Why is CNN better?
 
 [CATSMILE-9015](http://catsmile.info/9015-why-cnn.html)
 
@@ -20,6 +21,7 @@ maxdepth: 4
 - 结论: 
   - 卷积可以用稳定的,弱线性的变化完成数据空间的中长距离的线性插值(morphing)
   - CNN = MLP + LocallyConnectedNetworks + Translational Equivariance 
+- 完成度: 中
 - 备注: 
 - 关键词: 
 - 展望方向:
@@ -195,9 +197,13 @@ Adapted from BetaVAE
 
 L2RecoverLoss=530
 
-
 我们可以发现,CNN用稳定的变化,完成了morphing
 
+[TBC,代码很慢]
+
+### 模型插值路径 LocallyConnectedAutoEncoder: 多层的卷积自编码器
+
+[TBC,缺少函数,pytorch里面目前还没有Conv2DLocalTranspose的高效实现...]
 
 ### 从对比的角度出发
 
@@ -237,10 +243,10 @@ $$\begin{align}
 空间的每个位置单独构建一个模型,而是认为空间上的差异都直接可以被捕捉在隐藏状态里.
 
 
-### 
+### 更多可视化
 
-- [TBC] JacobianNorm plot of 2-class mnist for different models
-- [TBC] Loss plot of 2-class mnist for different models on specific examples.
+- [TBC,JacobianNorm plot of 2-class mnist for different models]
+- [TBC,Loss plot of 2-class mnist for different models on specific examples].
 
 ### 参数共享问题
 
@@ -283,8 +289,14 @@ $$\begin{align}
 这带来几个问题.NLP的VanillaTransformer是残差模式的,也就是说隐变量的维度跟输入
 的token的维度一样,所以模型会依赖初始的Tokenisation.在ViT进行16x16 patch的操作也是一样. 我们当然确实希望能在隐变量里通过Embedding直接编码位置信息,但是这是否可行呢? 最大的障碍在于,这样的一个位置隐变量是不能用gradient来进行推断的,因为这个
 位置向量直接决定隐变量如何投射到不同空间位置上,因此是highly local的一个表征.所以强行对图像数据上ViT或者MAE的建模方法,一方面会失去隐变量的维数可控性,另一方面也无法表征空间维度,纯粹是供给侧的方法论迁移,而非针对明确需求的构造.当然对于semantic information的处理确实很重要, 采用带有空间embedding的隐藏表征也不是不可以,但是
-对于其高效推断是需要重新梳理一下的. 这方面,我猜测对于蛋白质结构数据,或者点云,或者其他3D数据的处理方法,是可以反哺一下视觉模型的 [TBC]. 这种Dense-Sparse表征的转化,
-应该是一种比较本质的建模手段(Dense对应卷积先验空间下的分布式表征,Sparse对应以坐标形式的粒子式表征,这都快赶上波粒二相性的图景了...). 而且在可以预见的将来,DenseSparse问题会在CNN和Transformer的不断融合中得到解决.  
+对于其高效推断是需要重新梳理一下的. 这方面,我猜测对于蛋白质结构数据,或者点云,或者其他3D数据的处理方法,是可以反哺一下视觉模型的 [TBC]. 
+
+这种Dense-Sparse表征的转化,应该是一种基本的建模手段(Dense对应卷积先验空间下的分布式表征,Sparse对应以坐标形式的粒子式表征,这都快赶上波粒二相性的图景了...). 而且在可以预见的将来,DenseSparse问题会在CNN和Transformer的不断融合中得到解决. 我个人的感觉是,Transformer看起来不具备compositionality,因此是一条歧路. 正解应该是基于CNN的compositionality继续推广下去,并且换一种方式吸收RNNLM的attention思想.当然这种涉及发展路线的建议其实都很拉仇恨,但是我相信高效性和鲁棒性是建模产业的长久的核心竞争力,而不是短期内的模型越大,分数点越高.
+
+
+### 为什么语言模型需要Transformer?
+
+[TBC]这完全需要开另一篇文章了,按下不表.
 
 ### Compositionality of Representation 表征的复合性
 
@@ -293,8 +305,6 @@ $$\begin{align}
 (Compositionality亦见夕小瑶的文章[Zhihu539269835](https://zhuanlan.zhihu.com/p/539269835) )
 
 我们所希望的compositionality,其实是这里有张脸,脸右上方有条眉毛,下面两寸有个眼睛,眼睛外面有一圈睫毛,这样的表述. 
-
-插播一则广告: Permutation-Invariance in RL <https://attentionneuron.github.io/>.  <https://arxiv.org/abs/2109.02869>
 
 
 
