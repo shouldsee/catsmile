@@ -7,7 +7,7 @@
 ---
 maxdepth: 4
 ---
-9015-why-cnn.md
+9016-why-transformer.md
 ```
 
 ## 前言
@@ -54,11 +54,32 @@ c_i = \sum_j {\exp A(s_i, h_j) \over \sum_k \exp A(s_i, h_k)} h_j
 
 ### Transformer
 
-如果我们从 Transformer Circuits 提供的视角去考虑, 那么我们可以认为在某种程度上最小化了一个能量函数. 
+如果我们从 Transformer Circuits 提供的视角去考虑, 那么我们可以认为在某种程度上最小化了一个能量函数. 在由W所确定的局域内,进行V函数的最优化.
+这种W和V之间的关联应当是非常重要的,比如W表征的是电荷相关性,V就可以表征距离. 我们也可以猜测,单纯的一个W函数可能不能很好地表征一个空间坐标. 
+
+总之,如果 $x_i^T W x_j$ 看成是一个球面上的负距离函数,那么就可以理解为这个 V 函数只对 W 距离最近的那几个 j 起作用.原则上,我们可以把归一化去掉/做截断/在分母上加一个offset,借此来加速计算
 
 $$\begin{align}
-dx = \sum_j {\exp x_i K x_j  \over \sum_j \exp x_i K x_j} 
+dx_i &= \sum_j {\exp x_i^T W x_j  \over \sum_j \exp x_i^T W x_j} V x_j \\
+W    &= Q^T K
 \end{align}$$
+
+考察一个比较简单的力场
+
+$$\begin{align}
+E &= - \sum_{ij}   y_i^T W y_j  (x_i - x_j)^2 \\
+\nabla_{x_i} E &= 2 \sum_{j}   y_i^T W y_j  (x_j - x_i)
+\end{align}$$
+
+从图的角度出发,我们可以认为Transformer对于初始图进行了一些计算,
+从而得到终态图. 一个简单的假设是空间各处的作用都是相同的
+
+我们假设Transformer的态矢包含的信息是"在哪里"和"是什么".并且
+进一步要求在空间上只能有局域性的作用.这样就可以把原始空间上的超距
+作用转化为新空间上的局域作用.这在生物物理里是非常常见的一种效应.
+
+在这个基础上,我们把Transformer看成是一个对Token按照一定标准进行
+变换的网络.我们希望Transformer的微观操作至少能够表征块状的平移.
 
 
 ### 考察目标: 数据压缩的效率
