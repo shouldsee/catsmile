@@ -10,14 +10,23 @@ import random
 import time
 
 from markov_lm.Model_pretrain import lazy_load_pretrain_model
-modelName = "bert-base-uncased"
-BertTok,BertModel= BertBaseUncased = lazy_load_pretrain_model(modelName)
 
 # source_lang_file = "German_sentences.pkl"
 # dest_lang_file  = "English_sentences.pkl"
 source_lang_file = "English_sentences.pkl"
 dest_lang_file  = "German_sentences.pkl"
 DIR = os.path.dirname(os.path.realpath(__file__))
+class DeviceDataset(torch.utils.data.Dataset):
+    def __init__(self,CUDA=False):
+        super().__init__()
+        self.device = torch.device('cuda:0' if CUDA else 'cpu')
+        self.train()
+
+    def test(self):
+        self.mode = "test"
+    def train(self):
+        self.mode = "train"
+
 class EnglishToGermanDataset(torch.utils.data.Dataset):
     def __init__(self,CUDA=False):
         super(EnglishToGermanDataset, self).__init__()
@@ -42,8 +51,9 @@ class EnglishToGermanDataset(torch.utils.data.Dataset):
         self.english_vocab_reversed = load["vocab_reversed"]
         self.mode = "train"
         self.english_eos = self.english_vocab["<end>"]
-        # self.min_len = 30#min(self.german_min_len,self.english_min_len)
+        # self.min_len = 30 #min(self.german_min_len,self.english_min_len)
         self.min_len = 15  #min(self.german_min_len,self.english_min_len)
+        self.data_dim = self.min_len
         self.CUDA = CUDA
         self.device = torch.device('cuda:0' if CUDA else 'cpu')
 
@@ -57,7 +67,6 @@ class EnglishToGermanDataset(torch.utils.data.Dataset):
             y= torch.stack(xx,dim=0).to(self.device)
             setattr(self,k,y)
 
-        # import pdb; pdb.set_trace()
 
     def logit_to_sentence(self,logits,language="german"):
         if(language=="german"):
@@ -104,6 +113,27 @@ class EnglishToGermanDataset(torch.utils.data.Dataset):
             return len(self.german_sentences_train)
     def total_length(self):
         return  len(self.german_sentences_test)+len(self.german_sentences_train)
+
+class GermanToEnglishDatasetRenamed(EnglishToGermanDataset):
+    def __init__(self,CUDA):
+        # import pdb; pdb.set_trace()
+        super().__init__(CUDA)
+        self.graph_dim = self.german_vocab.__len__() + self.english_vocab.__len__()
+
+    def __getitem__(self, idx):
+        # torch.set_default_tensor_type(torch.FloatTensor)
+        if(self.mode=="test"):
+            german_item = self.german_sentences_test[idx]
+            english_item = self.english_sentences_test[idx]
+        else:
+            german_item = self.german_sentences_train[idx]
+            english_item = self.english_sentences_train[idx]
+
+        return {
+        "index":idx,
+        "source":german_item,
+        "target":english_item + self.german_vocab.__len__(),
+                }
 
 import random
 class RefillDataset(EnglishToGermanDataset):
@@ -250,20 +280,28 @@ dat = ArithmeticTest(1000)
 # from markov_lm.Model_pretrain import BertTok,BertModel
 import random
 import shutil
+#
 
 class BertMiddleLayer(EnglishToGermanDataset):
     '''
     Cache input as encoder.layers.[7].output
     and output as encoder.layers.[8].output
     '''
-    def __init__(self, layerIndex, BertTok=BertTok, BertModel=BertModel, CUDA=False):
-        super().__init__(CUDA)
+    BertTok = None
+    BertModel = None
 
-        BertModel = BertModel.to(self.device)
+    def __init__(self, layerIndex, CUDA=False):
+        super().__init__(CUDA)
+        cls = self.__class__
+        if self.__class__.BertTok is None:
+            modelName = "bert-base-uncased"
+            cls.BertTok,cls.BertModel = BertBaseUncased = lazy_load_pretrain_model(modelName)
+
+        BertModel = cls.BertModel.to(self.device)
         self.mimic = BertModel.encoder.layer[layerIndex]
 
         PKL =f'{__file__}.{__class__.__name__}.{layerIndex}.pkl'
-        if 0 and os.path.exists(PKL):
+        if 1 and os.path.exists(PKL):
             loaded = torch.load(PKL, map_location=self.device)
             self.__dict__.update(loaded)
         else:
@@ -316,12 +354,177 @@ class BertMiddleLayer(EnglishToGermanDataset):
     def __len__(self):
         return self.data['input'].__len__()
 
+
+
+class Vocab(object):
+    def __init__(self,vocab,offset):
+        self.offset = offset
+        self.i2w = list(sorted(vocab))
+        self.w2i = {w:i+offset for i,w in enumerate(self.i2w)}
+    def __len__(self):
+        return self.i2w.__len__()
+    def tokenize(self,k):
+        return self.w2i[k]
+
+    def wordize(self,i):
+        return self.i2w[i-self.offset]
+
+import collections
+
+import pickle
+class WMT14(DeviceDataset):
+    def __init__(self, source='de', target='en', B = 1000,CUDA=False,test_ratio=0.2, min_len=50):
+        super().__init__(CUDA=CUDA)
+        # self.B = B
+        test_count = int(B*test_ratio)
+        train_count = B - test_count
+        self.root= DIR + '/wmt14/train'
+        self.source = source
+        self.target = target
+        # self.train()
+        device= self.device
+        sv,tv,sc,tc = self.get_cached_data(min_len,B)
+        self.src_codes = torch.tensor(sc,dtype=torch.long,device=self.device)
+        self.tgt_codes = torch.tensor(tc,dtype=torch.long,device=self.device)
+        # import pdb; pdb.set_trace()
+        self.src_vocab = sv
+        self.tgt_vocab = tv
+        # self.test_offset = train_count
+        self.test_offset = self.train_count =train_count
+        self.test_count = test_count
+        self.end_offset = test_count + self.test_offset
+
+        self.graph_dim = len(sv)+len(tv)
+        self.data_dim  = min_len
+        print(f'[{self.__class__.__name__}]INIT_FINISH')
+
+    def p(self,v):
+        print(f'[{self.__class__.__name__}]:{v}')
+        # processing {i}/{B}')
+    def get_cached_data(self,min_len,B):
+        CACHE_FILE = f'{self.root}.cache.{min_len}.{B}.pkl'
+        if 0 and os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE,'rb') as f:
+                v = pickle.load(f)
+            src_vocab,tgt_vocab,src_codes,tgt_codes =v
+            # import pdb; pdb.set_trace()
+        else:
+            src_list = []
+            tgt_list = []
+            with open(self.root+'.'+ self.source, 'r') as f:
+                with open(self.root+'.'+self.target, 'r') as f2:
+                    # f.read().splitlines()
+                    for i in range(B):
+                        if i%500==0:
+                            print(f'{self.__class__.__name__}:processing {i}/{B}')
+                        src = src_line = f.readline().strip()
+                        tgt = tgt_line = f2.readline().strip()
+                        src = src.split()[:min_len]
+                        src = [x.upper() for x in src ]
+
+                        tgt = tgt.split()[:min_len]
+                        tgt = [x.upper() for x in tgt ]
+
+                        src = src + ['<UNK>']*max(0,(min_len - len(src)))
+                        tgt = tgt + ['<UNK>']*max(0,(min_len - len(tgt)))
+
+                        src_list.append(src)
+                        tgt_list.append(tgt)
+                        # if 'This hotel has a contemporary character with a classy 1930s feel . The Au Palais De' in tgt_line:
+                            # import pdb; pdb.set_trace()
+
+            self.p('VOCAB 1')
+            src_vocab = set()
+            [src_vocab.update(x) for x in src_list]
+
+            tgt_vocab = set()
+            self.p('VOCAB 2')
+            [tgt_vocab.update(x) for x in tgt_list]
+
+            self.p('VOCAB 3')
+            src_vocab = Vocab(src_vocab,0)
+            tgt_vocab = Vocab(tgt_vocab, src_vocab.__len__())
+            # src_codes =
+
+            src_codes = [[src_vocab.tokenize(x) for x in xx] for xx in src_list]
+            tgt_codes = [[tgt_vocab.tokenize(x) for x in xx] for xx in tgt_list]
+            # import pdb; pdb.set_trace()
+            with open(CACHE_FILE+'.temp','wb') as f:
+                pickle.dump((src_vocab,tgt_vocab,src_codes,tgt_codes),f)
+            shutil.move(CACHE_FILE+'.temp',CACHE_FILE)
+            v = src_vocab,tgt_vocab,src_codes,tgt_codes
+
+        for vocab_key in 'src_vocab tgt_vocab'.split():
+            vocab = eval(vocab_key)
+            print(f'[{vocab_key}]{len(vocab)} {list(vocab.i2w)[:5]}')
+        cts = {}
+        cts['src'] = collections.Counter()
+        cts['tgt'] = collections.Counter()
+        [cts['src'].update(x) for x in src_codes]
+        [cts['tgt'].update(x) for x in tgt_codes]
+        for x in 'src tgt'.split():
+            self.p( cts[x].most_common(10))
+        # self.p( collections.Counter(sum(tgt_codes,[])).most_common(10))
+        return v
+            # return src_vocab,tgt_vocab,src_codes,tgt_codes
+
+
+    def __len__(self):
+        if(self.mode=="test"):
+            return self.test_count
+        else:
+            return self.train_count
+    def __getitem__(self,index):
+        if(self.mode=="test"):
+            index = index + self.test_offset
+        else:
+            pass
+        # print(index)
+        target=self.tgt_codes[index]
+        xsource=self.src_codes[index]
+        # if index==3604:
+        if 1:
+            pass
+            # for x in target: print(self.tgt_vocab.wordize(x))
+            # # [self.tgt_vocab.wordize[x] for x in target]
+            # xsource
+            # import pdb; pdb.set_trace()
+
+        return dict(
+            target=target,
+            source=xsource,
+            index=index)
+
+import torchtext
+from torchtext import data
                     # def __getitem__()
 if __name__ == '__main__':
-    x = BertMiddleLayer(BertTok, BertModel, CUDA=True)
-    x[range(5)]
-    print(x[range(5)]['input'].shape)
-    print(len(x))
-    x.test()
-    x[range(5)]
-    print(len(x))
+    fix_length = 50
+    src = tgt = torchtext.data.Field(lower=False, include_lengths=False, batch_first=True,fix_length=fix_length)
+    root = DIR
+    ret = torchtext.datasets.Multi30k.download(root)
+    m30k = torchtext.datasets.Multi30k(root+'/multi30k/train',('.de','.en'),(src,tgt))
+    src.build_vocab(m30k, max_size=80000)
+    tgt.build_vocab(m30k, max_size=40000)
+    train_iter = data.BucketIterator(dataset=m30k, batch_size=32)
+
+    src.numericalize([m30k[0].src])
+
+    # ,sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)))
+    # train_iter = data.BucketIterator(dataset=m30k, batch_size=32,sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)))
+    # m30k[[0,1,2]]
+    m30k[0]
+    import pdb; pdb.set_trace()
+    dat = WMT14()
+    print(dat[torch.tensor([0,1,2])])
+    dat.test()
+    print(dat[torch.tensor([0,1,2])])
+    # print(dat[[0,1,2]])
+
+    # x = BertMiddleLayer(BertTok, BertModel, CUDA=True)
+    # x[range(5)]
+    # print(x[range(5)]['input'].shape)
+    # print(len(x))
+    # x.test()
+    # x[range(5)]
+    # print(len(x))

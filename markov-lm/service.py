@@ -1,18 +1,21 @@
-from markov_lm.gmm.train import attach_dataset_fashion_mnist_compress
+# from markov_lm.gmm.train import attach_dataset_fashion_mnist_compress
 from markov_lm.conf_gan import ConfigPrototype
+from markov_lm.conf_data import ConfigDatasetInstance
 import matplotlib;matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
 import sys
 import torch
 
-def init_conf(CUDA=0):
+def init_conf(task, CUDA=0):
     conf = ConfigPrototype(__file__)
     conf.CUDA = CUDA
     conf.device = (torch.device('cuda:0' if conf.CUDA else 'cpu'))
     conf.batch_size = 150
     conf.shuffle = 0
-    attach_dataset_fashion_mnist_compress(conf)
+    ConfigDatasetInstance.attach_task_to_conf(conf, task)
+    conf.dataset.train()
+    conf.train_data =  next(iter(conf.dataloader))
     conf.dataset.test()
     conf.test_data =  next(iter(conf.dataloader))
     conf.STRICT_LOAD = '--strict' not in sys.argv
@@ -35,10 +38,12 @@ ly = 25
 def plot_concat_mat(ax,x,lx,ly,ix,iy):
     xx = x[:lx*ly].reshape((lx,ly,ix,iy)).permute((0,2,1,3)).reshape((lx*ix,ly*iy)).cpu()
     res = ax.imshow(xx)
+    for lyy in range(ly):
+        ax.vlines(lyy*iy-0.5, 0-0.5,ix-0.5)
     return res
 
 
-def plot_fashion_mnist_recon(model,images,labels):
+def plot_fashion_mnist_recon(model,  images, labels, **kw):
     fig,axs = plt.subplots(1,1,figsize=[12,4])
     # ax = axs[0];
     axi=-1
@@ -66,7 +71,7 @@ def plot_fashion_mnist_recon(model,images,labels):
     return fig
 
 
-def plot_fashion_mnist_perp(model,images,labels):
+def plot_fashion_mnist_perp(model, images, labels,**kw):
     fig,axs = plt.subplots(2,1,figsize=[12,7])
     # axs = torch.ravel( axs )
     # ax = axs[0];
@@ -121,4 +126,58 @@ def plot_fashion_mnist_perp(model,images,labels):
     ax.grid(1)
     ax.set_title(f'sqrt_mse={diff.mean()} sqrt_mse_std={diff.std()}')
 
+    return fig
+
+
+from markov_lm.util_html import write_png_tag
+def plot_translation_attention(model,  source, target, buf, dataset,**kw):
+    # , labels, **kw):
+    fig,axs = plt.subplots(1,1,figsize=[12,4])
+    # ax = axs[0];
+    axi=-1
+    lx = 1
+    ly = 5
+    ix,iy= 25,25
+    # 40
+
+    ax = axs
+    # x = images
+
+    output_logit, att_weight = model.forward(dict(source=source,target=target))
+    mat = att_weight[:ly,:ix,:iy].detach().cpu()
+    # assert 0,mat[:ly].shape
+    plot_concat_mat(ax, mat,lx,ly,ix,iy)
+    # mse = (y-x).square().mean()
+    mse = 0
+    ax.set_title(f'{model.alias} \n mean_rec={mse} \n {mat.shape} ({lx*ix,ly*iy})')
+    buf.write(f'<pre>{target[0:3, :30]}</pre><br/>')
+    buf.write(f'Source<pre>{source[0:3, :30]}</pre><br/>')
+    buf.write(write_png_tag(fig))
+    # plt.close(fig)
+    fig,ax = plt.subplots(1,1,figsize=[10,10])
+    i = 2
+    zmat = att_weight[i,:ix,:iy].detach().cpu()
+
+    dict(source=[ 7503,  5699, 10460,  7533,  7491, 16174,  6138, 12725,  5672,    18,
+             5917,    18,  2782,    18,  3037,    18,  7976,    18, 13819,    18,
+             6997, 12363,    18,  7910, 14437,  9379,    55,   623,   623,   623,
+              623,   623,   623,   623,   623,   623,   623,   623,   623,   623,
+              623,   623,   623,   623,   623,   623,   623,   623,   623,   623],
+           device='cuda:0')
+    src= source[i]
+    tgt = target[i]
+    # import pdb; pdb.set_trace()
+
+    ax.matshow( zmat )
+    plt.sca(ax)
+    # xlab,wordize = tgt,dataset.tgt_vocab.wordize
+    xlab,wordize = tgt[:iy], dataset.tgt_vocab.wordize
+    plt.xticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation='vertical')
+
+    xlab,wordize = src[:ix], dataset.src_vocab.wordize
+    # xlab = src
+    ax.grid(1)
+    plt.yticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation='horizontal')
+    # buf.write(write_png_tag(fig))
+    # '.__repr__())
     return fig
