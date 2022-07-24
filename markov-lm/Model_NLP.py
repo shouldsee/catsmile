@@ -6,7 +6,7 @@ import torch.optim
 from dataclasses import dataclass
 from markov_lm.Model_gmm import AbstractLayerConfig
 # from transformers.models.bert.modeling_bert import BertLayer,BertConfig
-
+from markov_lm.nlp.model_seq2seq import Seq2SeqWithAttention,Seq2SeqWithNoAttention
 class RefillModelRNNBase(nn.Module):
     '''
     Symbolic Module that defines Loss function
@@ -443,12 +443,106 @@ class RefillModelRNNConvolveSimple(RefillModelRNNBase):
         assert 0
 
 
+# Temporarily leave PositionalEncoding module here. Will be moved somewhere else.
+class PositionalEncoding(nn.Module):
+    r"""Inject some information about the relative or absolute position of the tokens in the sequence.
+        The positional encodings have the same dimension as the embeddings, so that the two can be summed.
+        Here, we use sine and cosine functions of different frequencies.
+    .. math:
+        \text{PosEncoder}(pos, 2i) = sin(pos/10000^(2i/d_model))
+        \text{PosEncoder}(pos, 2i+1) = cos(pos/10000^(2i/d_model))
+        \text{where pos is the word position and i is the embed idx)
+    Args:
+        d_model: the embed dim (required).
+        dropout: the dropout value (default=0.1).
+        max_len: the max. length of the incoming sequence (default=5000).
+    Examples:
+        >>> pos_encoder = PositionalEncoding(d_model)
+    Source:
+      https://github.com/pytorch/examples/blob/main/word_language_model/model.py
+    """
+
+    def __init__(self, d_model, dropout=0.0, max_len=5000):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        r"""Inputs of forward function
+        Args:
+            x: the sequence fed to the positional encoder model (required).
+        Shape:
+            x: [sequence length, batch size, embed dim]
+            output: [sequence length, batch size, embed dim]
+        Examples:
+            >>> output = pos_encoder(x)
+        """
+
+        x = x.transpose(1,0) + self.pe[:x.size(0), :]
+        return self.dropout(x).transpose(1,0)
+
+class Seq2SeqWithTransformer(nn.Module):
+    task_list = ['translate-german-english']
+    def __init__(self, device,config,_):
+        super().__init__()
+        self.device=device
+        self.config=config
+        max_len = config.n_step
+        self.submodel = nn.Transformer(
+            d_model=config.embed_dim,
+            nhead=8,
+            # cconfig.kernel_size,
+            num_encoder_layers=config.depth,
+            num_decoder_layers=config.depth,
+            # dim_feedforward=config.embed_dim,
+            dropout=config.beta,
+            # activation=<function relu>,
+            custom_encoder=None,
+            custom_decoder=None,
+            layer_norm_eps=1e-05,
+            batch_first=True,
+            # norm_first=False,
+            device=self.device,
+            dtype=None)
+        self.pe = PositionalEncoding(d_model=config.embed_dim, max_len = max_len)
+        self.embed = nn.Embedding( config.graph_dim, config.embed_dim).to(self.device)
+        self.output_logit_layer  = nn.Linear( config.embed_dim,  config.graph_dim).to(self.device)
+
+    def loss(self,item):
+        return self._loss(item,'loss')
+    grad_loss = loss
+    def _loss(self,item,ret):
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+        dec_input  = target[:,:-1]
+        # hidden = torch.zeros((1, len(source), self.embed_dim),device=self.device)
+
+        source_embed = self.embed(source)
+        target_embed = self.embed(target)
+        output_hidden = self.submodel.forward( self.pe(source_embed), target_embed)
+        output_logit  = self.output_logit_layer(output_hidden)
+
+        output_tok = item['target'][:,1:]
+        loss = -torch.gather( output_logit.log_softmax(-1),index=output_tok.unsqueeze(-1),dim=-1).squeeze(-1)
+        loss = loss.mean(-1)
+        # import pdb; pdb.set_trace()
+        return loss
+
+
+
 
 @dataclass
 class NLPLayerConfig(AbstractLayerConfig):
     graph_dim:int
     model_name:str
-    window_size: int
+    window_size: int = 0
     # iter_per_layer:int = 0
     loss_name: str = 'KLD'
     grad_loss_name: str = 'KLD'
@@ -847,3 +941,90 @@ class SimpleDenseNetTransformer(nn.Module):
         lossVal = -lossVal
         # lossVal = lossVal.mean(0)
         return lossVal
+
+
+class AlignmentModel(nn.Module):
+    '''
+    This model is to test whether attention is learnable with a simple
+    optimisation algorith
+    '''
+    def __init__(self,device,config,_=None):
+        super().__init__()
+        self.config = config
+        self.device = device
+        self.n_hidden = n_hidden = config.embed_dim
+        self.n_class  = n_class  = config.graph_dim
+        dropout = config.beta
+        assert config.depth == 1,config.depth
+        self.embed = nn.Embedding(n_class,n_hidden).to(self.device)
+
+        self.mapping = nn.Linear(n_hidden, n_hidden).to(self.device)
+
+        # Linear for attention
+        self.attn = nn.Linear(n_hidden, n_hidden).to(self.device)
+        self.out_layer  = nn.Linear(n_hidden, n_class).to(self.device)
+
+    def loss(self,item,):
+        return self._loss(item,'loss')
+    grad_loss = loss
+
+    def forward(self,item):
+        return self._loss(item,'forward')
+
+    def _loss(self,item,ret):
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+
+        source_embed = self.embed(source)
+        target_embed = self.embed(target)
+
+        # (B, S, E)
+        out_embed = self.mapping( source_embed )
+        # (B, S, C)
+        out_logit = self.out_layer(out_embed).log_softmax(-1)
+        # (B, 1, T)
+        D = source.shape[1]
+        output_tok = item['target'][:,None,:].repeat((1,D,1))
+
+        # (B, S, T)
+        logp_mat = torch.gather( out_logit, index=output_tok, dim=-1)
+
+        # (B,T)
+        val,which = logp_mat.max(dim=1)
+        attn = logp_mat.softmax(dim=1)
+        loss = - val.mean(-1)
+
+        if ret =='forward':
+            return val, attn
+        return loss
+
+class SoftAlignmentModel(AlignmentModel):
+    def _loss(self,item,ret):
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+
+        source_embed = self.embed(source)
+        target_embed = self.embed(target)
+
+        # (B, S, E)
+        out_embed = self.mapping( source_embed )
+        # (B, S, C)
+        out_logit = self.out_layer(out_embed).log_softmax(-1)
+        # (B, 1, T)
+        D = source.shape[1]
+        output_tok = item['target'][:,None,:].repeat((1,D,1))
+
+        # (B, S, T)
+        logp_mat = torch.gather( out_logit, index=output_tok, dim=-1)
+
+        # (B,T)
+        val = logp_mat.logsumexp(dim=1)
+        attn = logp_mat.softmax(dim=1)
+        loss = - val.mean(-1)
+        # print(loss.shape)
+
+        # import pdb; pdb.set_trace()
+        if ret =='forward':
+            return val, attn
+
+        return loss

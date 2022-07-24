@@ -15,7 +15,7 @@ xs = []
 # xs += glob('Checkpoints/*WithAttention*.pkl')
 # xs += glob('Checkpoints/*MSE*.pkl')
 # xs += glob('Checkpoints/*NEW2*.pkl')
-xs += glob('Checkpoints/*.pkl')
+xs += glob('Checkpoints/*wmt*.pkl')
 # xs += glob('Checkpoints/*LSTM*MSE*.pkl')
 # # xs += glob('Checkpoints/*MixedEm*MSE*.pkl')
 #
@@ -58,7 +58,8 @@ xs += glob('Checkpoints/*.pkl')
 
 
 if 1:
-    xs = [xx for xx in xs if 'taskrefill' in xx]
+    # xs = [xx for xx in xs if 'taskrefill' in xx]
+    xs = [xx for xx in xs if 'translate-' in xx]
     # xs = [xx for xx in xs if 'taskner1' in xx]
     # xs = [xx for xx in xs if 'duie-mlm' in xx]
     # xs = [xx for xx in xs if 'duie-ce' in xx]
@@ -73,7 +74,7 @@ if 1:
     YLIM = (0,None)
     # MIN_YS = 0.000001
     MIN_YS = 100
-    XLIM = (10,3000)
+    XLIM = (0,300)
     # YLIM = (0,5)
     # YLIM = (-350,0)
 xs = sorted(xs)

@@ -13,12 +13,36 @@ class ConfigDataset(object):
     def attach_task_to_conf(self,conf,task):
         conf.task = task
         CUDA= conf.CUDA
+
+
+        conf.data_input_transform = lambda item: item
+        conf.loss = lambda item:conf.model.loss(item)
+        conf.grad_loss = lambda item:conf.model.grad_loss(item)
         if 0:
             pass
         elif conf.task == 'fashion-mnist-compress':
             self.attach_dataset_fashion_mnist_compress(conf)
         elif conf.task=='refill':
             self.attach_dataset_refill(conf)
+        elif conf.task == 'translate-german-english':
+            from markov_lm.Dataset.translation_dataset import GermanToEnglishDatasetRenamed
+            conf.dataset = dataset = GermanToEnglishDatasetRenamed(CUDA=CUDA)
+            conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=conf.shuffle)
+        elif conf.task == 'translate-wmt14-de2en-5k':
+            from markov_lm.Dataset.translation_dataset import WMT14
+            conf.dataset = dataset = WMT14(B=5000,source='de',target='en',CUDA=CUDA)
+            conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=conf.shuffle)
+
+        elif conf.task == 'translate-wmt14-de2en-50k':
+            from markov_lm.Dataset.translation_dataset import WMT14
+            conf.dataset = dataset = WMT14(B=50000,source='de',target='en',CUDA=CUDA)
+            conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=conf.shuffle)
+        elif conf.task == 'translate-wmt14-de2en-20k':
+            from markov_lm.Dataset.translation_dataset import WMT14
+            conf.dataset = dataset = WMT14(B=20000,source='de',target='en',CUDA=CUDA)
+            conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=conf.shuffle)
+            # EnglishToGermanDatasetRenamed
+
         elif conf.task=='add':
             ### This is a random dataset !!!! init after random seed is set
             conf.dataset = dataset = ArithmeticTest(CUDA=CUDA)
@@ -26,7 +50,7 @@ class ConfigDataset(object):
             conf.loss = lambda item:conf.model.loss(item)
             conf.grad_loss = lambda item:conf.model.loss(item)
             ### test dataset works
-            conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=shuffle)
+            conf.dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=conf.shuffle)
             # dataloader_test = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=True)
 
         elif conf.task in 'ner1 duie-mlm duie-ce'.split():
@@ -45,7 +69,6 @@ class ConfigDataset(object):
                 #     ss = get_recovered_corrupted_seq(conf.model,item['unmasked'],item['mask'],method='score',sample_method=conf.sample_method)
                 #     lossVal = -ss.log_softmax(-1)[:,0]
                 #     return lossVal
-
 
                 def grad_loss(item,conf=conf):
                     '''
