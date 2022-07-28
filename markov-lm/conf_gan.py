@@ -10,6 +10,7 @@ class ConfigPrototype(object):
     def __init__(self,fn,is_sorted=False,
     field_width = [20,20] + [5]*30,
     section_ender = None):
+        self.rnd = None
         self.is_sorted = is_sorted
         self._session_name = None
         self.is_model_set = False

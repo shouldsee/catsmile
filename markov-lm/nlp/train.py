@@ -76,14 +76,15 @@ def conf_init_translate(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
     # conf._session_name += 'opt-adam-'
 
 
-    conf.instance = random_seed
+    conf.instance = conf.rnd = random_seed
     torch.manual_seed(conf.instance)
 
     #############################
     'Setting Dataset'
     # conf.task = 'add'
     # conf.task = 'translate-german-english'
-    conf.task = 'translate-wmt14-de2en-5k'
+    # conf.task = 'translate-wmt14-de2en-5k'
+    conf.task = 'translate-mutli30k-de2en-l50'
     # conf.task = 'translate-wmt14-de2en-50k'
     # conf.task = 'translate-wmt14-de2en-20k'
     dconf.attach_task_to_conf(conf,conf.task)
@@ -98,13 +99,13 @@ def conf_init_translate(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
             embed_dim=128,
             # window_size=10,
             depth =1,
-            # model_name = 'Seq2SeqWithAttention',
+            model_name = 'Seq2SeqWithAttention',
             # model_name = 'Seq2SeqWithNoAttention',
 
             # depth =10,
             # model_name = 'Seq2SeqWithTransformer',
 
-            model_name = 'AlignmentModel',
+            # model_name = 'AlignmentModel',
             # model_name = 'SoftAlignmentModel',
             n_step = conf.dataset.data_dim,
             # model_name = 'Seq2SeqWithNoAttention',
@@ -167,7 +168,7 @@ def conf_init_ar(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
     # conf._session_name += 'opt-adam-'
 
 
-    conf.instance = random_seed
+    conf.instance = conf.rnd = random_seed
     torch.manual_seed(conf.instance)
 
     #############################
