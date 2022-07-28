@@ -468,7 +468,10 @@ class WMT14(DeviceDataset):
         return v
             # return src_vocab,tgt_vocab,src_codes,tgt_codes
 
-
+    def src_wordize(self,v):
+        return self.src_vocab.wordize(v)
+    def tgt_wordize(self,v):
+        return self.tgt_vocab.wordize(v)
     def __len__(self):
         if(self.mode=="test"):
             return self.test_count
@@ -485,11 +488,6 @@ class WMT14(DeviceDataset):
         # if index==3604:
         if 1:
             pass
-            # for x in target: print(self.tgt_vocab.wordize(x))
-            # # [self.tgt_vocab.wordize[x] for x in target]
-            # xsource
-            # import pdb; pdb.set_trace()
-
         return dict(
             target=target,
             source=xsource,
@@ -497,7 +495,11 @@ class WMT14(DeviceDataset):
 
 import torchtext
 from torchtext import data
-                    # def __getitem__()
+
+
+class Multi30k(torch.utils.data.Dataset):
+    pass
+
 if __name__ == '__main__':
     fix_length = 50
     src = tgt = torchtext.data.Field(lower=False, include_lengths=False, batch_first=True,fix_length=fix_length)
@@ -506,9 +508,20 @@ if __name__ == '__main__':
     m30k = torchtext.datasets.Multi30k(root+'/multi30k/train',('.de','.en'),(src,tgt))
     src.build_vocab(m30k, max_size=80000)
     tgt.build_vocab(m30k, max_size=40000)
-    train_iter = data.BucketIterator(dataset=m30k, batch_size=32)
+    it = data.BucketIterator(dataset=m30k, batch_size=32)
+    it = iter(it)
+    it.__next__()
+    self = m30k
+    def to_code(x,self=self):
+        return {
+        'source':self.fields['src'].numericalize([x['src']]),
+        'target':self.fields['trg'].numericalize([x['trg']]),
+        }
+    # m30k.fields src.numericalize([m30k[0].src])
+    import pdb; pdb.set_trace()
+    x = self.examples[0].__dict__
+    to_code(x)
 
-    src.numericalize([m30k[0].src])
 
     # ,sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)))
     # train_iter = data.BucketIterator(dataset=m30k, batch_size=32,sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)))

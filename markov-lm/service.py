@@ -13,6 +13,7 @@ def init_conf(task, CUDA=0):
     conf.device = (torch.device('cuda:0' if conf.CUDA else 'cpu'))
     conf.batch_size = 150
     conf.shuffle = 0
+    conf.rnd = 0
     ConfigDatasetInstance.attach_task_to_conf(conf, task)
     conf.dataset.train()
     conf.train_data =  next(iter(conf.dataloader))
@@ -133,6 +134,7 @@ from markov_lm.util_html import write_png_tag
 def plot_translation_attention(model,  source, target, buf, dataset,**kw):
     # , labels, **kw):
     fig,axs = plt.subplots(1,1,figsize=[12,4])
+    # fig0=
     # ax = axs[0];
     axi=-1
     lx = 1
@@ -154,30 +156,33 @@ def plot_translation_attention(model,  source, target, buf, dataset,**kw):
     buf.write(f'Source<pre>{source[0:3, :30]}</pre><br/>')
     buf.write(write_png_tag(fig))
     # plt.close(fig)
-    fig,ax = plt.subplots(1,1,figsize=[10,10])
-    i = 2
-    zmat = att_weight[i,:ix,:iy].detach().cpu()
 
-    dict(source=[ 7503,  5699, 10460,  7533,  7491, 16174,  6138, 12725,  5672,    18,
-             5917,    18,  2782,    18,  3037,    18,  7976,    18, 13819,    18,
-             6997, 12363,    18,  7910, 14437,  9379,    55,   623,   623,   623,
-              623,   623,   623,   623,   623,   623,   623,   623,   623,   623,
-              623,   623,   623,   623,   623,   623,   623,   623,   623,   623],
-           device='cuda:0')
-    src= source[i]
-    tgt = target[i]
-    # import pdb; pdb.set_trace()
+    for i in range(3):
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        # i = 2
+        zmat = att_weight[i,:ix,:iy].detach().cpu()
+        #
+        # dict(source=[ 7503,  5699, 10460,  7533,  7491, 16174,  6138, 12725,  5672,    18,
+        #          5917,    18,  2782,    18,  3037,    18,  7976,    18, 13819,    18,
+        #          6997, 12363,    18,  7910, 14437,  9379,    55,   623,   623,   623,
+        #           623,   623,   623,   623,   623,   623,   623,   623,   623,   623,
+        #           623,   623,   623,   623,   623,   623,   623,   623,   623,   623],
+        #        device='cuda:0')
+        src= source[i]
+        tgt = target[i]
+        # import pdb; pdb.set_trace()
 
-    ax.matshow( zmat )
-    plt.sca(ax)
-    # xlab,wordize = tgt,dataset.tgt_vocab.wordize
-    xlab,wordize = tgt[:iy], dataset.tgt_vocab.wordize
-    plt.xticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation='vertical')
+        ax.matshow( zmat )
+        plt.sca(ax)
+        # xlab,wordize = tgt,dataset.tgt_vocab.wordize
+        xlab,wordize = tgt[:iy], dataset.tgt_wordize
+        plt.xticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation='vertical')
 
-    xlab,wordize = src[:ix], dataset.src_vocab.wordize
-    # xlab = src
-    ax.grid(1)
-    plt.yticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation='horizontal')
-    # buf.write(write_png_tag(fig))
-    # '.__repr__())
-    return fig
+        xlab,wordize = src[:ix], dataset.src_wordize
+        # xlab = src
+        ax.grid(1)
+        plt.yticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation='horizontal')
+        buf.write(write_png_tag(fig))
+        plt.close(fig)
+        # '.__repr__())
+    return None

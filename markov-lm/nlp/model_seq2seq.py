@@ -103,7 +103,7 @@ class Seq2SeqWithAttention(nn.Module):
         output_logit = output_logit.transpose(0, 1)
 
         # make model shape [n_step, n_class]
-        return output_logit, trained_attn
+        return output_logit, trained_attn.transpose(2,1)
 
     def get_att_weight(self, dec_output, enc_outputs):  # get attention weight one 'dec_output' with 'enc_outputs'
         n_step = len(enc_outputs)

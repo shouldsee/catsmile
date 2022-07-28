@@ -85,12 +85,20 @@ def get_model_test_loss(conf):
         _loss = loss(item).detach()
         if _loss.shape.__len__()>=2:
             _loss = _loss.mean(item.shape[1:])
-        index.append(item['index'].to(_loss.device))
+        if item['index'] is not None:
+            index.append(item['index'].to(_loss.device))
         lsl.append(_loss)
         # item['losses'])
-    index = torch.cat(index,dim=0)
     lsl   = torch.cat(lsl,dim=0)
-    st = index.argsort()
+    if index:
+        index = torch.cat(index,dim=0)
+        st = index.argsort()
+    else:
+        index=  torch.arange(lsl.size(0),device=conf.device)[:]
+        # ,None]
+        st =index
+        # index[:,0]
+        # st = range(len())
     v = torch.stack([index,lsl],dim=1)[st,:]
 
     return v
