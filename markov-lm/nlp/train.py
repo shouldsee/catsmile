@@ -99,20 +99,22 @@ def conf_init_translate(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
             embed_dim=128,
             # window_size=10,
             depth =1,
-            model_name = 'Seq2SeqWithAttention',
+            # model_name = 'Seq2SeqWithAttention',
             # model_name = 'Seq2SeqWithNoAttention',
-
+#
             # depth =10,
             # model_name = 'Seq2SeqWithTransformer',
 
             # model_name = 'AlignmentModel',
-            # model_name = 'SoftAlignmentModel',
+            model_name = 'SoftAlignmentModel',
+            # model_name = 'SoftAlignmentModelAllowSourcePad',
+            # model_name = 'SoftAlignmentModelSimpleMean',
             n_step = conf.dataset.data_dim,
             # model_name = 'Seq2SeqWithNoAttention',
         )
         conf.model = model = conf.lconf.to_model(conf.device).to(conf.device)
-        conf.learning_rate = 0.00001
-        # conf.learning_rate = 0.0001
+        # conf.learning_rate = 0.00001
+        conf.learning_rate = 0.0001
         # conf.learning_rate = 0.001
         # conf.learning_rate = 0.01
         return model

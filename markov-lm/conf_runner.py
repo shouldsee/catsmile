@@ -111,15 +111,29 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
     # CKPT = conf.CKPT
     model = conf.model
     dataset = conf.dataset
-    if(CKPT!='-1'):
 
+    sys_argv = sys.argv
+    k =  '--LOAD_ABS'
+    if k in sys_argv:
+        v= sys_argv[sys_argv.index(k)+1]
+    else:
+        v =None
+    LOAD_ABS = v
+
+    if(CKPT!='-1') or LOAD_ABS is not None:
+# markov_lm/gmm/Checkpoints/-S29-tasktranslate-mutli30k-de2en-l50-shuffle1-graph-dim38783-model-nameSoftAlignmentModel-window-size0-loss-nameKLD-grad-loss-nameKLD-depth1-beta0.0-n-step50-kernel-size0-embed-dim128-p-null0.0001-submodel-name-loglr-4.0_15_6.10327.pkl
         epoch = CKPT
-        # res = glob.glob(os.path.join("Checkpoints",f"{conf._session_name}_{CKPT}_*.pkl"))
-        res = glob.glob(os.path.join("Checkpoints",f"{conf._session_name}_{epoch}*.pkl"))
-        assert len(res)==1,['Which one to choose?',res]
-        print(f'[LOADING]{res[0]}')
 
-        checkpoint   = torch.load(res[0])
+
+        if LOAD_ABS is not None:
+            res = LOAD_ABS
+        else:
+            res = glob.glob(os.path.join("Checkpoints",f"{conf._session_name}_{epoch}*.pkl"))
+            assert len(res)==1,['Which one to choose?',res]
+            res = res[0]
+        print(f'[LOADING]{res}')
+
+        checkpoint   = torch.load(res)
         test_losses  = checkpoint["test_losses"]
         train_losses = checkpoint["train_losses"]
         epoch        = checkpoint["epoch"]

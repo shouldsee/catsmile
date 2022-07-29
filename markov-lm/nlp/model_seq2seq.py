@@ -17,6 +17,16 @@ from markov_lm.util_html import write_png_tag
 # P: Symbol that will fill in blank sequence if current batch data size is short than time steps
 
 
+def mean_notnull(val,target_notnull):
+    '''
+    Take average on particular tokens, not all tokens.
+
+    target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+    '''
+
+    loss = (val * target_notnull ).sum(-1) / target_notnull.sum(-1)
+    return loss
+    
 class Seq2SeqWithAttention(nn.Module):
     def __init__(self,device,config,_=None):
         super().__init__()
@@ -43,6 +53,10 @@ class Seq2SeqWithAttention(nn.Module):
     def _loss(self,item,ret):
         source = item['source'] ### token sequence
         target = item['target'] ### token seq
+
+        target_len = item['target_len']
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+
         # source_hot
         dec_input  = target[:,:-1]
         hidden = torch.zeros((1, len(source), self.n_hidden),device=self.device)
@@ -54,7 +68,8 @@ class Seq2SeqWithAttention(nn.Module):
         # output_logp = self.out
         output_tok = item['target'][:,1:]
         loss = -torch.gather( output_logit.log_softmax(-1),index=output_tok.unsqueeze(-1),dim=-1).squeeze(-1)
-        loss = loss.mean(-1)
+        loss = mean_notnull(loss, target_notnull[:,1:])
+        # loss = loss.mean(-1)
         # import pdb; pdb.set_trace()
         return loss
 
@@ -105,11 +120,13 @@ class Seq2SeqWithAttention(nn.Module):
         # make model shape [n_step, n_class]
         return output_logit, trained_attn.transpose(2,1)
 
-    def get_att_weight(self, dec_output, enc_outputs):  # get attention weight one 'dec_output' with 'enc_outputs'
+    def get_att_weight(self, dec_output, enc_outputs, use_identity=False):  # get attention weight one 'dec_output' with 'enc_outputs'
         n_step = len(enc_outputs)
         attn_scores = torch.zeros(n_step,device=self.device)  # attn_scores : [n_step]
-
-        enc_t = self.attn(enc_outputs)
+        if use_identity:
+            enc_t = enc_outputs
+        else:
+            enc_t = self.attn(enc_outputs)
         score = dec_output.transpose(1,0).bmm(enc_t.transpose(1,0).transpose(2,1))
         out1   = score.softmax(-1)
         return out1
@@ -145,20 +162,20 @@ class Seq2SeqWithNoAttention(Seq2SeqWithAttention):
 
             #### Teacher forcing decoding
             dec_output, hidden = self.dec_cell(dec_inputs[i].unsqueeze(0), hidden)
-            # attn_weights       = self.get_att_weight(dec_output, enc_outputs)
+            attn_weights       = self.get_att_weight(dec_output, enc_outputs, use_identity=True)
             # bmm: batched matrix multiplication
             # [1,1,n_step] x [1,n_step,n_hidden] = [1,1,n_hidden]
             # context            = attn_weights.bmm(enc_outputs.transpose(0, 1)).transpose(0,1)
             model_hidden[i]    = torch.cat((dec_output, dec_output), 2)
 
-            # trained_attn[:,i]  = (attn_weights.squeeze().detach())
+            trained_attn[:,i]  = (attn_weights.squeeze().detach())
 
             # import pdb; pdb.set_trace()
         output_logit = self.out_layer(model_hidden)
         output_logit = output_logit.transpose(0, 1)
 
         # make model shape [n_step, n_class]
-        return output_logit, trained_attn
+        return output_logit, trained_attn.transpose(2,1)
 
 
 

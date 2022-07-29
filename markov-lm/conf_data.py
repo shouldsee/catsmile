@@ -35,8 +35,10 @@ class ConfigDataset(object):
 
             # splits
             fix_length  = 50
-            src = torchtext.data.Field(lower=True, include_lengths=False, batch_first=True,fix_length=fix_length)
-            tgt = torchtext.data.Field(lower=True, include_lengths=False, batch_first=True,fix_length=fix_length)
+            get_field = lambda :torchtext.data.Field(lower=True, include_lengths=True, batch_first=True,fix_length=fix_length, init_token='<start>', eos_token='<end>')
+            src = get_field()
+            tgt = get_field()
+            # tgt = torchtext.data.Field(lower=True, include_lengths=True, batch_first=True,fix_length=fix_length, )
             dataset = torchtext.datasets.Multi30k(root+'/multi30k/train',('.de','.en'),(src,tgt))
             # dataset = torchtext.datasets.Multi30k.splits(root+'/multi30k/train',('.de','.en'),(src,tgt))
             dataset_train,dataset_test  = dataset.split(0.8)
@@ -71,7 +73,14 @@ class ConfigDataset(object):
                     it = torchtext.data.BucketIterator(dataset=dataset_curr, batch_size=conf.batch_size,shuffle=conf.shuffle, device=conf.device)
                     # if dataset.mode=='train':
                     for x in it:
-                        yield {'source':x.src,'target':x.trg+dataset.offset_list[0],'index':None}
+                        # import pdb; pdb.set_trace()
+                        src, src_len = x.src
+                        trg, trg_len = x.trg
+                        yield {'source': src,
+                                'target':trg+dataset.offset_list[0],
+                                'source_len':src_len,
+                                'target_len':trg_len,
+                                'index':None}
                     yield None
                 @classmethod
                 def my_iter(cls):

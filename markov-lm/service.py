@@ -131,7 +131,8 @@ def plot_fashion_mnist_perp(model, images, labels,**kw):
 
 
 from markov_lm.util_html import write_png_tag
-def plot_translation_attention(model,  source, target, buf, dataset,**kw):
+# def plot_translation_attention(model,  source, target, buf, dataset,**kw):
+def plot_translation_attention(model,  source, target, target_len, source_len, buf, dataset,**kw):
     # , labels, **kw):
     fig,axs = plt.subplots(1,1,figsize=[12,4])
     # fig0=
@@ -145,7 +146,7 @@ def plot_translation_attention(model,  source, target, buf, dataset,**kw):
     ax = axs
     # x = images
 
-    output_logit, att_weight = model.forward(dict(source=source,target=target))
+    output_logit, att_weight = model.forward(dict(source=source,target=target,source_len=source_len,target_len=target_len))
     mat = att_weight[:ly,:ix,:iy].detach().cpu()
     # assert 0,mat[:ly].shape
     plot_concat_mat(ax, mat,lx,ly,ix,iy)
@@ -184,5 +185,8 @@ def plot_translation_attention(model,  source, target, buf, dataset,**kw):
         plt.yticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation='horizontal')
         buf.write(write_png_tag(fig))
         plt.close(fig)
+    x = getattr(getattr(model,'mapping',None),'weight',None)
+    buf.write(x.__repr__())
+    # .att.weight)
         # '.__repr__())
     return None

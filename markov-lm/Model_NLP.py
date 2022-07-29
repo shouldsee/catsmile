@@ -943,11 +943,17 @@ class SimpleDenseNetTransformer(nn.Module):
         return lossVal
 
 
-class AlignmentModel(nn.Module):
+class AlignmentModelPrototype(nn.Module):
     '''
     This model is to test whether attention is learnable with a simple
-    optimisation algorith
+    optimisation algorithm
+
+    [TBC] share interface with :class:SoftAlignmentModel
     '''
+    AVG_METHOD = None
+    ATT_METHOD = None
+    ALIGNEMNT_METHOD = None
+
     def __init__(self,device,config,_=None):
         super().__init__()
         self.config = config
@@ -963,6 +969,9 @@ class AlignmentModel(nn.Module):
         # Linear for attention
         self.attn = nn.Linear(n_hidden, n_hidden).to(self.device)
         self.out_layer  = nn.Linear(n_hidden, n_class).to(self.device)
+        assert self.ALIGNEMNT_METHOD
+        assert self.ATT_METHOD
+        assert self.AVG_METHOD
 
     def loss(self,item,):
         return self._loss(item,'loss')
@@ -971,12 +980,21 @@ class AlignmentModel(nn.Module):
     def forward(self,item):
         return self._loss(item,'forward')
 
+
+
     def _loss(self,item,ret):
         source = item['source'] ### token sequence
         target = item['target'] ### token seq
 
         source_embed = self.embed(source)
         target_embed = self.embed(target)
+
+        target_len = item['target_len']
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+
+        source_len = item['source_len']
+        source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+
 
         # (B, S, E)
         out_embed = self.mapping( source_embed )
@@ -989,42 +1007,81 @@ class AlignmentModel(nn.Module):
         # (B, S, T)
         logp_mat = torch.gather( out_logit, index=output_tok, dim=-1)
 
+
+        '''
+        Whether to mask <pad> in source sentence?
+        '''
+        if self.ATT_METHOD=='masked':
+            INF = 1E15
+            logp_mat = logp_mat + -INF * (~source_notnull[:,:,None])
+        elif self.ATT_METHOD=='allow_source_pad':
+            pass
+        else:
+            raise NotImplementedError(self.ATT_METHOD)
+
         # (B,T)
-        val,which = logp_mat.max(dim=1)
+        '''
+        Whether to use hard or soft alignment?
+
+        Note hard alignment does not yield a proba model, meaning its loss function
+        cannot be compared to soft model !!!!
+        '''
+        if self.ALIGNEMNT_METHOD=='soft':
+            val = logp_mat.logsumexp(dim=1) - math.log(source.size(1))
+        elif self.ALIGNEMNT_METHOD =='hard':
+            val,which = logp_mat.max(dim=1)
+        else:
+            raise NotImplementedError(self.ALIGNEMNT_METHOD)
+
+        val = - val
         attn = logp_mat.softmax(dim=1)
-        loss = - val.mean(-1)
+        # attn = attn * target_notnull[:,None,:]
+        # .unsqueeze(-1)
+
+        '''
+        Whether to mask <pad> in target sentence?
+        '''
+        if self.AVG_METHOD=='masked':
+            loss = mean_notnull(val,target_notnull)
+        elif self.AVG_METHOD == 'simple_mean':
+            loss = val.mean(-1)
+        else:
+            raise NotImplementedError(self.AVG_METHOD)
 
         if ret =='forward':
             return val, attn
-        return loss
-
-class SoftAlignmentModel(AlignmentModel):
-    def _loss(self,item,ret):
-        source = item['source'] ### token sequence
-        target = item['target'] ### token seq
-
-        source_embed = self.embed(source)
-        target_embed = self.embed(target)
-
-        # (B, S, E)
-        out_embed = self.mapping( source_embed )
-        # (B, S, C)
-        out_logit = self.out_layer(out_embed).log_softmax(-1)
-        # (B, 1, T)
-        D = source.shape[1]
-        output_tok = item['target'][:,None,:].repeat((1,D,1))
-
-        # (B, S, T)
-        logp_mat = torch.gather( out_logit, index=output_tok, dim=-1)
-
-        # (B,T)
-        val = logp_mat.logsumexp(dim=1)
-        attn = logp_mat.softmax(dim=1)
-        loss = - val.mean(-1)
-        # print(loss.shape)
-
-        # import pdb; pdb.set_trace()
-        if ret =='forward':
-            return val, attn
 
         return loss
+
+
+def mean_notnull(val, target_notnull):
+    '''
+    Take average on particular tokens, not all tokens.
+
+    target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+    '''
+HardAlignment
+    loss =  (val * target_notnull ).sum(-1) / target_notnull.sum(-1)
+    return loss
+
+
+class HardAlignmentModel(AlignmentModelPrototype):
+    ALIGNEMNT_METHOD = 'hard'
+    AVG_METHOD = 'masked'
+    ATT_METHOD = 'masked'
+
+
+class SoftAlignmentModel(AlignmentModelPrototype):
+    ALIGNEMNT_METHOD = 'soft'
+    AVG_METHOD = 'masked'
+    ATT_METHOD = 'masked'
+
+
+class SoftAlignmentModelAllowSourcePad(SoftAlignmentModel):
+    # AVG_METHOD = 'simple_mean'
+    ATT_METHOD = 'allow_source_pad'
+
+
+class SoftAlignmentModelSimpleMean(SoftAlignmentModel):
+    AVG_METHOD = 'simple_mean'
+    ATT_METHOD = 'allow_source_pad'
