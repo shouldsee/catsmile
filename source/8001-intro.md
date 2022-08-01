@@ -72,6 +72,11 @@ title: "CATSMILE"
       考虑 jinja2和hugo，因为我只会写python ，golang还在熟悉中
     - travis-ci 自动验证服务
     - 可及性accessibility
+  - ToDo:
+    - [TBC,加入自动备份系统]
+    - [TBC,加入FigureLegend]
+    - [TBC,加入自动抽取TBC标签系统]
+    - [TBC,加入考虑图片Array系统]
 
 - Changelog:
     - 20220515 迁移到jupyper_book+sphinx,方便运行代码 <https://jupyterbook.org/en/stable/reference/cheatsheet.html>
