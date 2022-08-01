@@ -15,7 +15,7 @@ xs = []
 # xs += glob('Checkpoints/*WithAttention*.pkl')
 # xs += glob('Checkpoints/*MSE*.pkl')
 # xs += glob('Checkpoints/*NEW2*.pkl')
-xs += glob('Checkpoints/*wmt*.pkl')
+xs += glob('Checkpoints/*mu*.pkl')
 # xs += glob('Checkpoints/*LSTM*MSE*.pkl')
 # # xs += glob('Checkpoints/*MixedEm*MSE*.pkl')
 #

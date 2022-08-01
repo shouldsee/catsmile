@@ -7,6 +7,81 @@ import shutil
 import collections
 
 
+def get_multi30k_dataset(conf, fix_length, dataset_name,root=None):
+    from markov_lm.Dataset.translation_dataset import DIR
+    import torchtext
+    import random
+    random.seed(conf.rnd)
+    if root is None:
+        root = DIR
+    ret = torchtext.datasets.Multi30k.download(root)
+
+    get_field = lambda :torchtext.data.Field(lower=True, include_lengths=True, batch_first=True,fix_length=fix_length, init_token='<start>', eos_token='<end>')
+    src = get_field()
+    tgt = get_field()
+    # tgt = torchtext.data.Field(lower=True, include_lengths=True, batch_first=True,fix_length=fix_length, )
+    dataset = torchtext.datasets.Multi30k(root+'/multi30k/train',('.de','.en'),(src,tgt))
+    # dataset = torchtext.datasets.Multi30k.splits(root+'/multi30k/train',('.de','.en'),(src,tgt))
+    dataset_train,dataset_test  = dataset.split(0.8)
+    # , rain='_train',test='_test')
+    # torchtext.datasets.Multi30k.splits(path=None,root=root,exts=('.de','.en'),fields=(src,tgt),train='_train',test='_test')
+    # for dataset in [dataset_train, dataset_test]:
+    src.build_vocab(dataset, max_size=40000)
+    tgt.build_vocab(dataset, max_size=40000)
+    # import pdb; pdb.set_trace()
+    conf.dataset = dataset
+    dataset.offset_list = [dataset.fields['src'].vocab.__len__(),dataset.fields['trg'].vocab.__len__()]
+    dataset.graph_dim = sum(dataset.offset_list)
+
+    dataset.data_dim = fix_length
+    dataset.mode='train'
+    dataset.train = lambda : setattr(dataset,'mode','train')
+    dataset.test = lambda : setattr(dataset,'mode','test')
+    dataset.src_wordize = lambda v: src.vocab.itos.__getitem__(v)
+    dataset.tgt_wordize = lambda v: tgt.vocab.itos.__getitem__(v-dataset.offset_list[0])
+
+
+    class IterMaker(object):
+        def __iter__(self):
+            return self.my_iter()
+        def __len__(self):
+            if dataset.mode=='test':
+                return dataset_test.__len__()//conf.batch_size
+            else:
+                return dataset_train.__len__()//conf.batch_size
+        @classmethod
+        def get_iter(cls,dataset_curr,dataset=dataset):
+            it = torchtext.data.BucketIterator(dataset=dataset_curr, batch_size=conf.batch_size,shuffle=conf.shuffle, device=conf.device)
+            # if dataset.mode=='train':
+            for x in it:
+                # import pdb; pdb.set_trace()
+                src, src_len = x.src
+                trg, trg_len = x.trg
+                yield {'source': src,
+                        'target':trg+dataset.offset_list[0],
+                        'source_len':src_len,
+                        'target_len':trg_len,
+                        'index':None}
+            yield None
+        @classmethod
+        def my_iter(cls):
+            train_iter= cls.get_iter(dataset_train)
+            test_iter = cls.get_iter(dataset_test)
+            while True:
+                if dataset.mode=='train':
+                    v = next(train_iter)
+                    # .__next__()
+                elif dataset.mode=='test':
+                    v = next(test_iter)
+                if v is not None:
+                    yield v
+                else:
+                    break
+
+
+    conf.dataloader = dataloader = IterMaker()
+    return dataset, dataloader
+
 class ConfigDataset(object):
 
     # @staticmethod
@@ -26,81 +101,12 @@ class ConfigDataset(object):
         elif conf.task=='refill':
             self.attach_dataset_refill(conf)
         elif conf.task == 'translate-mutli30k-de2en-l50':
-            from markov_lm.Dataset.translation_dataset import DIR
-            import torchtext
-            import random
-            random.seed(conf.rnd)
-            root = DIR
-            ret = torchtext.datasets.Multi30k.download(root)
+            conf.dataset,conf.dataloader = get_multi30k_dataset(conf, 50,conf.task)
+        elif conf.task == 'translate-multi30k-de2en-l20':
+            conf.dataset,conf.dataloader = get_multi30k_dataset(conf, 20,conf.task)
 
-            # splits
-            fix_length  = 50
-            get_field = lambda :torchtext.data.Field(lower=True, include_lengths=True, batch_first=True,fix_length=fix_length, init_token='<start>', eos_token='<end>')
-            src = get_field()
-            tgt = get_field()
-            # tgt = torchtext.data.Field(lower=True, include_lengths=True, batch_first=True,fix_length=fix_length, )
-            dataset = torchtext.datasets.Multi30k(root+'/multi30k/train',('.de','.en'),(src,tgt))
-            # dataset = torchtext.datasets.Multi30k.splits(root+'/multi30k/train',('.de','.en'),(src,tgt))
-            dataset_train,dataset_test  = dataset.split(0.8)
-            # , rain='_train',test='_test')
-            # torchtext.datasets.Multi30k.splits(path=None,root=root,exts=('.de','.en'),fields=(src,tgt),train='_train',test='_test')
-            # for dataset in [dataset_train, dataset_test]:
-            src.build_vocab(dataset, max_size=40000)
-            tgt.build_vocab(dataset, max_size=40000)
-            # import pdb; pdb.set_trace()
-            conf.dataset = dataset
-            dataset.offset_list = [dataset.fields['src'].vocab.__len__(),dataset.fields['trg'].vocab.__len__()]
-            dataset.graph_dim = sum(dataset.offset_list)
-
-            dataset.data_dim = fix_length
-            dataset.mode='train'
-            dataset.train = lambda : setattr(dataset,'mode','train')
-            dataset.test = lambda : setattr(dataset,'mode','test')
-            dataset.src_wordize = lambda v: src.vocab.itos.__getitem__(v)
-            dataset.tgt_wordize = lambda v: tgt.vocab.itos.__getitem__(v-dataset.offset_list[0])
-
-
-            class IterMaker(object):
-                def __iter__(self):
-                    return self.my_iter()
-                def __len__(self):
-                    if dataset.mode=='test':
-                        return dataset_test.__len__()//conf.batch_size
-                    else:
-                        return dataset_train.__len__()//conf.batch_size
-                @classmethod
-                def get_iter(cls,dataset_curr,dataset=dataset):
-                    it = torchtext.data.BucketIterator(dataset=dataset_curr, batch_size=conf.batch_size,shuffle=conf.shuffle, device=conf.device)
-                    # if dataset.mode=='train':
-                    for x in it:
-                        # import pdb; pdb.set_trace()
-                        src, src_len = x.src
-                        trg, trg_len = x.trg
-                        yield {'source': src,
-                                'target':trg+dataset.offset_list[0],
-                                'source_len':src_len,
-                                'target_len':trg_len,
-                                'index':None}
-                    yield None
-                @classmethod
-                def my_iter(cls):
-                    train_iter= cls.get_iter(dataset_train)
-                    test_iter = cls.get_iter(dataset_test)
-                    while True:
-                        if dataset.mode=='train':
-                            v = next(train_iter)
-                            # .__next__()
-                        elif dataset.mode=='test':
-                            v = next(test_iter)
-                        if v is not None:
-                            yield v
-                        else:
-                            break
-
-
-            conf.dataloader = IterMaker()
-            # my_iter()
-            # get_iter()
+                # my_iter()
+                # get_iter()
 
         elif conf.task == 'translate-german-english':
             from markov_lm.Dataset.translation_dataset import GermanToEnglishDatasetRenamed
@@ -227,7 +233,6 @@ class ConfigDataset(object):
         conf.n_mask = 1
         conf.thin_sep = 5
         conf.max_len = 50
-
 
         return
 

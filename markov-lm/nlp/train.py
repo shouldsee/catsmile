@@ -68,7 +68,6 @@ def conf_init_translate(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
     conf.shuffle       = shuffle
     conf.device        = torch.device('cuda:0' if CUDA else 'cpu')
     conf.num_epoch     = 6000
-    conf.batch_size    = 100
     add_optimizer      = lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
     # add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,eps=0.01)
     # add_optimizer      = lambda conf,params:torch.optim.Adam( params, lr=conf.learning_rate,)
@@ -84,7 +83,14 @@ def conf_init_translate(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
     # conf.task = 'add'
     # conf.task = 'translate-german-english'
     # conf.task = 'translate-wmt14-de2en-5k'
-    conf.task = 'translate-mutli30k-de2en-l50'
+
+    conf.batch_size    = 280
+    # conf.task = 'translate-mutli30k-de2en-l50'
+
+
+    # conf.batch_size    = 20
+    conf.batch_size    = 280
+    conf.task = 'translate-multi30k-de2en-l20'
     # conf.task = 'translate-wmt14-de2en-50k'
     # conf.task = 'translate-wmt14-de2en-20k'
     dconf.attach_task_to_conf(conf,conf.task)
@@ -96,26 +102,55 @@ def conf_init_translate(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
         from markov_lm.Model_NLP import NLPLayerConfig
         conf.lconf = NLPLayerConfig(
             graph_dim = conf.dataset.graph_dim,
-            embed_dim=128,
             # window_size=10,
             depth =1,
+
+            embed_dim=128,
             # model_name = 'Seq2SeqWithAttention',
+            # model_name = 'Seq2SeqWithAttentionMixture',
             # model_name = 'Seq2SeqWithNoAttention',
 #
             # depth =10,
             # model_name = 'Seq2SeqWithTransformer',
 
             # model_name = 'AlignmentModel',
-            model_name = 'SoftAlignmentModel',
+            # model_name = 'SoftAlignmentModel',
+
+            # beta = 0.5,
+            # model_name = 'GaussianSoftAlignmentModel',
+
+            # model_name = 'SharedSoftAlignmentModel',
+            # model_name = 'PerTokenSoftAlignmentModel',
+            # model_name = 'HardAlignmentModel',
             # model_name = 'SoftAlignmentModelAllowSourcePad',
             # model_name = 'SoftAlignmentModelSimpleMean',
+            # model_name = 'SAM7',
+            # beta = 0.5,
+            # model_name = 'SAM10',
+
+            # beta = 0.5,
+            # kernel_size = 1,
+            # model_name = 'SAM11',
+
+            # embed_dim=256,
+
+            # embed_dim=128,
+            # beta = 1.0,
+            # beta = 2.0,
+            # beta = 0.5,
+            # model_name = 'SAM13',
+
+            # model_name = 'SAM14',
+            model_name = 'SAM5',
+
+            # model_name = 'SAM3',
             n_step = conf.dataset.data_dim,
             # model_name = 'Seq2SeqWithNoAttention',
         )
         conf.model = model = conf.lconf.to_model(conf.device).to(conf.device)
         # conf.learning_rate = 0.00001
-        conf.learning_rate = 0.0001
-        # conf.learning_rate = 0.001
+        # conf.learning_rate = 0.0001
+        conf.learning_rate = 0.001
         # conf.learning_rate = 0.01
         return model
     _add_model(conf)
@@ -163,6 +198,7 @@ def conf_init_ar(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
     conf.device        = torch.device('cuda:0' if CUDA else 'cpu')
     conf.num_epoch     = 6000
     conf.batch_size    = 280
+    # conf.batch_size    = 180
     add_optimizer      = lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
     # add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,eps=0.01)
     # add_optimizer      = lambda conf,params:torch.optim.Adam( params, lr=conf.learning_rate,)

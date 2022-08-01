@@ -29,6 +29,8 @@ def get_model(f1n,device,strict):
     m.load_state_dict(f1['model'],strict=strict)
     # STRICT_LOAD)
     m.alias = f1n
+    f1['filename']=f1n
+    m.meta = f1
     m1 = m
     return m
 
@@ -140,7 +142,8 @@ def plot_translation_attention(model,  source, target, target_len, source_len, b
     axi=-1
     lx = 1
     ly = 5
-    ix,iy= 25,25
+    # ix,iy= 25,25
+    ix,iy= 19,19
     # 40
 
     ax = axs
@@ -158,7 +161,7 @@ def plot_translation_attention(model,  source, target, target_len, source_len, b
     buf.write(write_png_tag(fig))
     # plt.close(fig)
 
-    for i in range(3):
+    for i in range(ly):
         fig,ax = plt.subplots(1,1,figsize=[10,10])
         # i = 2
         zmat = att_weight[i,:ix,:iy].detach().cpu()
@@ -173,18 +176,24 @@ def plot_translation_attention(model,  source, target, target_len, source_len, b
         tgt = target[i]
         # import pdb; pdb.set_trace()
 
-        ax.matshow( zmat )
+        # im =ax.matshow( zmat,vmin=-4,vmax=0)
+        im =ax.matshow( zmat)
+        # vmin=-4,vmax=0)
         plt.sca(ax)
+        plt.colorbar(im)
+
         # xlab,wordize = tgt,dataset.tgt_vocab.wordize
         xlab,wordize = tgt[:iy], dataset.tgt_wordize
-        plt.xticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation='vertical')
+        plt.xticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation= 45)
 
         xlab,wordize = src[:ix], dataset.src_wordize
         # xlab = src
         ax.grid(1)
-        plt.yticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation='horizontal')
+        plt.yticks(range(len(xlab)), [ wordize(x) for x in xlab], rotation = 0)
         buf.write(write_png_tag(fig))
         plt.close(fig)
+
+    model.log_param(buf, plt)
     x = getattr(getattr(model,'mapping',None),'weight',None)
     buf.write(x.__repr__())
     # .att.weight)
