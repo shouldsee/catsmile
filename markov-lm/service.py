@@ -149,8 +149,10 @@ def plot_translation_attention(model,  source, target, target_len, source_len, b
     ax = axs
     # x = images
 
-    output_logit, att_weight = model.forward(dict(source=source,target=target,source_len=source_len,target_len=target_len))
-    mat = att_weight[:ly,:ix,:iy].detach().cpu()
+    output_logit, att_weight = model.forward(dict(source=source,target=target,source_len=source_len,target_len=target_len,**kw))
+    mat = att_weight[:ly, :ix, :iy].detach().cpu()
+    iy = min(iy, mat.shape[2])
+    ix = min(ix, mat.shape[1])
     # assert 0,mat[:ly].shape
     plot_concat_mat(ax, mat,lx,ly,ix,iy)
     # mse = (y-x).square().mean()
@@ -166,12 +168,6 @@ def plot_translation_attention(model,  source, target, target_len, source_len, b
         # i = 2
         zmat = att_weight[i,:ix,:iy].detach().cpu()
         #
-        # dict(source=[ 7503,  5699, 10460,  7533,  7491, 16174,  6138, 12725,  5672,    18,
-        #          5917,    18,  2782,    18,  3037,    18,  7976,    18, 13819,    18,
-        #          6997, 12363,    18,  7910, 14437,  9379,    55,   623,   623,   623,
-        #           623,   623,   623,   623,   623,   623,   623,   623,   623,   623,
-        #           623,   623,   623,   623,   623,   623,   623,   623,   623,   623],
-        #        device='cuda:0')
         src= source[i]
         tgt = target[i]
         # import pdb; pdb.set_trace()

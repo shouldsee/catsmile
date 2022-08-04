@@ -42,7 +42,8 @@ from markov_lm.conf_runner import conf_main_loop,conf_parse_all
 def main():
     CUDA, CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL,RANDOM_SEED = conf_parse_all(sys.argv)
     # sess    = Session()
-    initor  = 'conf_init_translate'
+    # initor  = 'conf_init_translate'
+    initor = 'conf_init_nlm'
     conf    = ConfigPrototype(__file__)
     conf    = eval(initor)(conf, CUDA,RANDOM_SEED,shuffle=True)
     model   = conf.model
@@ -177,6 +178,148 @@ def conf_init_translate(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
         conf.handler = NullHanlder()
     assert conf._session_name is not None,'Please set conf._session_name before finish init!'
     return conf
+
+def conf_init_nlm(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
+    '''
+    autoregression binding
+
+    returns a config object that controls training process.
+    binds (dataset,model,device)
+
+    '''
+
+
+    '''
+    Abusing attributes here
+    [TBC]
+    '''
+    conf.CUDA          = CUDA
+    conf.shuffle       = shuffle
+    conf.device        = torch.device('cuda:0' if CUDA else 'cpu')
+    conf.num_epoch     = 6000
+    add_optimizer      = lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
+    # add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,eps=0.01)
+    # add_optimizer      = lambda conf,params:torch.optim.Adam( params, lr=conf.learning_rate,)
+    #### using Adam with high learning_rate is catastrophic
+    # conf._session_name += 'opt-adam-'
+
+
+    conf.instance = conf.rnd = random_seed
+    torch.manual_seed(conf.instance)
+
+    #############################
+    'Setting Dataset'
+    # conf.task = 'add'
+    # conf.task = 'translate-german-english'
+    # conf.task = 'translate-wmt14-de2en-5k'
+
+    # conf.batch_size    = 280
+    # conf.task = 'translate-mutli30k-de2en-l50'
+
+
+    # conf.batch_size    = 280
+    conf.batch_size    = 180
+    # conf.batch_size    = 100
+    # conf.batch_size    = 30
+    # conf.task = 'translate-multi30k-de2en-l20'
+    conf.task = 'translate-ptb-l20'
+    # conf.task = 'translate-wmt14-de2en-50k'
+    # conf.task = 'translate-wmt14-de2en-20k'
+    dconf.attach_task_to_conf(conf,conf.task)
+
+    #############################
+    'Setting Model'
+    # @staticmethod
+    def _add_model( conf,):
+        # from markov_lm.Model_NLP import NLPLayerConfig
+        from markov_lm.Model_NLM import NLMLayerConfig
+        conf.lconf = NLMLayerConfig(
+            graph_dim = conf.dataset.graph_dim,
+            window_size=4,
+            depth =1,
+
+            embed_dim=128,
+            # model_name = 'DLM1',
+            # model_name = 'DLM2',
+            # model_name = 'DLM5',
+
+            # kernel_size = 1,
+            # model_name = 'DLM7',
+
+            # model_name = 'DLM8',
+            # kernel_size = 3,
+
+
+            # model_name = 'DLM9',
+            # kernel_size = 3,
+            #
+
+            model_name = 'DLM10',
+            # kernel_size = 200,
+            # # kernel_size = 3,
+            kernel_size = 128,
+
+
+            # model_name = 'DLM16',
+
+            # model_name = 'DLM17',
+            # # kernel_size = 3,
+            # kernel_size = 200,
+
+            # model_name = 'DLM18',
+            # kernel_size = 5,
+            # kernel_size = 200,
+
+
+            # model_name = 'DLM13',
+            # kernel_size = 3,
+            # kernel_size = 20,
+            # kernel_size = 128,
+
+            # model_name = 'DLM14',
+            # kernel_size = 80,
+
+            # embed_dim=128,
+            # model_name = 'DLM4',
+
+            # model_name = 'DLM11',
+            # model_name = 'DLM12',
+
+            n_step = conf.dataset.data_dim,
+            # model_name = 'Seq2SeqWithNoAttention',
+        )
+        conf.model = model = conf.lconf.to_model(conf.device).to(conf.device)
+        # conf.learning_rate = 0.00001
+        conf.learning_rate = 0.0001
+        # conf.learning_rate = 0.001
+        # conf.learning_rate = 0.01
+        return model
+
+    _add_model(conf)
+
+    #############################
+    'Setting Name'
+    'Optimizer is not included in the name'
+    conf.get_cache_name()
+    conf.model = model = conf.model.to(conf.device)
+
+    #############################
+    'Check Parameters'
+    'Set Parameter and optimizer'
+    conf.params = params = list(model.parameters())
+    print(dict(model.named_parameters()).keys())
+    conf.optimizer = add_optimizer(conf,params)
+
+
+    if ADD_MONITOR_HOOK:
+        conf.handler = conf.add_hook_for_output_tensor(model,CONFIG_DETACH=1,CONFIG_EXPAND_LEVEL=4,CONFIG_PRINT_CLASS=0)
+    else:
+        class NullHanlder(object):
+            xdict = {}
+        conf.handler = NullHanlder()
+    assert conf._session_name is not None,'Please set conf._session_name before finish init!'
+    return conf
+
 
 
 def conf_init_ar(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
