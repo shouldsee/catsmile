@@ -54,14 +54,39 @@ def conf_parse_all(sys_argv):
     v = int(v)
     SAVE_INTERVAL = v
 
-    if '--seed' in sys_argv:
-        v= sys_argv[sys_argv.index('--seed')+1]
+    k = '--seed'
+    _caster = int
+    if k in sys_argv:
+        v= sys_argv[sys_argv.index(k)+1]
     else:
         v = 29
-    v = int(v)
+    v = _caster(v)
     SEED = v
 
-    return CUDA,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL,SEED
+
+    meta_dict = {}
+
+    k = '--target'
+    _caster = int
+    if k in sys_argv:
+        v= sys_argv[sys_argv.index(k)+1]
+    else:
+        v = 6000
+    v = _caster(v)
+    meta_dict['num_epoch']= v
+
+
+    model_dict = {}
+    for i,k in enumerate(sys_argv):
+        if k.startswith('--model'):
+            # kk = k[len('--model'):]
+            assert '.' in k, k
+            kk = k.split('.',1)[1]
+            # k[len('--model'):]
+            v = sys_argv[i+1]
+            model_dict[kk] = v
+
+    return CUDA,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL,SEED,model_dict,meta_dict
 
 
 
@@ -111,15 +136,29 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
     # CKPT = conf.CKPT
     model = conf.model
     dataset = conf.dataset
-    if(CKPT!='-1'):
 
+    sys_argv = sys.argv
+    k =  '--LOAD_ABS'
+    if k in sys_argv:
+        v= sys_argv[sys_argv.index(k)+1]
+    else:
+        v =None
+    LOAD_ABS = v
+
+    if(CKPT!='-1') or LOAD_ABS is not None:
+# markov_lm/gmm/Checkpoints/-S29-tasktranslate-mutli30k-de2en-l50-shuffle1-graph-dim38783-model-nameSoftAlignmentModel-window-size0-loss-nameKLD-grad-loss-nameKLD-depth1-beta0.0-n-step50-kernel-size0-embed-dim128-p-null0.0001-submodel-name-loglr-4.0_15_6.10327.pkl
         epoch = CKPT
-        # res = glob.glob(os.path.join("Checkpoints",f"{conf._session_name}_{CKPT}_*.pkl"))
-        res = glob.glob(os.path.join("Checkpoints",f"{conf._session_name}_{epoch}*.pkl"))
-        assert len(res)==1,['Which one to choose?',res]
-        print(f'[LOADING]{res[0]}')
 
-        checkpoint   = torch.load(res[0])
+
+        if LOAD_ABS is not None:
+            res = LOAD_ABS
+        else:
+            res = glob.glob(os.path.join("Checkpoints",f"{conf._session_name}_{epoch}*.pkl"))
+            assert len(res)==1,['Which one to choose?',res]
+            res = res[0]
+        print(f'[LOADING]{res}')
+
+        checkpoint   = torch.load(res)
         test_losses  = checkpoint["test_losses"]
         train_losses = checkpoint["train_losses"]
         epoch        = checkpoint["epoch"]
@@ -147,7 +186,7 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
 
     loss_test_mean = 0
     n_mask = 4
-    for _epoch in range(conf.num_epoch):
+    for _epoch in range(conf.num_epoch+1):
         # conf.dataset.op_extract_and_mask(n_mask)
         epoch += 1
         conf.epoch = epoch

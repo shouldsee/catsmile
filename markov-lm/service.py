@@ -29,6 +29,8 @@ def get_model(f1n,device,strict):
     m.load_state_dict(f1['model'],strict=strict)
     # STRICT_LOAD)
     m.alias = f1n
+    f1['filename']=f1n
+    m.meta = f1
     m1 = m
     return m
 
@@ -131,7 +133,8 @@ def plot_fashion_mnist_perp(model, images, labels,**kw):
 
 
 from markov_lm.util_html import write_png_tag
-def plot_translation_attention(model,  source, target, buf, dataset,**kw):
+# def plot_translation_attention(model,  source, target, buf, dataset,**kw):
+def plot_translation_attention(model,  source, target, target_len, source_len, buf, dataset,**kw):
     # , labels, **kw):
     fig,axs = plt.subplots(1,1,figsize=[12,4])
     # fig0=
@@ -139,14 +142,17 @@ def plot_translation_attention(model,  source, target, buf, dataset,**kw):
     axi=-1
     lx = 1
     ly = 5
-    ix,iy= 25,25
+    # ix,iy= 25,25
+    ix,iy= 19,19
     # 40
 
     ax = axs
     # x = images
 
-    output_logit, att_weight = model.forward(dict(source=source,target=target))
-    mat = att_weight[:ly,:ix,:iy].detach().cpu()
+    output_logit, att_weight = model.forward(dict(source=source,target=target,source_len=source_len,target_len=target_len,**kw))
+    mat = att_weight[:ly, :ix, :iy].detach().cpu()
+    iy = min(iy, mat.shape[2])
+    ix = min(ix, mat.shape[1])
     # assert 0,mat[:ly].shape
     plot_concat_mat(ax, mat,lx,ly,ix,iy)
     # mse = (y-x).square().mean()
@@ -157,32 +163,106 @@ def plot_translation_attention(model,  source, target, buf, dataset,**kw):
     buf.write(write_png_tag(fig))
     # plt.close(fig)
 
-    for i in range(3):
+    for i in range(ly):
         fig,ax = plt.subplots(1,1,figsize=[10,10])
         # i = 2
         zmat = att_weight[i,:ix,:iy].detach().cpu()
         #
-        # dict(source=[ 7503,  5699, 10460,  7533,  7491, 16174,  6138, 12725,  5672,    18,
-        #          5917,    18,  2782,    18,  3037,    18,  7976,    18, 13819,    18,
-        #          6997, 12363,    18,  7910, 14437,  9379,    55,   623,   623,   623,
-        #           623,   623,   623,   623,   623,   623,   623,   623,   623,   623,
-        #           623,   623,   623,   623,   623,   623,   623,   623,   623,   623],
-        #        device='cuda:0')
         src= source[i]
         tgt = target[i]
         # import pdb; pdb.set_trace()
 
-        ax.matshow( zmat )
+        # im =ax.matshow( zmat,vmin=-4,vmax=0)
+        im =ax.matshow( zmat)
+        # vmin=-4,vmax=0)
         plt.sca(ax)
+        plt.colorbar(im)
+
         # xlab,wordize = tgt,dataset.tgt_vocab.wordize
         xlab,wordize = tgt[:iy], dataset.tgt_wordize
-        plt.xticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation='vertical')
+        plt.xticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation= 45)
 
         xlab,wordize = src[:ix], dataset.src_wordize
         # xlab = src
         ax.grid(1)
-        plt.yticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation='horizontal')
+        plt.yticks(range(len(xlab)), [ wordize(x) for x in xlab], rotation = 0)
         buf.write(write_png_tag(fig))
         plt.close(fig)
+
+    model.log_param(buf, plt)
+    x = getattr(getattr(model,'mapping',None),'weight',None)
+    buf.write(x.__repr__())
+    # .att.weight)
+        # '.__repr__())
+    return None
+
+
+from markov_lm.util_html import write_png_tag
+# def plot_translation_attention(model,  source, target, buf, dataset,**kw):
+def plot_translation_attention(model,  source, target, target_len, source_len, buf, dataset,**kw):
+    '''
+    Needs a plot to indicate the loss at different positions
+
+    Needs to compare a model that predict object from the subject. SVO decompostion. instead of just
+    predict the next word. 
+    '''
+    # , labels, **kw):
+    fig,axs = plt.subplots(1,1,figsize=[12,4])
+    # fig0=
+    # ax = axs[0];
+    axi=-1
+    lx = 1
+    ly = 5
+    # ix,iy= 25,25
+    ix,iy= 19,19
+    # 40
+
+    ax = axs
+    # x = images
+
+    output_logit, att_weight = model.forward(dict(source=source,target=target,source_len=source_len,target_len=target_len,**kw))
+    mat = att_weight[:ly, :ix, :iy].detach().cpu()
+    iy = min(iy, mat.shape[2])
+    ix = min(ix, mat.shape[1])
+    # assert 0,mat[:ly].shape
+    plot_concat_mat(ax, mat,lx,ly,ix,iy)
+    # mse = (y-x).square().mean()
+    mse = 0
+    ax.set_title(f'{model.alias} \n mean_rec={mse} \n {mat.shape} ({lx*ix,ly*iy})')
+    buf.write(f'<pre>{target[0:3, :30]}</pre><br/>')
+    buf.write(f'Source<pre>{source[0:3, :30]}</pre><br/>')
+    buf.write(write_png_tag(fig))
+    # plt.close(fig)
+
+    for i in range(ly):
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        # i = 2
+        zmat = att_weight[i,:ix,:iy].detach().cpu()
+        #
+        src= source[i]
+        tgt = target[i]
+        # import pdb; pdb.set_trace()
+
+        # im =ax.matshow( zmat,vmin=-4,vmax=0)
+        im =ax.matshow( zmat)
+        # vmin=-4,vmax=0)
+        plt.sca(ax)
+        plt.colorbar(im)
+
+        # xlab,wordize = tgt,dataset.tgt_vocab.wordize
+        xlab,wordize = tgt[:iy], dataset.tgt_wordize
+        plt.xticks(range(len(xlab)), [ wordize(x) for x in xlab],rotation= 45)
+
+        xlab,wordize = src[:ix], dataset.src_wordize
+        # xlab = src
+        ax.grid(1)
+        plt.yticks(range(len(xlab)), [ wordize(x) for x in xlab], rotation = 0)
+        buf.write(write_png_tag(fig))
+        plt.close(fig)
+
+    model.log_param(buf, plt)
+    x = getattr(getattr(model,'mapping',None),'weight',None)
+    buf.write(x.__repr__())
+    # .att.weight)
         # '.__repr__())
     return None

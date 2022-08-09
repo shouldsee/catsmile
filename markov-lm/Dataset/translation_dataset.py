@@ -491,6 +491,7 @@ class WMT14(DeviceDataset):
         return dict(
             target=target,
             source=xsource,
+            has_start_token=0,
             index=index)
 
 import torchtext

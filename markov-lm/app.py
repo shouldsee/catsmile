@@ -22,6 +22,7 @@ translate-wmt14-de2en-5k
 translate-wmt14-de2en-50k
 translate-wmt14-de2en-20k
 translate-mutli30k-de2en-l50
+translate-multi30k-de2en-l20
 '''.strip().splitlines():
         CONFS[k] = markov_lm.service.init_conf(k)
     # 'fashion-mnist-compress')
@@ -103,7 +104,8 @@ app.route('/fashion_mnist_perp',methods=["GET", "POST"])(prepare_target('fashion
 # app.route('/translation_attention',methods=["GET", "POST"])(prepare_target('translate-german-english', markov_lm.service.plot_translation_attention))
 # app.route('/translation_attention',methods=["GET", "POST"])(prepare_target('translate-wmt14-de2en-20k', markov_lm.service.plot_translation_attention))
 # app.route('/translation_attention',methods=["GET", "POST"])(prepare_target('translate-wmt14-de2en-5k', markov_lm.service.plot_translation_attention))
-app.route('/translation_attention',methods=["GET", "POST"])(prepare_target('translate-mutli30k-de2en-l50', markov_lm.service.plot_translation_attention))
+# app.route('/translation_attention',methods=["GET", "POST"])(prepare_target('translate-mutli30k-de2en-l50', markov_lm.service.plot_translation_attention))
+app.route('/translation_attention',methods=["GET", "POST"])(prepare_target('translate-multi30k-de2en-l20', markov_lm.service.plot_translation_attention))
 
 
 BUTTONS_HTML = ''

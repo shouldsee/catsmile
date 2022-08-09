@@ -6,441 +6,21 @@ import torch.optim
 from dataclasses import dataclass
 from markov_lm.Model_gmm import AbstractLayerConfig
 # from transformers.models.bert.modeling_bert import BertLayer,BertConfig
-from markov_lm.nlp.model_seq2seq import Seq2SeqWithAttention,Seq2SeqWithNoAttention
-class RefillModelRNNBase(nn.Module):
-    '''
-    Symbolic Module that defines Loss function
+from markov_lm.nlp.model_seq2seq import Seq2SeqWithAttention
 
-    Calculate f_{ik}(Y,Z)
-    where Y a set of tokens
-          Z a sequence with masks at position of extraction
 
-    '''
-    def __init__(self,
-        device,
-        graph_dim,
-        embed_dim,
-        mixture_count,
-        state_count,
-        total_length,
-        min_len,
-        mask_token_idx):
-        super().__init__()
-        state_count = 5
-        # state_count = 15
-        self.device = device
-        self.total_length = total_length
-        self.min_len = min_len
-        self.mixture_count = mixture_count
-        self.embed_dim = embed_dim
-        self.state_count = state_count
+class Seq2SeqWithNoAttention(Seq2SeqWithAttention):
+    # USE_ATTENTION = 0
+    MODE_EMISSION = 'no_attention'
+class Seq2SeqWithAttentionMixture(Seq2SeqWithAttention):
+    # USE_ATTENTION = 0
+    MODE_EMISSION = 'attention_mixture'
+# Seq2SeqWithNoAttention
 
-        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
-        self.n_step     = min_len
-        self.selector   = nn.Linear(embed_dim, mixture_count).to(self.device)
-        self.selector_q = nn.Linear(embed_dim, mixture_count).to(self.device)
-        # self.selector_q = nn.Linear(embed_dim, mixture_count*embed_dim).to(self.device)
-        self.selector_k = nn.Linear(embed_dim, embed_dim).to(self.device)
-        kernel_size = 5
-        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
-        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
-
-    def callback_step(self,outer,inner):
-        [zi,x,y,z,fs],[i,sel,xz,xs] = outer,inner
+class TranslationModelPrototype(nn.Module):
+    meta = {}
+    def log_param(self,buf,plt):
         return
-    def callback_init(self,outer):
-        return
-    def callback_end(self,outer):
-        return
-        # self.callback_init = lambda zi,x,y,z,sel: None
-
-    def nembed(self,y):
-        y = self.embed(y)
-        y = self.norm(y)
-        return y
-    def norm(self,y):
-        y = y / (0.00001 + y.std(-1,keepdims=True)) *1.0
-        return y
-
-    def vocab(self,x):
-        y = x.matmul(self.embed.weight.T)
-        return y
-
-
-    def target_energy(self,lptok,yt):
-        yp = torch.gather(lptok,index=yt[:,:,None],dim=-1)[:,:,0]
-        return yp
-
-    def loss(self,zi,x,y,z):
-        return self._loss(zi,x,y,z,out='loss')
-
-    def get_tokens(self,zi,x,y,z):
-        return self._loss(zi,x,y,z,out='token')
-
-    def _step(self,outer,inner):
-        '''
-        Outer should be non-mutable?
-        '''
-        return outer,inner
-
-
-    def _batch_init(self,zi,x,y,z):
-        #### batch_init part
-        ### state init
-        z = self.embed(z)
-        y = self.embed(y)
-        # xs = torch.cat([y,init_state],dim=1)
-        xs = self.init_state.weight.T[None,0:1]
-        xs = self.norm(xs)
-        # xs =
-        y  = self.norm(y)
-        z  = self.norm(z)
-        fs = torch.tensor([],requires_grad=True).to(self.device)
-        # outer,inner = self.batch_init(zi,x,y,z,fs)
-        outer = [zi,x,y,z,fs]
-        i = -1
-        sel = None
-        xz = None
-        inner = [i,sel,xz,xs]
-        return outer,inner
-
-    def _loss(self,zi,x,y,z,out='loss'):
-        assert out in 'loss token traj'.split()
-
-        outer,inner = self._batch_init(zi,x,y,z)
-        ### Uses an explicit RNN to switch between copying z and extract y
-        self.callback_init(outer)
-        for i in range(z.size(1)):
-            inner[0]=i
-            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-            self.callback_step(outer,inner)
-        self.callback_end(outer)
-        (zi,x,y,z,fs) = outer
-
-
-        fs = self.norm(fs)
-        if out=='traj': return fs
-        lptok =  self.vocab(fs).log_softmax(-1)
-        if out=='token': return lptok
-
-        cent  = self.target_energy(lptok,x)
-
-        if out=='loss': return -cent.mean(-1)
-        assert 0
-
-    grad_loss = loss
-
-    def corrupt(self,zi,y):
-        # self.sigma = 1.5
-        # self.sigma = 1.0
-        y = y / (0.00001 + y.std(-1,keepdims=True)) *1.0
-        y = y + torch.normal(0, self.sigma, y.shape).to(self.device)
-        return y
-
-class RefillModelRNNConvolveSimple(RefillModelRNNBase):
-    def __init__(self,
-        device,
-        graph_dim,
-        embed_dim,
-        mixture_count,
-        state_count,
-        total_length,
-        min_len,
-        mask_token_idx,
-        use_mixture=1):
-
-        state_count = 1
-        super().__init__(
-            device,
-            graph_dim,
-            embed_dim,
-            mixture_count,
-            state_count,
-            total_length,
-            min_len,
-            mask_token_idx)
-        # state_count = 15
-        self.device        = device
-        self.total_length  = total_length
-        self.min_len       = min_len
-        self.mixture_count = mixture_count
-        self.embed_dim     = embed_dim
-        self.state_count   = state_count
-
-        #### share embed usually works
-        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
-        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
-        self.n_step     = min_len
-        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
-        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
-        kernel_size = 5
-        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
-        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.transcore  = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.emittor    = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.att_kernel = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.att_energy = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.att_prob   = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.use_mixture= use_mixture
-        self.fs_type    = 'lptok'
-
-    def _batch_init(self,zi,x,y,z):
-        #### batch_init part
-        ### state init
-        z = self.embed(z)
-        # xs = torch.cat([y,init_state],dim=1)
-        xsa = self.init_state.weight.T[None,0:1]
-        xsa = xsa.repeat((len(z),z.size(1),1))
-        xsa = self.norm(xsa)
-        if y is not None:
-            y = self.embed(y)
-            y  = self.norm(y)
-        z  = self.norm(z)
-        fs = self.vocab(xsa)*0
-        # fs = torch.tensor([],requires_grad=True).to(self.device)
-        # outer,inner = self.batch_init(zi,x,y,z,fs)
-        i = -1
-        sel = None
-        xz = None
-        outer = [zi, x,y,z,fs]
-        inner = [i,sel,xz,xsa]
-        return outer,inner
-
-    def _step(self,outer,inner):
-        '''
-        Outer should be non-mutable?
-        '''
-
-        (zi,x,y,z,fs) = outer
-        (i,sel,xz,xsa) = inner
-        sel = None
-        xz  = None
-
-        xnew=1./3 *(
-            xsa.roll(1,1).matmul(self.transition.weight)+
-            xsa.roll(-1,1).matmul(self.transition.weight.T)+
-            xsa.roll(0,1).matmul(self.transcore.weight)+
-            z.matmul(self.updater.weight.T)
-            +self.transition.bias
-            )
-        # xsa = 0.5* xsa + 0.5*xnew
-        xsa = xnew
-        if i+1 == xsa.size(1):
-            # print((xsa[0,:3,:30]).int())
-            pass
-        # xsa + 0.5*xnew
-        outer = [zi,x,y,z,fs]
-        inner = [i,sel,xz,xsa]
-        return outer,inner
-
-    def loss(self,item):
-        # (zi,x,y,z,mask =None):
-        zi = 1
-        x   = item['unmasked']
-        y   = x*0
-        mask= item['mask']
-        z   = item['masked']
-        return self._loss(zi,x,y,z,out='loss',mask =mask)
-
-    def _loss(self,zi,x,y,z,out='loss',mask =None):
-        assert out in 'loss token traj'.split()
-
-        outer,inner = self._batch_init(zi,x,y,z)
-        ### Uses an explicit RNN to switch between copying z and extract y
-        self.callback_init(outer)
-        L = z.size(1)
-        for i in range(L):
-            inner[0]=i
-            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-            self.callback_step(outer,inner)
-
-        self.callback_end(outer,)
-        (zi,x,y,z,lptok) = outer
-        (i,sel,xz,xsa) = inner
-
-        if self.use_mixture:
-            xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
-            xkey_dynamic= self.xkey_dynamic(y)
-            xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
-            # import pdb; pdb.set_trace()
-            cand= torch.cat([ self.emittor(xsa)[:,:,None], z[:,:,None],y[:,None,:,:].repeat((1,L,1,1))],dim=2)
-            sel = xsa.matmul(xkey.transpose(2,1)).log_softmax(-1)
-            lptok = self.vocab(cand).log_softmax(-1)
-            lptok = (sel[:,:,:,None] + lptok).logsumexp(-2)
-
-
-            lptok = (lptok/2).exp()
-        # import pdb; pdb.set_trace()
-        else:
-            if self.use_mask:
-                _mask = mask[:,:,None].repeat((1,1, xsa.shape[2]))
-                # lptok= torch.gather(lptok,index=mask[:,:,None].repeat((1,1,lptok.shape[2])),dim=1)
-                lptok = self.vocab(torch.gather(xsa,index=_mask,dim=1).matmul(self.emittor.weight)).log_softmax(-1)
-                x    = torch.gather(x,index=mask[:,:],dim=1)
-                # print(lptok.shape,x.shape)
-            else:
-                lptok = self.vocab(xsa.matmul(self.emittor.weight)).log_softmax(-1)
-        cent = self.target_energy(lptok,x)
-        loss  = -cent.mean(-1)
-        # if out=='token': return lptok
-        if out=='token': return lptok
-
-        if out=='loss': return loss
-        assert 0
-
-class RefillModelRNNConvolveSimple(RefillModelRNNBase):
-    def __init__(self,
-        device,
-        graph_dim,
-        embed_dim,
-        mixture_count,
-        state_count,
-        total_length,
-        min_len,
-        mask_token_idx,
-        use_mixture=1):
-
-        state_count = 1
-        super().__init__(
-            device,
-            graph_dim,
-            embed_dim,
-            mixture_count,
-            state_count,
-            total_length,
-            min_len,
-            mask_token_idx)
-        # state_count = 15
-        self.device        = device
-        self.total_length  = total_length
-        self.min_len       = min_len
-        self.mixture_count = mixture_count
-        self.embed_dim     = embed_dim
-        self.state_count   = state_count
-
-        #### share embed usually works
-        # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
-        self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
-        self.n_step     = min_len
-        self.xkey_static = nn.Linear(embed_dim, 2).to(self.device)
-        self.xkey_dynamic= nn.Linear(embed_dim, embed_dim).to(self.device)
-        kernel_size = 5
-        self.init_state = nn.Linear(mixture_count, embed_dim).to(self.device)
-        self.transition = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.transcore  = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.updater    = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.emittor    = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.att_kernel = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.att_energy = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.att_prob   = nn.Linear(embed_dim,embed_dim).to(self.device)
-        self.use_mixture= use_mixture
-        self.fs_type    = 'lptok'
-
-    def _batch_init(self,zi,x,y,z):
-        #### batch_init part
-        ### state init
-        z = self.embed(z)
-        # xs = torch.cat([y,init_state],dim=1)
-        xsa = self.init_state.weight.T[None,0:1]
-        xsa = xsa.repeat((len(z),z.size(1),1))
-        xsa = self.norm(xsa)
-        if y is not None:
-            y = self.embed(y)
-            y  = self.norm(y)
-        z  = self.norm(z)
-        fs = self.vocab(xsa)*0
-        # fs = torch.tensor([],requires_grad=True).to(self.device)
-        # outer,inner = self.batch_init(zi,x,y,z,fs)
-        i = -1
-        sel = None
-        xz = None
-        outer = [zi, x,y,z,fs]
-        inner = [i,sel,xz,xsa]
-        return outer,inner
-
-    def _step(self,outer,inner):
-        '''
-        Outer should be non-mutable?
-        '''
-
-        (zi,x,y,z,fs) = outer
-        (i,sel,xz,xsa) = inner
-        sel = None
-        xz  = None
-
-        xnew=1./3 *(
-            xsa.roll(1,1).matmul(self.transition.weight)+
-            xsa.roll(-1,1).matmul(self.transition.weight.T)+
-            xsa.roll(0,1).matmul(self.transcore.weight)+
-            z.matmul(self.updater.weight.T)
-            +self.transition.bias
-            )
-        # xsa = 0.5* xsa + 0.5*xnew
-        xsa = xnew
-        if i+1 == xsa.size(1):
-            # print((xsa[0,:3,:30]).int())
-            pass
-        # xsa + 0.5*xnew
-        outer = [zi,x,y,z,fs]
-        inner = [i,sel,xz,xsa]
-        return outer,inner
-
-    def loss(self,item):
-        # (zi,x,y,z,mask =None):
-        zi = 1
-        x   = item['unmasked']
-        y   = x*0
-        mask= item['mask']
-        z   = item['masked']
-        return self._loss(zi,x,y,z,out='loss',mask =mask)
-
-    def _loss(self,zi,x,y,z,out='loss',mask =None):
-        assert out in 'loss token traj'.split()
-
-        outer,inner = self._batch_init(zi,x,y,z)
-        ### Uses an explicit RNN to switch between copying z and extract y
-        self.callback_init(outer)
-        L = z.size(1)
-        for i in range(L):
-            inner[0]=i
-            outer,inner = self._step(outer,inner) #### do what ever with your hidden state
-            self.callback_step(outer,inner)
-
-        self.callback_end(outer,)
-        (zi,x,y,z,lptok) = outer
-        (i,sel,xz,xsa) = inner
-
-        if self.use_mixture:
-            xkey_static = self.xkey_static.weight[None,:2,:self.embed_dim].repeat((len(z),1,1))
-            xkey_dynamic= self.xkey_dynamic(y)
-            xkey  = torch.cat([xkey_static, xkey_dynamic],dim=1)
-            # import pdb; pdb.set_trace()
-            cand= torch.cat([ self.emittor(xsa)[:,:,None], z[:,:,None],y[:,None,:,:].repeat((1,L,1,1))],dim=2)
-            sel = xsa.matmul(xkey.transpose(2,1)).log_softmax(-1)
-            lptok = self.vocab(cand).log_softmax(-1)
-            lptok = (sel[:,:,:,None] + lptok).logsumexp(-2)
-
-
-            lptok = (lptok/2).exp()
-        # import pdb; pdb.set_trace()
-        else:
-            if self.use_mask:
-                _mask = mask[:,:,None].repeat((1,1, xsa.shape[2]))
-                # lptok= torch.gather(lptok,index=mask[:,:,None].repeat((1,1,lptok.shape[2])),dim=1)
-                lptok = self.vocab(torch.gather(xsa,index=_mask,dim=1).matmul(self.emittor.weight)).log_softmax(-1)
-                x    = torch.gather(x,index=mask[:,:],dim=1)
-                # print(lptok.shape,x.shape)
-            else:
-                lptok = self.vocab(xsa.matmul(self.emittor.weight)).log_softmax(-1)
-        cent = self.target_energy(lptok,x)
-        loss  = -cent.mean(-1)
-        # if out=='token': return lptok
-        if out=='token': return lptok
-
-        if out=='loss': return loss
-        assert 0
 
 
 # Temporarily leave PositionalEncoding module here. Will be moved somewhere else.
@@ -943,11 +523,23 @@ class SimpleDenseNetTransformer(nn.Module):
         return lossVal
 
 
-class AlignmentModel(nn.Module):
+class AlignmentModelPrototype(TranslationModelPrototype):
     '''
     This model is to test whether attention is learnable with a simple
-    optimisation algorith
+    optimisation algorithm
+
+    [TBC] share interface with :class:SoftAlignmentModel
     '''
+    AVG_METHOD = None
+    ATT_METHOD = None
+    ALIGNMENT_METHOD = 'mixture_soft'
+    ALIGNMENT_PRIOR = None
+    IS_RUN_BACKWARD = None
+    # ALIGNMENT_MODEL = 'mixture'
+    INF =1E15
+    # SOURCE_ENCODER ='na'
+
+
     def __init__(self,device,config,_=None):
         super().__init__()
         self.config = config
@@ -963,6 +555,11 @@ class AlignmentModel(nn.Module):
         # Linear for attention
         self.attn = nn.Linear(n_hidden, n_hidden).to(self.device)
         self.out_layer  = nn.Linear(n_hidden, n_class).to(self.device)
+        self.source_encoder = None
+        assert self.ALIGNMENT_METHOD
+        assert self.ATT_METHOD
+        assert self.AVG_METHOD
+
 
     def loss(self,item,):
         return self._loss(item,'loss')
@@ -971,12 +568,29 @@ class AlignmentModel(nn.Module):
     def forward(self,item):
         return self._loss(item,'forward')
 
+
+
     def _loss(self,item,ret):
         source = item['source'] ### token sequence
         target = item['target'] ### token seq
 
         source_embed = self.embed(source)
         target_embed = self.embed(target)
+        S = source.size(1)
+        T = target.size(1)
+        B = source.size(0)
+        target_len = item['target_len']
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+
+        source_len = item['source_len']
+        source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        if self.source_encoder is None:
+             # == 'na':
+            pass
+        else:
+            source_embed = self.source_encoder(source_embed)
+
+
 
         # (B, S, E)
         out_embed = self.mapping( source_embed )
@@ -986,45 +600,705 @@ class AlignmentModel(nn.Module):
         D = source.shape[1]
         output_tok = item['target'][:,None,:].repeat((1,D,1))
 
+        # (B, S, T, K)
+        output_tok
+
         # (B, S, T)
+
+        #### get logp_matrix
         logp_mat = torch.gather( out_logit, index=output_tok, dim=-1)
 
+        if self.ALIGNMENT_METHOD in 'mixture_soft mixture_hard'.split():
+            prior = torch.tensor([0],device= self.device)[None,None]
+            if self.ALIGNMENT_PRIOR is None:
+                '''
+                Uniform prior
+                '''
+                prior += -math.log(source.size(1))
+
+            elif self.ALIGNMENT_PRIOR =='gaussian':
+                xs = torch.arange(S,device=self.device)[None,:,None]
+                xt = torch.arange(T,device=self.device)[None,None,:,]
+                diff =  -self.config.beta * (xs - xt).abs()
+                prior =  prior +  diff.log_softmax(1)
+                # logp_mat = logp_mat + self.alignment(item)shared
+                # source_len,target_len)
+            elif self.ALIGNMENT_PRIOR == 'shared':
+                diff = self.shared_log_align[None]
+                prior = prior + diff.log_softmax(1)
+            elif self.ALIGNMENT_PRIOR == 'per_token':
+                # import pdb; pdb.set_trace()
+                mat = self.per_token_alignment[source]
+                diff = torch.arange(S,device=self.device)[None,:,None] - torch.arange(S,device=self.device)[None,None,:] + (S -1)
+                # import pdb; pdb.set_trace()
+                diff = torch.gather(mat,index=diff.repeat((B,1,1)),dim=-1)
+                prior = prior + diff.log_softmax(1)
+                # torch.gather(self.per_token_alignment, index=,dim=0)
+            else:
+                raise NotImplementedError(self.ALIGNMENT_PRIOR)
+
+
+            '''
+            Whether to mask <pad> in source sentence?
+            '''
+            if self.ATT_METHOD=='masked':
+                INF = 1E15
+                prior = prior + -INF * (~source_notnull[:,:,None])
+                # logp_mat = logp_mat +
+            elif self.ATT_METHOD=='allow_source_pad':
+                pass
+            else:
+                raise NotImplementedError(self.ATT_METHOD)
+
+            prior = prior.log_softmax(1)
+            logp_mat = logp_mat + prior
+            # (B,T)
+            '''
+            Whether to use hard or soft alignment?
+
+            Note hard alignment does not yield a proba model, meaning its loss function
+            cannot be compared to soft model !!!!
+            '''
+            if self.ALIGNMENT_METHOD=='mixture_soft':
+                val = logp_mat.logsumexp(dim=1)
+            elif self.ALIGNMENT_METHOD =='mixture_hard':
+                val,which = logp_mat.max(dim=1)
+            else:
+                raise NotImplementedError(self.ALIGNMENT_METHOD)
+
+            ### get \log P(E|m) = \sum_i  \log \sum_{a_i} P(e_i,a_i|m)
+            val  = - val
+            attn = logp_mat.softmax(dim=1)
+            self._last_att = attn
+            # attn = attn * target_notnull[:,None,:]
+            # .unsqueeze(-1)
+
+            '''
+            Whether to mask <pad> in target sentence?
+            '''
+            if self.AVG_METHOD=='masked':
+                loss = mean_notnull(val,target_notnull)
+            elif self.AVG_METHOD == 'simple_mean':
+                loss = val.mean(-1)
+            else:
+                raise NotImplementedError(self.AVG_METHOD)
+
+            loss, attn
+
+        elif self.ALIGNMENT_METHOD=='hmm':
+            #### initialise forward variable
+            loga = torch.ones((B,S,1), device=self.device).log_softmax(1)
+            # loga = (torch.zeros((B,S,1), device=self.device)-self.INF)
+            # loga[:,0]=0
+            # loga = loga.log_softmax(1)
+            logb = torch.ones((B,S,1), device=self.device).log()
+            # _softmax(1)
+            loga_array = torch.zeros((B,S,T),device=self.device)
+            logb_array = torch.zeros((B,S,T),device=self.device)
+            # (1, S, S)
+            xs = torch.arange(S,device=self.device)[:,None]
+            if self.ALIGNMENT_PRIOR == 'gaussian':
+                logt = torch.exp( -self.config.beta*(xs + 0.5 - xs.T ).abs() )[None]
+            elif self.ALIGNMENT_PRIOR=='uniform':
+                logt = torch.ones((1,S,S),device=self.device)
+            elif self.ALIGNMENT_PRIOR == 'shared':
+                logt = self.shared_log_align[None]
+            else:
+                raise NotImplementedError(self.ALIGNMENT_PRIOR)
+
+            if self.ATT_METHOD=='masked':
+                logt = logt + -self.INF * (~source_notnull[:,:,None])
+            elif self.ATT_METHOD=='allow_source_pad':
+                pass
+            else:
+                raise NotImplementedError(self.ATT_METHOD)
+            logt = logt.log_softmax(dim=2)
+
+            ### only count loss if not null, otherwise no loss for p(<pad>)=1
+            logp_mat = logp_mat * target_notnull[:,None,:]
+            for ti in range(T):
+                # loga = ((loga + logt).logsumexp(dim=1)) + (logp_mat[:,:,ti] * target_notnull[:,ti:ti+1])  ### only count loss if not null, otherwise no loss for p(<pad>)=1
+                loga = ((loga + logt).logsumexp(dim=1)) + logp_mat[:,:,ti]
+                loga = loga[:,:,None]
+                loga_array[:,:,ti:ti+1] = loga
+
+            logp = loga.squeeze(-1).logsumexp(dim=1)
+            loss = -logp / target_len
+
+            if self.IS_RUN_BACKWARD:
+                for ti in range(T):
+                    ti = T-1-ti
+                    logb_array[:,:,ti:ti+1]= logb
+                    logb = (logb + logp_mat[:,:,ti:ti+1] + logt.transpose(2,1)).logsumexp(dim=1)
+                    logb = logb[:,:,None]
+
+                # attn = (loga_array + logb_array) - (loga_array + logb_array).logsumexp(dim=1,keepdims=True)
+                attn = (loga_array + logb_array).softmax(dim=1)
+                 # - (loga_array + logb_array).logsumexp(dim=1,keepdims=True)
+            else:
+                attn = torch.ones((B,S,T),device=self.device)
+            #### recursively evaluate forward variable
+
+        else:
+            raise NotImplementedError(self.ALIGNMENT_METHOD)
+
+        self._last_att = attn
+
+        if ret =='forward':
+            return loss, attn
+
+        return loss
+
+
+def mean_notnull(val, target_notnull):
+    '''
+    Take average on particular tokens, not all tokens.
+
+    target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+    '''
+    loss =  (val * target_notnull ).sum(-1) / target_notnull.sum(-1)
+    return loss
+
+
+class HardAlignmentModel(AlignmentModelPrototype):
+    ALIGNMENT_METHOD = 'mixture_hard'
+    AVG_METHOD = 'masked'
+    ATT_METHOD = 'masked'
+
+
+class SoftAlignmentModel(AlignmentModelPrototype):
+    ALIGNMENT_METHOD = 'mixture_soft'
+    AVG_METHOD = 'masked'
+    ATT_METHOD = 'masked'
+
+class GaussianSoftAlignmentModel(AlignmentModelPrototype):
+    ALIGNMENT_PRIOR = 'gaussian'
+    ALIGNMENT_METHOD = 'mixture_soft'
+    AVG_METHOD = 'masked'
+    ATT_METHOD = 'masked'
+
+
+class SoftAlignmentModelAllowSourcePad(SoftAlignmentModel):
+    # AVG_METHOD = 'simple_mean'
+    AVG_METHOD = 'masked'
+    ATT_METHOD = 'allow_source_pad'
+
+
+class SoftAlignmentModelSimpleMean(SoftAlignmentModel):
+    AVG_METHOD = 'simple_mean'
+    ATT_METHOD = 'allow_source_pad'
+
+from markov_lm.util_html import write_png_tag
+
+class SharedSoftAlignmentModel(AlignmentModelPrototype):
+    ALIGNMENT_PRIOR = 'shared'
+    ALIGNMENT_METHOD = 'mixture_soft'
+    AVG_METHOD = 'masked'
+    ATT_METHOD = 'masked'
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        S = self.config.n_step
+        x = nn.Linear(S,S)
+        self.shared_log_align = nn.Parameter(x.weight)
+
+    def log_param(self,buf,plt):
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        mat = self.shared_log_align.log_softmax(0).cpu().detach()
+
+        # im = ax.imshow(mat,vmin=0.0,vmax=0.5)
+        im = ax.imshow(mat,vmin=-4,vmax=0.)
+        # im = ax.imshow(mat,)
+        plt.sca(ax)
+        plt.colorbar(im)
+        epoch = self.meta['epoch']
+        ax.set_title(f'[log_param]self.shared_log_align\nModel_name={self.config.model_name}\nEpoch:{epoch}')
+        buf.write(write_png_tag(fig))
+        pass
+
+
+
+class PerTokenSoftAlignmentModel(AlignmentModelPrototype):
+    ALIGNMENT_PRIOR = 'per_token'
+    ALIGNMENT_METHOD = 'mixture_soft'
+    AVG_METHOD = 'masked'
+    ATT_METHOD = 'masked'
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        S = self.config.n_step
+        G = self.config.graph_dim
+        x = nn.Linear(G,S*2)
+        self.per_token_alignment = nn.Parameter(x.weight.T)
+
+    def log_param(self,buf,plt):
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        mat = self._last_att.mean(dim=0).log().cpu().detach()
+        # im = ax.imshow(mat,vmin=0.0,vmax=0.5)
+        im = ax.imshow(mat,vmin=-4,vmax=0.)
+        # im = ax.imshow(mat,)
+        plt.sca(ax)
+        plt.colorbar(im)
+        epoch = self.meta['epoch']
+        ax.set_title(f'[log_param]self.shared_log_align\nModel_name={self.config.model_name}\nEpoch:{epoch}')
+        buf.write(write_png_tag(fig))
+        pass
+
+SAM1 = SoftAlignmentModelSimpleMean
+SAM2 = SoftAlignmentModelAllowSourcePad
+SAM3 = SoftAlignmentModel
+SAM4 = GaussianSoftAlignmentModel
+SAM5 = SharedSoftAlignmentModel
+
+class SAM7(SoftAlignmentModel):
+    '''
+    Implement a causal relation graph model
+    aside from the alignment model
+
+    $$
+    P(e_i | f,e,a,b)  \propto \exp( e_i W_1 e_{b_i}^T +  e_i W_2 f_{a_i})
+    $$
+
+    TOOOOOOOOOO SLOW!
+
+    '''
+
+    ALIGNMENT_PRIOR = 'na'
+    ALIGNMENT_METHOD = 'na'
+    AVG_METHOD = 'na'
+    ATT_METHOD = 'na'
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        n_hidden = self.n_hidden
+        self.mapping2 = nn.Linear(n_hidden, n_hidden).to(self.device)
+
+    def _loss(self,item,ret):
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+
+        source_embed = self.embed(source)
+        target_embed = self.embed(target)
+        S = source.size(1)
+        T = target.size(1)
+        B = source.size(0)
+        target_len = item['target_len']
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+
+        source_len = item['source_len']
+        source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+
+
+        # (B, S, T, E)
+        out_embed = self.mapping( source_embed )[:,:,None,:] + self.mapping2(target_embed)[:,None,:,:]
+        # (B, S, T, C)
+        out_logit = self.out_layer(out_embed).log_softmax(-1)
+
+        D = source.shape[1]
+
+        # (B, S, T, 1)
+        output_tok = item['target'][:,None,None,:].repeat((1,S,T,1))
+        output_tok
+
+        # (B, S, T, T)
+        # logp_mat = torch.gather( out_logit, index=output_tok, dim=-1,sparse_grad=True)
+        logp_mat = torch.gather( out_logit, index=output_tok, dim=-1)
+        '''
+        Uniform prior
+        '''
+        logp_mat += -math.log(S*T/2) #[approx]
+
+        '''
+        Whether to mask <pad> in source sentence?
+        Mask <pad> in input seq
+        '''
+        INF = 1E15
+        logp_mat = logp_mat + -INF * (~source_notnull[:,:,None,None])
+
+        '''
+        Force nodes to depend on left tokens
+        '''
+        ts = torch.arange(T,device=self.device)
+        is_future_node = ts[None,None,None,:]<=ts[None,None,:,None]
+        logp_mat = logp_mat + -INF * (is_future_node)
+
         # (B,T)
-        val,which = logp_mat.max(dim=1)
-        attn = logp_mat.softmax(dim=1)
-        loss = - val.mean(-1)
+        '''
+        Whether to use hard or soft alignment?
+
+        Note hard alignment does not yield a proba model, meaning its loss function
+        cannot be compared to soft model !!!!
+        '''
+        val = logp_mat.logsumexp(dim=(1,2))
+        val = - val
+        attn1 = logp_mat.logsumexp(dim=2).softmax(dim=1) ## alignment
+        attn2 = logp_mat.logsumexp(dim=1).softmax(dim=1) ## dep
+        self._last_att = attn1
+        attn = attn1
+
+        '''
+        Whether to mask <pad> in target sentence?
+        Also excludes <sos>
+        '''
+        loss = mean_notnull(val[:,1:],target_notnull[:,1:])
 
         if ret =='forward':
             return val, attn
         return loss
 
-class SoftAlignmentModel(AlignmentModel):
+
+
+class SAM8(SoftAlignmentModel):
+    '''
+    Implement a causal relation graph model
+    aside from the alignment model
+
+    '''
+
+    ALIGNMENT_PRIOR = 'na'
+    ALIGNMENT_METHOD = 'na'
+    AVG_METHOD = 'na'
+    ATT_METHOD = 'na'
+    USE_CAUSAL = 0
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        n_hidden = self.n_hidden
+        self.mapping2 = nn.Linear(n_hidden, n_hidden).to(self.device)
+
     def _loss(self,item,ret):
         source = item['source'] ### token sequence
         target = item['target'] ### token seq
 
         source_embed = self.embed(source)
         target_embed = self.embed(target)
+        S = source.size(1)
+        T = target.size(1)
+        B = source.size(0)
+        target_len = item['target_len']
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
 
-        # (B, S, E)
+        source_len = item['source_len']
+        source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+
+
+        # (B,   S, E)
         out_embed = self.mapping( source_embed )
-        # (B, S, C)
-        out_logit = self.out_layer(out_embed).log_softmax(-1)
-        # (B, 1, T)
-        D = source.shape[1]
-        output_tok = item['target'][:,None,:].repeat((1,D,1))
+        if self.USE_CAUSAL:
+            # (B,S,T,E)
+            out_embed = out_embed[:,:,None] + target_embed.roll(1,1)[:,None,:,:]
+            out_logit = self.out_layer(out_embed).log_softmax(-1)
+            output_tok= item['target'][:,None,:,None].repeat((1,S,1,1))
+            logp_mat  = torch.gather( out_logit, index=output_tok, dim=-1)
+            # logp_mat  = torch.gather( out_logit, index=output_tok, dim=-1)
+        else:
+            pass
+            # (B,   S, C)
+            out_logit = self.out_layer(out_embed).log_softmax(-1)
+            # (B, 1*S, T)
+            output_tok= item['target'][:,None,:].repeat((1,S,1))
+            # (B,   S, T)
+            logp_mat  = torch.gather( out_logit, index=output_tok, dim=-1)
+        logp_mat  += -math.log(S) #[approx]
+        logp_mat1 = logp_mat
 
-        # (B, S, T)
-        logp_mat = torch.gather( out_logit, index=output_tok, dim=-1)
+        '''
+        Whether to mask <pad> in source sentence?
+        Mask <pad> in input seq
+        '''
+        INF = 1E15
+        logp_mat1 = logp_mat1 + -INF * (~source_notnull[:,:,None])
+
+
+
+        out_embed = self.mapping2( target_embed )
+        # (B,   T, C)
+        out_logit = self.out_layer(out_embed).log_softmax(-1)
+        # (B, 1*T, T)
+        output_tok= item['target'][:,None,:].repeat((1,T,1))
+        # (B,   T, T)
+        logp_mat  =  torch.gather( out_logit, index=output_tok, dim=-1)
+        logp_mat  += -math.log(T) #[approx]
+        logp_mat2 =  logp_mat
+
+        '''
+        Force nodes to depend on left tokens
+        '''
+        ts = torch.arange(T,device=self.device)
+        is_future_node = ts[None,None,:]<=ts[None,:,None]
+        logp_mat2  = logp_mat2 + -INF * (is_future_node)
 
         # (B,T)
+        '''
+        Whether to use hard or soft alignment?
+
+        Note hard alignment does not yield a proba model, meaning its loss function
+        cannot be compared to soft model !!!!
+        '''
+        val = torch.stack([logp_mat1.logsumexp(dim=1),logp_mat2.logsumexp(dim=1)], dim=-1).logsumexp(-1) - math.log(2)
+        # val = logp_mat.logsumexp(dim=(1,2))
+        val = - val
+
+        # attn1 = logp_mat1.softmax(dim=1) ## alignment
+        # attn2 = logp_mat2.softmax(dim=1) ## dep
+        attn1 = (logp_mat1 + val.unsqueeze(1)).exp()  ## alignment
+        attn2 = (logp_mat2 + val.unsqueeze(1)).exp()  ## alignment
+        self._last_att_1 = attn1
+        self._last_att_2 = attn2
+        attn = attn2
+
+        '''
+        Whether to mask <pad> in target sentence?
+        Also excludes <sos>
+        '''
+        loss = mean_notnull(val[:,1:],target_notnull[:,1:])
+
+        if ret =='forward':
+            return val, attn
+        return loss
+
+
+
+
+class SAM9(SoftAlignmentModel):
+    '''
+    Implement a causal relation graph model
+    aside from the alignment model
+
+    '''
+
+    ALIGNMENT_PRIOR = 'na'
+    ALIGNMENT_METHOD = 'uniform'
+    AVG_METHOD = 'na'
+    ATT_METHOD = 'na'
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        n_hidden = self.n_hidden
+        self.mapping2 = nn.Linear(n_hidden, n_hidden).to(self.device)
+
+    def _loss(self,item,ret):
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+
+        source_embed = self.embed(source)
+        target_embed = self.embed(target)
+        S = source.size(1)
+        T = target.size(1)
+        B = source.size(0)
+        target_len = item['target_len']
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+
+        source_len = item['source_len']
+        source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        #
+        #
+        # # (B,   S, E)
+        # out_embed = self.mapping( source_embed )
+        # # (B,   S, C)
+        # out_logit = self.out_layer(out_embed).log_softmax(-1)
+        # # (B, 1*S, T)
+        # output_tok= item['target'][:,None,:].repeat((1,S,1))
+        # # (B,   S, T)
+        # logp_mat  = torch.gather( out_logit, index=output_tok, dim=-1)
+        # logp_mat  += -math.log(S) #[approx]
+        # logp_mat1 = logp_mat
+        #
+        # '''
+        # Whether to mask <pad> in source sentence?
+        # Mask <pad> in input seq
+        # '''
+        INF = 1E15
+        # logp_mat1 = logp_mat1 + -INF * (~source_notnull[:,:,None])
+
+
+
+        out_embed = self.mapping2( target_embed )
+        # (B,   T, C)
+        out_logit = self.out_layer(out_embed).log_softmax(-1)
+        # (B, 1*T, T)
+        output_tok= item['target'][:,None,:].repeat((1,T,1))
+        # (B,   T, T)
+        logp_mat  =  torch.gather( out_logit, index=output_tok, dim=-1)
+        logp_mat  += -math.log(T) #[approx]
+        logp_mat2 =  logp_mat
+
+        '''
+        Force nodes to depend on left tokens
+        '''
+        ts = torch.arange(T,device=self.device)
+        is_future_node = ts[None,None,:]<=ts[None,:,None]
+        logp_mat  = logp_mat2 + -INF * (is_future_node)
+
+        if self.ALIGNMENT_PRIOR =='uniform':
+            '''
+            Uniform prior
+            '''
+            pass
+            # logp_mat += -math.log(source.size(1))
+
+        elif self.ALIGNMENT_PRIOR =='gaussian':
+            xs = torch.arange(T,device=self.device)[None,:,None]
+            xt = torch.arange(T,device=self.device)[None,None,:,]
+            diff =  -self.config.beta * (xs - xt).abs()
+            logp_mat = logp_mat + diff.log_softmax(1)
+        # (B,T)
+        '''
+        Whether to use hard or soft alignment?
+
+        Note hard alignment does not yield a proba model, meaning its loss function
+        cannot be compared to soft model !!!!
+        '''
+        # val = torch.stack([logp_mat1.logsumexp(dim=1),logp_mat2.logsumexp(dim=1)], dim=-1).logsumexp(-1) - math.log(2)
+        # val = logp_mat.logsumexp(dim=(1,2))
         val = logp_mat.logsumexp(dim=1)
-        attn = logp_mat.softmax(dim=1)
-        loss = - val.mean(-1)
-        # print(loss.shape)
+        val = - val
 
-        # import pdb; pdb.set_trace()
+        # attn1 = logp_mat1.softmax(dim=1) ## alignment
+        # attn2 = logp_mat2.softmax(dim=1) ## dep
+        # attn1 = (logp_mat1 + val.unsqueeze(1)).exp()  ## alignment
+        attn2 = (logp_mat + val.unsqueeze(1)).exp()  ## alignment
+        self._last_att_1 = attn2
+        self._last_att_2 = attn2
+        attn = attn2
+
+        '''
+        Whether to mask <pad> in target sentence?
+        Also excludes <sos>
+        '''
+        loss = mean_notnull(val[:,1:],target_notnull[:,1:])
+
         if ret =='forward':
             return val, attn
-
         return loss
+
+
+    def log_param(self,buf,plt):
+        key = '_last_att_1'
+        mat = self._last_att_1.mean(dim=0).log().cpu().detach()
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        # im = ax.imshow(mat,vmin=0.0,vmax=0.5)
+        im = ax.imshow(mat,vmin=-4,vmax=0.)
+        # im = ax.imshow(mat,)
+        plt.sca(ax)
+        plt.colorbar(im)
+        epoch = self.meta['epoch']
+        ax.set_title(f'[log_param]self.{key}\nModel_name={self.config.model_name}\nEpoch:{epoch}')
+        buf.write(write_png_tag(fig))
+
+        key = '_last_att_2'
+        mat = self._last_att_2.mean(dim=0).log().cpu().detach()
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        # im = ax.imshow(mat,vmin=0.0,vmax=0.5)
+        im = ax.imshow(mat,vmin=-4,vmax=0.)
+        # im = ax.imshow(mat,)
+        plt.sca(ax)
+        plt.colorbar(im)
+        epoch = self.meta['epoch']
+        ax.set_title(f'[log_param]self.{key}\nModel_name={self.config.model_name}\nEpoch:{epoch}')
+        buf.write(write_png_tag(fig))
+
+
+        pass
+class SAM10(SAM9):
+    '''
+    Implement a causal relation graph model
+    aside from the alignment model
+
+    '''
+
+    ALIGNMENT_PRIOR = 'gaussian'
+    ALIGNMENT_METHOD = 'na'
+    AVG_METHOD = 'na'
+    ATT_METHOD = 'na'
+
+class SAM11(SoftAlignmentModel):
+    '''
+    Implement a causal relation graph model
+    aside from the alignment model
+
+    '''
+    ALIGNMENT_PRIOR = 'gaussian'
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        n_hidden = self.n_hidden
+        self.source_encoder_base = nn.Conv1d(n_hidden,n_hidden,config.kernel_size,padding='same')
+        self.source_encoder = lambda x:self.source_encoder_base(x.transpose(2,1)).transpose(2,1)
+        # Linear
+        # self.mapping2 = nn.Linear(n_hidden, n_hidden).to(self.device)
+
+    # def _loss(self,item,ret):
+
+class SAM12(SoftAlignmentModel):
+    '''
+    Implement a causal relation graph model
+    aside from the alignment model
+
+    '''
+    ALIGNMENT_PRIOR = 'gaussian'
+    USE_CAUSAL = 1
+
+    def log_param(self,buf,plt):
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        mat = self._last_att.mean(dim=0).log().cpu().detach()
+        # im = ax.imshow(mat,vmin=0.0,vmax=0.5)
+        im = ax.imshow(mat,vmin=-4,vmax=0.)
+        # im = ax.imshow(mat,)
+        plt.sca(ax)
+        plt.colorbar(im)
+        epoch = self.meta['epoch']
+        ax.set_title(f'[log_param]self.shared_log_align\nModel_name={self.config.model_name}\nEpoch:{epoch}')
+        buf.write(write_png_tag(fig))
+        pass
+
+class HMMSoftAlignmentModel(SoftAlignmentModel):
+    '''
+    Implement a HMM alignment model
+    '''
+    ALIGNMENT_METHOD = 'hmm'
+    ALIGNMENT_PRIOR = 'gaussian'
+    IS_RUN_BACKWARD = 1
+
+    def log_param(self,buf,plt):
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        mat = self._last_att.mean(dim=0).log().cpu().detach()
+        # im = ax.imshow(mat,vmin=0.0,vmax=0.5)
+        im = ax.imshow(mat,vmin=-4,vmax=0.)
+        # im = ax.imshow(mat,)
+        plt.sca(ax)
+        plt.colorbar(im)
+        epoch = self.meta['epoch']
+        ax.set_title(f'[log_param]self.shared_log_align\nModel_name={self.config.model_name}\nEpoch:{epoch}')
+        buf.write(write_png_tag(fig))
+        pass
+
+
+
+class SAM14(SharedSoftAlignmentModel):
+    '''
+    Implement a HMM alignment model
+    '''
+    ALIGNMENT_METHOD = 'hmm'
+    ALIGNMENT_PRIOR = 'shared'
+    IS_RUN_BACKWARD = 1
+    # def __init__(self,device,config,_=None):
+    #     super().__init__(device,config)
+    #     S = self.config.n_step
+    #     x = nn.Linear(S,S)
+    #     self.shared_log_align = nn.Parameter(x.weight)
+    #
+
+    def log_param(self,buf,plt):
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        key = 'self.shared_log_align \n $\log P(a_{i+1}|a_i)$'
+        mat = self.shared_log_align.log_softmax(0).cpu().detach()
+
+        # im = ax.imshow(mat,vmin=0.0,vmax=0.5)
+        im = ax.imshow(mat.T,vmin=-4,vmax=0.,origin='lower')
+        # im = ax.imshow(mat,)
+        plt.sca(ax)
+        plt.colorbar(im)
+        epoch = self.meta['epoch']
+        ax.set_title(f'[log_param]{key}\nModel_name={self.config.model_name}\nEpoch:{epoch}')
+        ax.set_xlabel('$a_i$')
+        ax.set_ylabel('$a_{i+1}$')
+        plt.suptitle('')
+        buf.write(write_png_tag(fig))
+        pass
+
+SAM13 = HMMSoftAlignmentModel
