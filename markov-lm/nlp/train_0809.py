@@ -273,13 +273,11 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
             # model_name = 'DLM22',
             # model_name = 'DLM26',
             model_name = 'DLM46',
-            # model_name = 'DLM47',
             # model_name = 'DLM21',
             # model_name = 'DLM27',
             # kernel_size = 200,
             kernel_size = 400,
-            window_size=-1,
-            loss_name='0,4,5,7',
+            window_size=7,
 
 
             #

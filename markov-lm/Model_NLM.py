@@ -79,11 +79,14 @@ class DLMPrototype(LanguageModelPrototype):
         #### share embed usually works
         # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
         self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
-        self.layers      = nn.ModuleList([
-            nn.Linear(embed_dim*window_size, embed_dim*window_size).to(self.device)
-            for _ in range(self.config.depth-1)
-            ])
-        self.final_layer      = nn.Linear(embed_dim*window_size,  embed_dim).to(self.device)
+
+        # W = min(self.config.window_size,0 )
+        # embed_dim       = self.embed_dim
+        # self.layers     = nn.ModuleList([
+        #     nn.Linear(embed_dim*W, embed_dim*W).to(self.device)
+        #     for _ in range(self.config.depth-1)
+        #     ])
+        # self.final_layer      = nn.Linear(embed_dim*W,  embed_dim).to(self.device)
 
 
     def unembed(self,x):
@@ -247,7 +250,7 @@ class DLMPrototype(LanguageModelPrototype):
             logp_sum = (lp * target_notnull).sum(dim=1)
 
 
-        elif CLS_NAME in 'DLM23 DLM26 DLM29 DLM43 DLM44 DLM46'.split():
+        elif CLS_NAME in 'DLM23 DLM26 DLM29 DLM43 DLM44 DLM46 DLM47'.split():
             target_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device),target_embed],dim=1)[:,:-1]
             target_embed_parent = target_embed_parent/target_embed_parent.std(dim=1,keepdims=True)
 
@@ -258,7 +261,7 @@ class DLMPrototype(LanguageModelPrototype):
             if CLS_NAME in 'DLM23 DLM26'.split():
                 yp, (h1,c1) = self.rnn(target_embed_parent,(h0,c0))
                 yp = yp / yp.std(dim=-1, keepdims=True)
-            elif CLS_NAME in 'DLM29 DLM43 DLM44 DLM46'.split():
+            elif CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
                 yp, h1      = self.rnn(target_embed_parent,h0)
                 yp = yp / yp.std(dim=-1, keepdims=True)
             else:
@@ -269,7 +272,7 @@ class DLMPrototype(LanguageModelPrototype):
                 lyp = self.unembed(yp).log_softmax(-1)
                 lp =  torch.gather(lyp [:,:,:], index=target[:,:,None],dim=-1)[:,:,:]
 
-            elif CLS_NAME in 'DLM26 DLM29 DLM44 DLM46'.split():
+            elif CLS_NAME in 'DLM26 DLM29 DLM44 DLM46 DLM47'.split():
                 ## (B, T ,K )
                 kp = self.embed_to_logp(yp).log_softmax(-1)
 
@@ -946,7 +949,16 @@ class DLMPrototype(LanguageModelPrototype):
         return loss
 
 class DLM1(DLMPrototype):
-    pass
+    # pass
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        W = min(self.config.window_size,0 )
+        embed_dim       = self.embed_dim
+        self.layers     = nn.ModuleList([
+            nn.Linear(embed_dim*W, embed_dim*W).to(self.device)
+            for _ in range(self.config.depth-1)
+            ])
+        self.final_layer      = nn.Linear(embed_dim*W,  embed_dim).to(self.device)
 
 class DLM3(DLMPrototype):
     pass
@@ -1661,6 +1673,10 @@ class DLM46(DLMPrototype):
             Ablation studies
             '''
             self.rnn.mutate(self.window_size)
+        if ',' in config.loss_name:
+            for k in config.loss_name.split(','):
+                self.rnn.mutate(int(k))
+
 
         # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
 
@@ -1673,6 +1689,38 @@ class DLM46(DLMPrototype):
         # self.embed_to_logp = nn.Parameter(x.weight.T)
         self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
         # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+from markov_lm.Model_rnn import MGRU,RNNConfig
+class DLM47(DLMPrototype):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        self.rnn = MGRU(device, RNNConfig(input_size=E,hidden_size=E,num_layers=1))
+        # if config.window_size != 0
+        # self.rnn = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        K = config.kernel_size
+        assert K >=1,config
+        if ',' in config.loss_name:
+            for k in config.loss_name.split(','):
+                self.rnn.mutate(int(k))
+        # import pdb; pdb.set_trace()
+
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        # x = nn.Linear(1,K)
+        # self.shared_log_align = nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        # self.embed_to_logp = nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
 
 
 class DLM43(DLMPrototype):

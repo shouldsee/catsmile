@@ -54,14 +54,39 @@ def conf_parse_all(sys_argv):
     v = int(v)
     SAVE_INTERVAL = v
 
-    if '--seed' in sys_argv:
-        v= sys_argv[sys_argv.index('--seed')+1]
+    k = '--seed'
+    _caster = int
+    if k in sys_argv:
+        v= sys_argv[sys_argv.index(k)+1]
     else:
         v = 29
-    v = int(v)
+    v = _caster(v)
     SEED = v
 
-    return CUDA,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL,SEED
+
+    meta_dict = {}
+
+    k = '--target'
+    _caster = int
+    if k in sys_argv:
+        v= sys_argv[sys_argv.index(k)+1]
+    else:
+        v = 6000
+    v = _caster(v)
+    meta_dict['num_epoch']= v
+
+
+    model_dict = {}
+    for i,k in enumerate(sys_argv):
+        if k.startswith('--model'):
+            # kk = k[len('--model'):]
+            assert '.' in k, k
+            kk = k.split('.',1)[1]
+            # k[len('--model'):]
+            v = sys_argv[i+1]
+            model_dict[kk] = v
+
+    return CUDA,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL,SEED,model_dict,meta_dict
 
 
 
@@ -161,7 +186,7 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
 
     loss_test_mean = 0
     n_mask = 4
-    for _epoch in range(conf.num_epoch):
+    for _epoch in range(conf.num_epoch+1):
         # conf.dataset.op_extract_and_mask(n_mask)
         epoch += 1
         conf.epoch = epoch
