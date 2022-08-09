@@ -104,7 +104,7 @@ def conf_init_translate(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
         conf.lconf = NLPLayerConfig(
             graph_dim = conf.dataset.graph_dim,
             # window_size=10,
-            depth =1,
+            depth = 1,
 
             embed_dim=128,
             # model_name = 'Seq2SeqWithAttention',
@@ -154,6 +154,7 @@ def conf_init_translate(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
         conf.learning_rate = 0.001
         # conf.learning_rate = 0.01
         return model
+
     _add_model(conf)
 
     #############################
@@ -197,9 +198,10 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
     conf.shuffle       = shuffle
     conf.device        = torch.device('cuda:0' if CUDA else 'cpu')
     conf.num_epoch     = 6000
-    add_optimizer      = lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
-    # add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,eps=0.01)
+    # add_optimizer      = lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,)
+    add_optimizer      =  lambda conf,params:torch.optim.RMSprop( params, lr=conf.learning_rate,eps=0.01)
     # add_optimizer      = lambda conf,params:torch.optim.Adam( params, lr=conf.learning_rate,)
+    # add_optimizer      = lambda conf,params:torch.optim.SGD( params, lr=conf.learning_rate,)
     #### using Adam with high learning_rate is catastrophic
     # conf._session_name += 'opt-adam-'
 
@@ -217,12 +219,13 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
     # conf.task = 'translate-mutli30k-de2en-l50'
 
 
-    # conf.batch_size    = 280
-    conf.batch_size    = 180
+    conf.batch_size    = 280
+    # conf.batch_size    = 180
     # conf.batch_size    = 100
-    # conf.batch_size    = 30
-    # conf.task = 'translate-multi30k-de2en-l20'
-    conf.task = 'translate-ptb-l20'
+    # conf.batch_size    = 5
+    conf.task = 'translate-multi30k-de2en-l20'
+    # conf.task = 'translate-ptb-l20'
+    # conf.task = 'translate-ptb-l100'
     # conf.task = 'translate-wmt14-de2en-50k'
     # conf.task = 'translate-wmt14-de2en-20k'
     dconf.attach_task_to_conf(conf,conf.task)
@@ -235,12 +238,12 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
         from markov_lm.Model_NLM import NLMLayerConfig
         conf.lconf = NLMLayerConfig(
             graph_dim = conf.dataset.graph_dim,
-            window_size=4,
+            # window_size=4,
             depth =1,
 
             embed_dim=128,
-            # model_name = 'DLM1',
-            # model_name = 'DLM2',
+            # # model_name = 'DLM1',
+            # # model_name = 'DLM2',
             # model_name = 'DLM5',
 
             # kernel_size = 1,
@@ -254,17 +257,71 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
             # kernel_size = 3,
             #
 
-            model_name = 'DLM10',
-            # kernel_size = 200,
-            # # kernel_size = 3,
-            kernel_size = 128,
+            # embed_dim = 300,
+            # model_name = 'DLM10',
+            # model_name = 'DLM20',
 
+            # model_name = 'DLM25',
+            # model_name = 'DLM24',
+            # model_name = 'DLM22',
+            # model_name = 'DLM26',
+            model_name = 'DLM46',
+            # model_name = 'DLM21',
+            # model_name = 'DLM27',
+            # kernel_size = 200,
+            kernel_size = 400,
+            window_size=7,
+
+
+            #
+            # window_size= 4,
+            # model_name = 'DLM30',
+            # kernel_size = 400,
+
+
+            # window_size= 4,
+            # model_name = 'DLM32',
+            # kernel_size = 400,
+
+            # window_size= 4,
+            # # model_name = 'DLM33',
+            # # model_name = 'DLM34',
+            # model_name = 'DLM35',
+            # kernel_size = 400,
+
+
+            # window_size= 4,
+            # model_name = 'DLM29',
+            # # kernel_size = 400,
+            # kernel_size = 800,
+
+
+            # model_name = 'DLM40',
+            # # model_name = 'DLM41',
+            # kernel_size = 400,
+            # window_size= 16,
+            # # kernel_size = 16,
+            # depth = 6,
+
+            # model_name = 'DLM28',
+            # kernel_size = 10,
+
+            # kernel_size = 128,
+            # kernel_size = 128,
+
+
+
+            # embed_dim = 128,
+            # model_name = 'DLM19',
+            # kernel_size = 256,
+
+            # kernel_size = 64,
 
             # model_name = 'DLM16',
 
             # model_name = 'DLM17',
             # # kernel_size = 3,
-            # kernel_size = 200,
+            # kernel_size = 100,
 
             # model_name = 'DLM18',
             # kernel_size = 5,
@@ -284,14 +341,16 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,ADD_MONITOR_HOOK=1):
 
             # model_name = 'DLM11',
             # model_name = 'DLM12',
+            # model_name = 'DLM23',
 
             n_step = conf.dataset.data_dim,
             # model_name = 'Seq2SeqWithNoAttention',
         )
         conf.model = model = conf.lconf.to_model(conf.device).to(conf.device)
         # conf.learning_rate = 0.00001
-        conf.learning_rate = 0.0001
+        # conf.learning_rate = 0.0001
         # conf.learning_rate = 0.001
+        conf.learning_rate = 0.001
         # conf.learning_rate = 0.01
         return model
 

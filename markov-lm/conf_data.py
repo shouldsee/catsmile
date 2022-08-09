@@ -95,12 +95,17 @@ def get_ptb_dataset(conf, fix_length, dataset_name,root=None):
     cls = torchtext.datasets.PennTreebank
     ret = cls.download(root)
 
-    get_field = lambda :torchtext.data.Field(lower=True, include_lengths=True, batch_first=True,fix_length=fix_length, init_token='<start>', eos_token='<end>')
+    # get_field = lambda :torchtext.data.Field(lower=True, include_lengths=True, batch_first=True,fix_length=fix_length, init_token='<start>', eos_token='<end>')
+    get_field = lambda :torchtext.data.Field(lower=True, include_lengths=True, batch_first=True,fix_length=False, init_token='<start>', eos_token='<end>')
     trg = get_field()
     # tgt = get_field()
     # tgt = torchtext.data.Field(lower=True, include_lengths=True, batch_first=True,fix_length=fix_length, )
     # dataset = cls(root+'/multi30k/train',('.de','.en'),(src,tgt))
+    # dataset_train = cls(ret+'ptb.train.txt',trg)
     dataset_train = cls(ret+'ptb.train.txt',trg)
+    # dataset_train = cls.iters(path=ret+'ptb.train.txt',text_field=trg, batch_size=conf.batch_size, bptt_len=fix_length,
+    #     device=conf.device)
+        # , root='.data', vectors=None, **kwargs)
     dataset_test = cls(ret+'ptb.test.txt',trg)
     dataset = dataset_train
     # dataset = torchtext.datasets.Multi30k.splits(root+'/multi30k/train',('.de','.en'),(src,tgt))
@@ -128,25 +133,47 @@ def get_ptb_dataset(conf, fix_length, dataset_name,root=None):
             return self.my_iter()
         def __len__(self):
             if dataset.mode=='test':
-                return dataset_test.__len__()//conf.batch_size
+                return dataset_test.examples[0].text.__len__()//conf.batch_size//fix_length
             else:
-                return dataset_train.__len__()//conf.batch_size
+                return dataset_train.examples[0].text.__len__()//conf.batch_size//fix_length
         @classmethod
         def get_iter(cls,dataset_curr,dataset=dataset):
             it = torchtext.data.BucketIterator(dataset=dataset_curr, batch_size=conf.batch_size,shuffle=conf.shuffle, device=conf.device)
             # if dataset.mode=='train':
-            for x in it:
-                # import pdb; pdb.set_trace()
-                # src, src_len = x.src
-                trg, trg_len = x.text
+            buf = next(iter(it))
+            trg = buf.text[0][0]
+
+            chunk_size = (conf.batch_size*fix_length)
+            for xi in range( trg.__len__()//chunk_size ):
                 yield {
-                        'source':None,
-                        'target':trg+dataset.offset_list[0],
+                        'source': None,
+                        # 'target':trg+dataset.offset_list[0],
+                        'target': trg[xi*chunk_size : (xi+1)*chunk_size].reshape(conf.batch_size,fix_length),
+                        # +dataset.offset_list[0],
                         'source_len':None,
-                        'target_len':trg_len,
+                        'target_len':torch.ones([conf.batch_size],device=conf.device,dtype=torch.long)*fix_length,
+                        # trg_len,
                         'has_start_token':1,
                         'index':None}
+            # return
             yield None
+            # # buf
+            # # import pdb; pdb.set_trace()
+            # for x in it:
+            #     # import pdb; pdb.set_trace()
+            #     # src, src_len = x.src
+            #     trg, trg_len = x.text
+            #     yield {
+            #             'source':None,
+            #             # 'target':trg+dataset.offset_list[0],
+            #             'target':trg,
+            #             # +dataset.offset_list[0],
+            #             'source_len':None,
+            #             'target_len':trg_len,
+            #             'has_start_token':1,
+            #             'index':None}
+            # yield None
+
         @classmethod
         def my_iter(cls):
             train_iter= cls.get_iter(dataset_train)
@@ -161,7 +188,7 @@ def get_ptb_dataset(conf, fix_length, dataset_name,root=None):
                     yield v
                 else:
                     break
-
+    # assert 0, dataset.examples.__len__()
 
     conf.dataloader = dataloader = IterMaker()
     return dataset, dataloader
@@ -192,6 +219,8 @@ class ConfigDataset(object):
             conf.dataset,conf.dataloader = get_multi30k_dataset(conf, 20,conf.task)
         elif conf.task == 'translate-ptb-l20':
             conf.dataset,conf.dataloader = get_ptb_dataset(conf, 20,conf.task)
+        elif conf.task == 'translate-ptb-l100':
+            conf.dataset,conf.dataloader = get_ptb_dataset(conf, 100,conf.task)
 
                 # my_iter()
                 # get_iter()
