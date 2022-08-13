@@ -20,6 +20,7 @@ title: "CATSMILE"
   - 可组合性，损失函数需要有一个高效的组合语法。
   - 可验证性: 实践是检验真理的唯一标准, 把抽象的损失函数逐步实体化可视化的过程,
   蕴含着工程难度
+  - 用消融实验和,PGM等价物,可视化等促进神经网络机器学习的可解释性 [CATSMILE-9019](./9019-summary-of-recent)
 - 相似理念:
   - MLM ebook <https://machinelearningmastery.com/>
   - medium 知识社区

@@ -18,6 +18,8 @@ maxdepth: 4
     - 往期实验中难以复现transformer的优越性
     - 所以转向了更为直观的NMT翻译中的注意力机制
     - 为IBM-Model适配一个词嵌入范式下的梯度模型,命名为SAM(SoftAlignmentModel)
+    - 做一个稳定的,可解释的NMT基线
+    - 提供一个稳定的对齐图质控和调试框架
 - 结论: 
     - 虽然SAM14的负对数损失不如SAM5,但是SAM14的对齐效果却比SAM5好很多.这也侧面说明,仅靠损失函数去指导模型选择,有可能是会误入歧途的.
     - Multi30K的质量看起来比WMT14要好很多
@@ -33,8 +35,11 @@ maxdepth: 4
     周六改了半天RNN,周日调了一天WMT14.醉了
 - 关键词: WMT14/数据质量控制/NMT
 - 后续目标/展望方向:
+    - [TBC,复现JYChung2016] 非常有趣的charLevel工作,可以更加精细地做charLevel alignment
     - [TBC,找个中文数据集]
     - [TBC,清理一下标点符号]
+    - [TBC,加入HeadToHeadCompare头对头的对比工具]
+    - [TBC,用头对头的工具细致分析损失来源,针对性提点]
     - [TBC,检查注意力机制对于删除/反序问题的效果]
     - [DONE,用Multi30K:清洗一下WMT14,或者找个干净点的数据集]
     - [DONE:记录在SAM7旁边了:做一下消融实验证明注意力机制的优越性]
@@ -478,7 +483,7 @@ $$
 
 注:这个模型用的`log10_learning_rate=-3`,而用Seq2SeqWithAttention用的`log10_learning_rate=-4`. 
 
-对比shared_log_align,可以明显发现,HMM可以准确地捕捉到对齐态之间的迁移,而相比之下SAM5因为拟合的是绝对位置/边际分布,就会产生累计的误差,对于长序列来说就可能产生很大问题.
+对比shared_log_align,可以明显发现,HMM可以准确地捕捉到对齐态之间的迁移,而相比之下SAM5因为拟合的是绝对位置/边际分布,就会产生累计的误差,对于长序列来说就可能产生很大问题.事实上,我们可以认为SAM5的参数可以从SAM14的连乘形式取边际分布导出,但是SAM14的优越性在于它比单纯的边际分布有着更多的解构,也就是对于内部结构是敏感的
 
 ![SAM14,E10,loss=3.95](./9017-p19-SAM14-E10.png)
 
@@ -503,6 +508,16 @@ $$
 ![SAM14,E60,loss=3.69](./9017-p25-SAM14-E60-ALN-OVERALL.png)
 
 ![SAM5,E60,loss=3.65](./9017-p26-SAM5-E60-ALN-OVERALL.png)
+
+
+### Seq2SeqWithAttention:
+
+![S2SWA,E45,loss=3.50,我着实不太明白神经网络是怎么从这么怪异的注意力图中得到很高的对数概率的...](./9017-p27-S2SWA-E45-ATTN.png)
+
+
+
+### 质控指标: 对齐图
+
 
 ### 质控指标: LPPTT
 
@@ -602,3 +617,9 @@ WMT14 by Stanford NLP <https://nlp.stanford.edu/projects/nmt/>
     - fast_align: <https://github.com/clab/fast_align>
 
 - Vogel1996: HMM-Based Word Alignment in Statistical Translation <https://aclanthology.org/C96-2141.pdf>
+
+- Huang2018,NPMT: TOWARDS NEURAL PHRASE-BASED MACHINE
+TRANSLATION <https://openreview.net/pdf?id=HktJec1RZ>
+    - 居然用的是lua + torch7. github <https://github.com/microsoft/NPMT> 
+
+- JYChung2016  A Character-Level Decoder without Explicit Segmentation for Neural Machine Translation: <https://arxiv.org/abs/1603.06147.pdf>
