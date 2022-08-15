@@ -8,7 +8,7 @@ from markov_lm.Model_gmm import AbstractLayerConfig
 # from transformers.models.bert.modeling_bert import BertLayer,BertConfig
 from markov_lm.nlp.model_seq2seq import Seq2SeqWithAttention
 from markov_lm.Model_rnn import GRUMinimal,RNNConfig
-
+from markov_lm.util_html import register_object_method
 
 class Seq2SeqWithNoAttention(Seq2SeqWithAttention):
     # USE_ATTENTION = 0
@@ -46,6 +46,8 @@ def get_kperm_tensor(k,device=None,dtype=torch.long):
     return torch.tensor( list(itertools.permutations(range(k))),device=device,dtype=dtype)
 
 
+
+
 class DLMPrototype(LanguageModelPrototype):
     '''
     Use autoregression objective
@@ -79,6 +81,62 @@ class DLMPrototype(LanguageModelPrototype):
         #### share embed usually works
         # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
         self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self._init_attach_method()
+
+    def _init_attach_method(self):
+        '''
+        Dynamically attaches method to new object to allows easier code sharing
+        '''
+        # self._hidden_to_cats()
+        CLS_NAME = self.__class__.__name__
+        '''
+        Setting _hidden_to_cats()
+        '''
+        if CLS_NAME in 'DLM23 DLM43'.split():
+            @register_object_method(self)
+            def _hidden_to_cats(self, yp, target, ret):
+                '''
+                Convert hidden vector to explicit categorical distribution
+                '''
+                # (B, T, C)
+                lyp = self.unembed(yp).log_softmax(-1)
+                lp =  torch.gather(lyp [:,:,:], index=target[:,:,None],dim=-1)[:,:,:]
+                if ret=='full':
+                    raise NotImplementedError
+                    # lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+                    # return lp
+                    # pass
+                elif ret =='target':
+                    return lp
+                else:
+                    raise NotImplementedError(f'{ret}')
+
+        elif CLS_NAME in 'DLM26 DLM29 DLM44 DLM46 DLM47 DLM50 DLM51 DLM52 DLM53 DLM54 DLM55 DLM56 DLM57 DLM58 DLM59 DLM60 DLM61 DLM62 DLM63 DLM64 DLM65 DLM66 DLM67'.split():
+            @register_object_method(self)
+            def _hidden_to_cats(self, yp, target, ret):
+                # CLS_NAME = self.__class__.__name__
+                ## (B, T ,K )
+                kp = self.embed_to_logp(yp).log_softmax(-1)
+                yp = self.unembed( self.std_norm(self.k_vector,-1))
+                yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+
+                # if class
+                if ret=='full':
+                    lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+                    return lp
+
+                elif ret =='target':
+                    # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+                    model_w = yp.T[target]
+
+                    ## yp (K, C)
+                    ## kp (B,T,K)
+                    lp = (model_w + kp)
+                    return lp
+                else:
+                    raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+        else:
+            raise NotImplementedError( CLS_NAME )
 
     def unembed(self,x):
         y = x.matmul(self.embed.weight.T)
@@ -94,8 +152,11 @@ class DLMPrototype(LanguageModelPrototype):
         return self._loss(item, 'loss')
 
     @staticmethod
-    def sample_logp(lp,dim,return_logp=False):
-        xp = lp.softmax(dim)
+    def sample_logp(lp,dim,return_logp=False, is_log=True):
+        if is_log:
+            xp = lp.softmax(dim)
+        else:
+            xp = lp
         # p = lp.log_softmax(dim).exp()
         '''
         Sampling bug....
@@ -286,38 +347,136 @@ class DLMPrototype(LanguageModelPrototype):
                 '''
                 parse to get a state distrib
                 '''
-                h1, _ = self.embed_to_latent(target_embed)
+                ### (B,T,E)
+                encd, h1 = self.encode(target_embed,h0)
 
                 ### (1,T,E,K)
                 '''
                 Sample a sequence (w_i,l_i) from parser
+                First sample whether to skip.
+                Then for the none-null postion, sample the actual state (maybe just uses the projected context vector?).
                 '''
+                self.encode
+                self.e_to_null
+                self.e_to_token
+                self.w_embed
+                self.prior_logp
+
 
                 ### (B,T,W)
-                z_lp = (self.std_norm(h1,-1)@self.h_to_z).log_softmax(-1)
 
-                idx     = self.sample_logp(z_lp, return_logp=False, dim=-1)
+                ### two state gate.. controls whether the vector is passed into the prior lstm.
+                ### it seeems the prior lstm does not needs to emit discrete sequence?
+                ### to be safe, uses discrete seq to model prior seq for now.
+
+                lp_is_skip = self.e_to_null(encd).log_softmax(-1)
+                lp_token   = self.e_to_token(encd).log_softmax(-1)
+
+                lp_is_skip_s, idx_is_skip = self.sample_logp( lp_is_skip, return_logp=True, dim=-1)
+                lp_token_s,   idx_token = self.sample_logp( lp_token, return_logp=True, dim=-1)
+
+                idx_is_token = (1-idx_is_skip).bool()
+                idx_emit     = idx_is_token * idx_token
+                ## (B,T,)
+
+                ### if no token emitted, then omit the logp required to encode token
+                lp_emit_s = idx_is_token * ( (1-lp_is_skip.exp()).log() + lp_token_s ) + (1-idx_is_token) * lp_is_skip_s
+                lp_emit_s, idx_emit
+                ### ends sample generation
+
+
+                lp_emit_s_embed = self.w_embed(idx_emit)
+
+                # target_embed_parent =
+                _E = lp_emit_s_embed.shape[2]
+                lp_emit_s_embed_parent =  torch.cat([torch.ones((B,1,_E),device=self.device), lp_emit_s_embed],dim=1)[:,:-1]
+                lp_emit_s_pred, _ = self.prior_logp(lp_emit_s_embed_parent, h0 )
+
+                ## (P, E)
+                _x  =  lp_emit_s_pred[idx_is_token,:]
+                unb = self.w_unembed(self.std_norm(_x,-1)).log_softmax(-1)
+                ## (P,)
+                prior_lp = torch.gather(unb,index=idx_emit[idx_is_token,None],dim=-1).squeeze(-1)
+                prior_lp = torch.masked_scatter_(idx_is_token,prior_lp)
+                lp_prior = prior_lp
+
+                'Calculate decode proba given a sequence and a convolution expansion'
                 '''
-                calculate score as log_p_decode(sampled_code) - log_p_encode(sampled_code) + log_p_prior(sampled_code)
+                needs to calculates w,delta for each character position...
+                seems we need a for-loop here.. needs fast impl.
+
+                forces to backfill from a token pos?
+
+                if is_token, then memorize token, empty counter,
+                print token
+                print counter
+                inc counter
+                step
                 '''
 
-                post_lp = torch.gather(z_lp,index=idx.unsqueeze(-1),dim=-1).squeeze(-1)
+                '''
+                H: maximum word length
+                '''
+                H = 30
+                tok= torch.ones((B,1),device=self.device,dtype=torch.long)
+                ct = torch.zeros((B,1),device=self.device, dtype=torch.long) - 1
 
-                ## (1, T, W)
-                z_lp_p  = self.z_prior.log_softmax(-1)[None]
-                prior_lp= torch.gather(z_lp_p.repeat((B,1,1)), index=idx.unsqueeze(-1), dim=-1).squeeze(-1)
+                tok_arr= torch.zeros(B,T),device=self.device,dtype=torch.long)
+                ct_arr = torch.zeros((B,T),device=self.device,dtype=torch.long)
+                for t in range(T):
+                    t= T-1-t
+                    is_tok = idx_is_token[:,t:t+1]
+                    tok = is_tok * idx_token[:,t:t+1] + (1-is_tok) * tok
+                    ct  = is_tok * 0 + (1-is_tok)*(ct+1)
+                    tok_arr[:,t:t+1] = tok
+                    ct_arr[:,t:t+1] = ct
+                ### then gets
+                ct_arr = ct_arr.clip(None, H - 1)
 
-                # prior = prior + prior_lp - post_lp
+                ### uses h matrix to score between char and word
+                # (H, E, E)
+                # (B, T, E, E)
+                head_left = self.h_matrix[ct_arr] @ self.w_embed(tok_arr).unsqueeze(-1)
+                lps = self.unembed( head_left.squeeze(-1) ).log_softmax(-1)
+                lps = torch.gather(lps,index=target.unsqueeze(-1),dim=-1).squeeze(-1)
+                lp_decode = lps
 
-                kl = (z_lp.exp() * (z_lp_p - z_lp)).sum(-1)
-                prior = prior + kl
+                lp = lp_decode + lp_prior - lp_emit_s
 
+
+                if ret=='encode': return encd
+                # if ret=='encode': return lp_emit_s_embed
+                
+                # z_lp.softmax(-1)
+                #
+                #
+                # # lp_emit_s_prior.
+                # '[TBC] pickup from here'
+                #
+                #
+                # z_lp = (self.std_norm(h1,-1)@self.h_to_z).log_softmax(-1)
+                # idx  = self.sample_logp(z_lp, return_logp=False, dim=-1)
+                # '''
+                # calculate score as log_p_decode(sampled_code) - log_p_encode(sampled_code) + log_p_prior(sampled_code)
+                # '''
+                #
+                # post_lp = torch.gather(z_lp,index=idx.unsqueeze(-1),dim=-1).squeeze(-1)
+                #
+                # ## (1, T, W)
+                # z_lp_p  = self.z_prior.log_softmax(-1)[None]
+                # prior_lp= torch.gather(z_lp_p.repeat((B,1,1)), index=idx.unsqueeze(-1), dim=-1).squeeze(-1)
+                #
+                # # prior = prior + prior_lp - post_lp
+                #
+                # kl = (z_lp.exp() * (z_lp_p - z_lp)).sum(-1)
+                # prior = prior + kl
+                #
                 # h1r = self.z_vector[idx]
-                # h1r = self.std_norm(self.z_vector,-1)[idx]
-                yp = self.latent_to_emittor(h1r)
-
-                self._temp = dict(h1r=h1r,idx=idx,z_lp=z_lp,)
-                if ret=='encode': return z_lp.softmax(-1)
+                # # h1r = self.std_norm(self.z_vector,-1)[idx]
+                # yp = self.latent_to_emittor(h1r)
+                #
+                # self._temp = dict(h1r=h1r,idx=idx,z_lp=z_lp,)
+                # if ret=='encode': return z_lp.softmax(-1)
 
 
             lp = self._hidden_to_cats(yp,ret='target',target=target)
@@ -450,7 +609,6 @@ class DLMPrototype(LanguageModelPrototype):
 
 
                 if ret=='encode': return mu
-
 
 
             elif CLS_NAME in 'DLM66'.split():
@@ -2393,7 +2551,6 @@ class DLM64(DLM57):
         # x = nn.Linear(E,  E).to(self.device)
         # self.h_to_beta   =  nn.Parameter(x.weight.T)
 
-
     def latent_to_emittor(self, h1r,h0=None):
         h0 = self.get_default_init(h0,len(h1r))
         yp, h2      = self.rnn_dec(h1r, h0)
@@ -2405,6 +2562,8 @@ class DLM64(DLM57):
         h1 , h1blah      = self.rnn_enc(target_embed[:,:].flip([1,]) , h0)
         h1 = h1.flip([1,])
         return h1,h1blah
+
+
     def sample_token(self,B,T,prompt=None):
         return None
     def sample_token_from_latent(self,h1):
@@ -2447,6 +2606,10 @@ class DLM67(DLM57):
         # x = nn.Linear(E,  E).to(self.device)
         # self.h_to_beta   =  nn.Parameter(x.weight.T)
 
+        # '''
+        # '''
+        # self._init_attach_method()
+        # complete_init()
 
     def latent_to_emittor(self, h1r,h0=None):
         h0 = self.get_default_init(h0,len(h1r))
@@ -2464,32 +2627,32 @@ class DLM67(DLM57):
     def sample_token_from_latent(self,h1):
         return None
 
-    def _hidden_to_cats(self,yp,target,ret):
-        CLS_NAME = self.__class__.__name__
-
-        ## (B, T ,K )
-        kp = self.embed_to_logp(yp).log_softmax(-1)
-        yp = self.unembed( self.std_norm(self.k_vector,-1))
-        yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
-
-        # if class
-        if ret=='full':
-            lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
-            return lp
-
-        elif ret =='target':
-            # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
-            model_w = yp.T[target]
-
-            ## yp (K, C)
-            ## kp (B,T,K)
-            # if target is not None and 23 in target[7].detach().cpu().numpy().tolist():
-            #     pass
-                # import pdb; pdb.set_trace()
-            lp = (model_w + kp)
-            return lp
-        else:
-            raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+    # def _hidden_to_cats(self,yp,target,ret):
+    #     CLS_NAME = self.__class__.__name__
+    #
+    #     ## (B, T ,K )
+    #     kp = self.embed_to_logp(yp).log_softmax(-1)
+    #     yp = self.unembed( self.std_norm(self.k_vector,-1))
+    #     yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+    #
+    #     # if class
+    #     if ret=='full':
+    #         lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+    #         return lp
+    #
+    #     elif ret =='target':
+    #         # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+    #         model_w = yp.T[target]
+    #
+    #         ## yp (K, C)
+    #         ## kp (B,T,K)
+    #         # if target is not None and 23 in target[7].detach().cpu().numpy().tolist():
+    #         #     pass
+    #             # import pdb; pdb.set_trace()
+    #         lp = (model_w + kp)
+    #         return lp
+    #     else:
+    #         raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
 
 class DLM66(DLM57):
     def __init__(self,device,config,_=None):
