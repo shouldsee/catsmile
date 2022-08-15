@@ -203,7 +203,7 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
         if(epoch % SAVE_INTERVAL ==0):
             # target_filename = conf.get_ckpt_name(os.path.join("Checkpoints",f"{conf._session_name}_{epoch}_{loss_test_mean:.5f}.pkl"))
             target_filename = os.path.join("Checkpoints",f"{conf._session_name}_{epoch}_{loss_test_mean:.5f}.pkl")
-            torch.save({
+            meta = {
                 "model"       :conf.model.state_dict(),
                 "optimizer"   :conf.optimizer.state_dict(),
                 "epoch"       :epoch,
@@ -213,7 +213,10 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
                 "curr_seed"   :[curr_seed, torch.seed()],
                 "model_config":conf.model.__dict__.get('config',{}),
                 "model_cls"   :conf.model.__class__,
-            },target_filename)
+                'conf_task'   :conf.task,
+            }
+            model.meta = meta
+            torch.save(meta,target_filename)
             linkFile = __file__+'.curr.ckpt.pkl'
             # os.unlink(linkFile) if os.path.exists(linkFile) else None
             # os.link(target_filename,linkFile)

@@ -80,15 +80,6 @@ class DLMPrototype(LanguageModelPrototype):
         # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
         self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
 
-        # W = min(self.config.window_size,0 )
-        # embed_dim       = self.embed_dim
-        # self.layers     = nn.ModuleList([
-        #     nn.Linear(embed_dim*W, embed_dim*W).to(self.device)
-        #     for _ in range(self.config.depth-1)
-        #     ])
-        # self.final_layer      = nn.Linear(embed_dim*W,  embed_dim).to(self.device)
-
-
     def unembed(self,x):
         y = x.matmul(self.embed.weight.T)
         return y
@@ -101,6 +92,33 @@ class DLMPrototype(LanguageModelPrototype):
 
     def loss(self,item):
         return self._loss(item, 'loss')
+
+    @staticmethod
+    def sample_logp(lp,dim,return_logp=False):
+        xp = lp.softmax(dim)
+        # p = lp.log_softmax(dim).exp()
+        '''
+        Sampling bug....
+        '''
+        # _,idx = (torch.rand( xp.shape, device=xp.device) < xp.cumsum(dim)).max(dim) ### [A critical bug!!!]
+
+        _,idx = (torch.rand( xp.shape[:-1] + (1,), device=xp.device) < xp.cumsum(dim)).max(dim)
+        lp = torch.gather( lp, index=idx.unsqueeze(dim),dim=dim).squeeze(dim)
+        rand_sampled_output = idx #.clip(dataset.tgt_vocab.offset,None)
+        # import pdb; pdb.set_trace()
+        if return_logp:
+            return lp,rand_sampled_output
+        else:
+            return rand_sampled_output
+
+
+    def get_default_init(self,h0,B):
+        if h0 is None:
+            E = self.config.embed_dim
+            # B = len(h0)
+            h0  = torch.ones([1,B,E],device=self.device)
+        return h0
+
 
     def _loss(self,item, ret):
         CLS_NAME = self.__class__.__name__
@@ -117,13 +135,13 @@ class DLMPrototype(LanguageModelPrototype):
         # source = None; source_embed=None
         T = target.size(1)
         B = target.size(0)
-        N = self.config.window_size
+        N = W = self.config.window_size
         K = self.config.kernel_size
         target_len = item['target_len']
         # target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
         target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
         # import pdb; pdb.set_trace()
-        if item['has_start_token']==1:
+        if (item['has_start_token'].__class__==int and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
             target_notnull[:,0] = False
 
 
@@ -249,49 +267,479 @@ class DLMPrototype(LanguageModelPrototype):
             lp  = lp.logsumexp(-1)
             logp_sum = (lp * target_notnull).sum(dim=1)
 
+        elif CLS_NAME in 'DLM67'.split():
+            '''
+            This branch predicts a discrete mixer instead of a vector to speeds up final softmax
+            '''
 
-        elif CLS_NAME in 'DLM23 DLM26 DLM29 DLM43 DLM44 DLM46 DLM47'.split():
             target_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device),target_embed],dim=1)[:,:-1]
             target_embed_parent = target_embed_parent/target_embed_parent.std(dim=1,keepdims=True)
 
             h0 = torch.ones([1,B,E],device=self.device)
             c0 = torch.ones([1,B,E],device=self.device)
 
-            # (B, T, E)
-            if CLS_NAME in 'DLM23 DLM26'.split():
-                yp, (h1,c1) = self.rnn(target_embed_parent,(h0,c0))
-                yp = yp / yp.std(dim=-1, keepdims=True)
-            elif CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
-                yp, h1      = self.rnn(target_embed_parent,h0)
-                yp = yp / yp.std(dim=-1, keepdims=True)
-            else:
-                raise NotImplementedError( CLS_NAME )
+            prior = 0.
+            prior_sum = 0.
 
-            if CLS_NAME in 'DLM23 DLM43'.split():
-                # (B, T, C)
-                lyp = self.unembed(yp).log_softmax(-1)
-                lp =  torch.gather(lyp [:,:,:], index=target[:,:,None],dim=-1)[:,:,:]
+            if 1:
 
-            elif CLS_NAME in 'DLM26 DLM29 DLM44 DLM46 DLM47'.split():
-                ## (B, T ,K )
-                kp = self.embed_to_logp(yp).log_softmax(-1)
+                '''
+                parse to get a state distrib
+                '''
+                h1, _ = self.embed_to_latent(target_embed)
 
-                # target_embed = self.std_norm(target_embed,-1)
-                yp = self.unembed( self.std_norm(self.k_vector,-1))
-                yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
-                model_w = yp.T[target]
+                ### (1,T,E,K)
+                '''
+                Sample a sequence (w_i,l_i) from parser
+                '''
 
-                lp = (model_w + kp)
-            else:
-                raise NotImplementedError( CLS_NAME )
+                ### (B,T,W)
+                z_lp = (self.std_norm(h1,-1)@self.h_to_z).log_softmax(-1)
+
+                idx     = self.sample_logp(z_lp, return_logp=False, dim=-1)
+                '''
+                calculate score as log_p_decode(sampled_code) - log_p_encode(sampled_code) + log_p_prior(sampled_code)
+                '''
+
+                post_lp = torch.gather(z_lp,index=idx.unsqueeze(-1),dim=-1).squeeze(-1)
+
+                ## (1, T, W)
+                z_lp_p  = self.z_prior.log_softmax(-1)[None]
+                prior_lp= torch.gather(z_lp_p.repeat((B,1,1)), index=idx.unsqueeze(-1), dim=-1).squeeze(-1)
+
+                # prior = prior + prior_lp - post_lp
+
+                kl = (z_lp.exp() * (z_lp_p - z_lp)).sum(-1)
+                prior = prior + kl
+
+                # h1r = self.z_vector[idx]
+                # h1r = self.std_norm(self.z_vector,-1)[idx]
+                yp = self.latent_to_emittor(h1r)
+
+                self._temp = dict(h1r=h1r,idx=idx,z_lp=z_lp,)
+                if ret=='encode': return z_lp.softmax(-1)
 
 
+            lp = self._hidden_to_cats(yp,ret='target',target=target)
 
-                # lp =  torch.gather(lyp [:,:,:], index=target[:,:,None],dim=-1)[:,:,:]
 
             att = lp.softmax(dim=2).transpose(2,1)
             lp  = lp.logsumexp(-1)
-            logp_sum = (lp * target_notnull).sum(dim=1)
+
+            # logp_sum = (lp * target_notnull).sum(dim=1)
+            logp_sum = ((lp + prior) * target_notnull).sum(dim=1)
+            logp_sum = logp_sum + prior_sum
+            # logp_sum = logp_sum + prior
+
+
+
+        elif CLS_NAME in 'DLM23 DLM26 DLM29 DLM43 DLM44 DLM46 DLM47 DLM50 DLM51 DLM52 DLM53 DLM54 DLM55 DLM56 DLM57 DLM58 DLM59 DLM60 DLM61 DLM62 DLM63 DLM64 DLM65 DLM66'.split():
+            '''
+            This branch predicts a discrete mixer instead of a vector to speeds up final softmax
+            '''
+
+            target_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device),target_embed],dim=1)[:,:-1]
+            target_embed_parent = target_embed_parent/target_embed_parent.std(dim=1,keepdims=True)
+
+            h0 = torch.ones([1,B,E],device=self.device)
+            c0 = torch.ones([1,B,E],device=self.device)
+
+            prior = 0.
+            prior_sum = 0.
+            # (B, T, E)
+            if CLS_NAME in 'DLM23 DLM26'.split():
+
+                # target_embed_parent[:,0:1] = h0.transpose(1,0)
+
+                # _ , (h0,c0) = self.rnn(  h0.transpose(1,0),(h0,c0))
+                target_embed_parent[:,0:1] = h0.transpose(1,0)
+                yp, (h1,c1) = self.rnn(target_embed_parent,(h0,c0))
+                yp = yp / yp.std(dim=-1, keepdims=True)
+                if ret=='encode': return yp
+
+
+            elif CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+                # h0 = torch.ones([,E],device=self.device)
+                h0 = self.w_init_vector[None].repeat((B,1,1)).reshape((1,B*W,E))
+                yp, h1      = self.rnn(target_embed_parent[:,None].repeat((1,W,1,1)).reshape((B*W,T,E)), h0)
+                # import pdb; pdb.set_trace()
+                # yp = yp.reshape((BW,T,E))
+                yp = yp / yp.std(dim=-1, keepdims=True)
+
+                target_notnull = target_notnull[:,None].repeat((1,W,1)).reshape((B*W,T))
+                target = target[:,None].repeat((1,W,1)).reshape((B*W,T))
+                if ret=='encode': return yp.reshape((B,W,T,E))[:,0]
+
+            elif CLS_NAME in 'DLM50 DLM51'.split():
+                _ , h1      = self.rnn_enc(target_embed[:,1:].flip([1,]) , h0)
+
+                '''
+                Needs to sample from h1
+                '''
+
+                # mu_p   = self.h_prior[None,:,0:1].transpose(2,1)
+                mu_p     = self.h_prior[0,None,None,:,]
+                beta_p   = self.h_prior[1,None,None,:,].exp()
+                # beta_p = self.h_prior[None,:,1:2].exp().transpose(2,1)
+                #.clip(0,100)
+
+                mu     = h1@self.h_to_mu
+                beta   = self.h_post[1,None,None,:,].exp()
+                # beta_p = self.h_prior[None,:,1:2].exp().transpose(2,1)
+                # beta = beta_p
+                # beta = h1@self.h_to_beta
+
+                h1r  = torch.normal(0,1,mu.shape, device=self.device) / beta + mu
+                # h1r = h1r.tanh()
+
+                yp, h2      = self.rnn_dec(target_embed_parent, h1r)
+                # yp = yp + h1r[0,:,None]
+                yp = yp / yp.std(dim=-1, keepdims=True)
+
+                # lp1 = -0.5*((h1r + 1)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi)
+                # lp2 = -0.5*((h1r - 1)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi)
+                # # prior = (torch.stack([lp1,lp2],dim=0) + math.log(0.5)).logsumexp(0)
+                # lp3 = torch.stack([mu_p.sigmoid(),1-mu_p.sigmoid()],dim=0).log()
+                # prior = (torch.stack([lp1,lp2],dim=0) + lp3 ).logsumexp(0)
+
+                prior = prior +( -0.5*((h1r - mu_p)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi) )
+                prior = prior -( -0.5*((h1r - mu)*beta).square() + beta.log() - 0.5 * math.log(2*math.pi) )
+                prior_sum = prior[0].sum(1)
+                prior = 0.
+                self._temp = dict(mu=mu,beta=beta,h1r=h1r,prior=prior)
+                if ret=='encode': return mu[0,:,None,:].transpose(2,1)
+                # print(prior.mean())
+
+            elif CLS_NAME in 'DLM57 DLM58 DLM59 DLM60 DLM61 DLM62'.split():
+
+                '''
+                Encode right to left, decode left to right
+                '''
+                h1, _ = self.embed_to_latent(target_embed)
+
+                '''
+                Needs to sample from h1
+                '''
+
+                mu_p   = self.h_prior[0:1]
+                beta_p = self.h_prior[1:2].exp()
+                # if self.meta.get('epoch',0)<=5:
+                #     prior_w = 0.
+                # else:
+                prior_w = 1.
+                mu   = h1 @self.h_to_mu
+                # mu   = h1
+                beta = self.h_post[1:2].exp()
+
+                '''
+                Resampling
+                '''
+                h1r = torch.normal( 0, 1, mu.shape, device=self.device) / beta + mu
+                yp = self.latent_to_emittor(h1r)
+
+
+                # import pdb; pdb.set_trace()
+                '''
+                Calculate extra terms due to posterior correction from prior dist
+                '''
+                prior = prior +( -0.5*((h1r - mu_p)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi) )
+                prior = prior -( -0.5*((h1r - mu)*beta).square() + beta.log() - 0.5 * math.log(2*math.pi) )
+                prior = prior.sum((2))
+                prior = prior*prior_w
+                self._temp = dict(mu=mu,beta=beta,h1r=h1r,prior=prior)
+
+
+                if ret=='encode': return mu
+
+
+
+            elif CLS_NAME in 'DLM66'.split():
+
+                '''
+                Encode right to left, decode left to right
+                '''
+                # h1, _ = self.embed_to_latent(target_embed)
+
+                '''
+                Needs to sample from h1
+                '''
+
+                mu_p   = self.h_prior[0:1]
+                beta_p = self.h_prior[1:2].exp()
+                # if self.meta.get('epoch',0)<=5:
+                #     prior_w = 0.
+                # else:
+                prior_w = 1.
+                # mu   = h1 @self.h_to_mu
+                # mu   = h1
+                mu   = self.embed(target)
+                beta = self.h_post[1:2].exp()
+
+                '''
+                Resampling
+                '''
+                h1r = torch.normal( 0, 1, mu.shape, device=self.device) / beta + mu
+                yp = self.latent_to_emittor(h1r)
+
+
+                # import pdb; pdb.set_trace()
+                '''
+                Calculate extra terms due to posterior correction from prior dist
+                '''
+                prior = prior +( -0.5*((h1r - mu_p)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi) )
+                prior = prior -( -0.5*((h1r - mu)*beta).square() + beta.log() - 0.5 * math.log(2*math.pi) )
+                prior = prior.sum((2))
+                prior = prior*prior_w
+                self._temp = dict(mu=mu,beta=beta,h1r=h1r,prior=prior)
+
+
+                if ret=='encode': return mu
+
+
+            elif CLS_NAME in 'DLM65'.split():
+                '''
+                This diverges
+                '''
+
+                '''
+                Encode right to left, decode left to right
+                '''
+                h1, _ = self.embed_to_latent(target_embed)
+
+                '''
+                Needs to sample from h1
+                '''
+
+                mu_p   = self.h_prior[0:1]
+                beta_p = self.h_prior[1:2].exp()
+
+                # mu   = h1 @self.h_to_mu
+                # beta = self.h_post[1:2].exp()
+
+                '''
+                Resampling
+                '''
+                h1r = mu = h1
+                yp = self.latent_to_emittor(h1r)
+
+
+                # import pdb; pdb.set_trace()
+                '''
+                Calculate extra terms due to posterior correction from prior dist
+                '''
+                prior = prior +( -0.5*((h1r - mu_p)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi) )
+                # prior = prior -( -0.5*((h1r - mu)*beta).square() + beta.log() - 0.5 * math.log(2*math.pi) )
+                prior = prior.sum((2))
+                self._temp = dict(h1r=h1r,prior=prior)
+
+
+                if ret=='encode': return mu
+
+
+
+
+
+            elif CLS_NAME in 'DLM63'.split():
+
+                '''
+                Encode right to left, decode left to right
+                '''
+                h1, _ = self.embed_to_latent(target_embed)
+
+                '''
+                Needs to sample from h1
+                '''
+
+                ### (1,T,E,K)
+                mu_p   = self.h_prior[0:1]
+                beta_p = self.h_prior[1:2].exp()
+                k_p    = self.h_prior[2:3].log_softmax(-1)
+                ## ( T, E, K)
+                # k_p  = self.k_prior[None,:,None]
+
+                mu   = h1 @self.h_to_mu
+                beta = self.h_post[1:2].exp()
+
+                '''
+                Resampling
+                '''
+                h1r = torch.normal( 0, 1, mu.shape, device=self.device) / beta + mu
+                yp = self.latent_to_emittor(h1r)
+
+
+                # import pdb; pdb.set_trace()
+                '''
+                Calculate extra terms due to posterior correction from prior dist
+                '''
+                prior = prior +(( -0.5*((h1r.unsqueeze(-1) - mu_p)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi) ) + k_p).logsumexp(-1)
+                prior = prior -( -0.5*((h1r - mu)*beta).square() + beta.log() - 0.5 * math.log(2*math.pi) )
+                prior = prior.sum((2))
+                self._temp = dict(mu=mu,beta=beta,h1r=h1r,prior=prior)
+
+                if ret=='encode': return mu
+
+
+            elif CLS_NAME in 'DLM64'.split():
+
+                '''
+                Encode right to left, decode left to right
+                '''
+                h1, _ = self.embed_to_latent(target_embed)
+
+                '''
+                Needs to sample from h1
+                '''
+
+                ### (1,T,E,K)
+
+                '''
+                Sampling discrete variables
+                '''
+                ### (B,T,W)
+                z_lp = (self.std_norm(h1,-1)@self.h_to_z).log_softmax(-1)
+                # z_lp = (h1@self.h_to_z).log_softmax(-1)
+
+
+                idx     = self.sample_logp(z_lp, return_logp=False, dim=-1)
+                # import pdb; pdb.set_trace()
+                '''
+                Calculate extra terms due to posterior correction from prior dist
+                '''
+
+                post_lp = torch.gather(z_lp,index=idx.unsqueeze(-1),dim=-1).squeeze(-1)
+
+                ## (1, T, W)
+                z_lp_p  = self.z_prior.log_softmax(-1)[None]
+                prior_lp= torch.gather(z_lp_p.repeat((B,1,1)), index=idx.unsqueeze(-1), dim=-1).squeeze(-1)
+
+
+                # prior = prior + prior_lp - post_lp
+
+                kl = (z_lp.exp() * (z_lp_p - z_lp)).sum(-1)
+                prior = prior + kl
+
+                # h1r = self.z_vector[idx]
+                h1r = self.std_norm(self.z_vector,-1)[idx]
+                yp = self.latent_to_emittor(h1r)
+
+
+                self._temp = dict(h1r=h1r,idx=idx,z_lp=z_lp,)
+                #mu=mu,beta=beta,h1r=h1r,prior=prior)
+
+                if ret=='encode': return z_lp.softmax(-1)
+
+
+            elif CLS_NAME in 'DLM53 DLM54'.split():
+                _ , h1      = self.rnn_enc(target_embed[:,:].flip([1,]), h0)
+                '''
+                no need to sample from h1
+                '''
+                h1 = h1[0]
+                yp, h2      = self.rnn_dec(target_embed_parent, h1[None])
+                # yp = yp + h1r[0,:,None]
+                yp = yp / yp.std(dim=-1, keepdims=True)
+
+                self._temp = dict(h1=h1)
+                if ret=='encode': return h1
+
+
+            elif CLS_NAME in 'DLM55 DLM56'.split():
+                # if item.get('is_test',[0])[0]==1:
+                #     target = torch.randint(target.min(),target.max()-1,size=target.shape,device=self.device)
+                #     target_embed = self.embed(target)
+                h1 = self.enc(target_embed)
+
+                mu_p   = self.h_prior[None,:,0:1].transpose(2,1)[0]
+                beta_p = self.h_prior[None,:,1:2].exp().transpose(2,1).clip(0.01,100)[0]
+
+                mu   = h1@self.h_to_mu + h1
+                beta = beta_p
+                # beta = h1@self.h_to_beta
+                # beta = beta.exp().clip(0.01,100)
+                h1r  = torch.normal(0,1, mu.shape, device=self.device) / beta + mu
+                # import pdb; pdb.set_trace()
+                prior = prior +( -0.5*((h1r - mu_p)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi) )
+                prior = prior -( -0.5*((h1r - mu)*beta).square() + beta.log() - 0.5 * math.log(2*math.pi) )
+                prior = prior.sum(1)
+                # prior = 0.
+                self._temp = dict(mu=mu,beta=beta,h1r=h1r,prior=prior)
+
+                # if torch.isnan(prior).any():
+                #     import pdb; pdb.set_trace()
+
+                yp = self.dec(h1r)
+
+                yp = yp /(yp.std(dim=-1, keepdims=True))
+
+                self._temp = dict(h1=h1)
+                if ret=='encode': return h1
+
+
+            elif CLS_NAME in 'DLM52'.split():
+                _ , h1      = self.rnn_enc(target_embed[:,1:].flip([1,]) , h0)
+
+                '''
+                Needs to sample from h1
+                '''
+
+                # mu_p   = self.h_prior[None,:,0:1].transpose(2,1)
+                # beta_p = self.h_prior[None,:,1:2].exp().transpose(2,1)
+
+                mup   = (h1@self.h_to_mu).reshape((1,B,E,3)).softmax(dim=-1)
+                # beta_p = self.h_prior[None,:,1:2].exp().transpose(2,1)
+                # beta = beta_p
+                # beta = h1@self.h_to_beta
+                # beta = beta.exp()
+                # import pdb; pdb.set_trace()
+                mupc = mup.cumsum(-1)
+                xr = torch.rand(mup.shape[:-1],device=self.device)
+                _ , idx = (xr.unsqueeze(-1)<mupc).max(-1)
+                h1r = torch.tensor((-1.,0.,1.),device=self.device)[idx]
+                # import pdb; pdb.set_trace()
+                # h1r  = torch.normal(0,1,mu.shape, device=self.device) / beta + mu
+                # h1r = h1r.tanh()
+
+
+                yp, h2      = self.rnn_dec(target_embed_parent, h1r)
+                yp = yp / yp.std(dim=-1, keepdims=True)
+                self._temp = dict(mup=mup,h1r=h1r)
+
+                mup_prior_log   = self.h_mu_prior.reshape((1,1, E,3)).log_softmax(-1)
+                # [None,:,0:1].transpose(2,1)
+                # mup_p = self.h_prior
+                prior = prior + torch.gather( mup_prior_log - mup.log(),dim=-1,index=idx.unsqueeze(-1)).squeeze(-1)
+                # [idx]
+                prior = prior[0].sum(1)
+                # print(prior.mean())
+
+
+
+            else:
+                raise NotImplementedError( CLS_NAME )
+
+
+
+            lp = self._hidden_to_cats(yp,ret='target',target=target)
+
+
+            att = lp.softmax(dim=2).transpose(2,1)
+            lp  = lp.logsumexp(-1)
+
+            # logp_sum = (lp * target_notnull).sum(dim=1)
+            logp_sum = ((lp + prior) * target_notnull).sum(dim=1)
+            logp_sum = logp_sum + prior_sum
+            # logp_sum = logp_sum + prior
+
+
+            if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+                wp = self.w_init_logp.log_softmax(0)[None].repeat((B,1,1)).reshape((B*W,))
+                ## (BW, 1)
+                logp_sum = logp_sum + wp
+                logp_sum = logp_sum.reshape((B,W)).logsumexp(-1)
+                target_notnull = target_notnull.reshape((B,W,T))[:,0]
+
+
+
 
         elif CLS_NAME in 'DLM40'.split():
             # torch.cat([torch.ones((B,1,E),device=self.device),target_embed],dim=1)[:,:-1]
@@ -889,7 +1337,6 @@ class DLMPrototype(LanguageModelPrototype):
 
 
 
-
             # att = lp.softmax(dim=2).transpose(2,1)
             lp  = lp.logsumexp(-1)
             logp_sum = (lp * target_notnull).sum(dim=1)
@@ -940,13 +1387,72 @@ class DLMPrototype(LanguageModelPrototype):
 
         ### normalise by average token count, but sum by batchsize
         # lossVal = lossVal/ (source_notnull.sum() / B)
-        logp_per_token = logp_sum/ (target_notnull.sum(dim=1))
+        # print('[mean]',target_notnull.sum(1).float().mean())
+
+
+        logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+        # .clip(1,None)
         #* 1000
         loss = -logp_per_token
 
         if ret=='forward':
             return loss,att
-        return loss
+        elif ret in 'loss grad_loss'.split():
+            return loss
+        # elif ret=='grad_loss':
+        #     return loss
+        elif ret=='loss_per_loc':
+            return -lp,target_notnull
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
+
+    def _hidden_to_cats(self, yp, target, ret):
+        '''
+        Convert hidden vector to explicit categorical distribution
+        '''
+        CLS_NAME = self.__class__.__name__
+        if CLS_NAME in 'DLM23 DLM43'.split():
+            # (B, T, C)
+            lyp = self.unembed(yp).log_softmax(-1)
+            lp =  torch.gather(lyp [:,:,:], index=target[:,:,None],dim=-1)[:,:,:]
+            if ret=='full':
+                raise NotImplementedError
+                # lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+                # return lp
+                # pass
+            elif ret =='target':
+                return lp
+            else:
+                raise NotImplementedError(f'{ret}')
+
+        elif CLS_NAME in 'DLM26 DLM29 DLM44 DLM46 DLM47 DLM50 DLM51 DLM52 DLM53 DLM54 DLM55 DLM56 DLM57 DLM58 DLM59 DLM60 DLM61 DLM62 DLM63 DLM64 DLM65 DLM66'.split():
+            ## (B, T ,K )
+            kp = self.embed_to_logp(yp).log_softmax(-1)
+            yp = self.unembed( self.std_norm(self.k_vector,-1))
+            yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+
+            # if class
+            if ret=='full':
+                lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+                return lp
+
+            elif ret =='target':
+                # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+                model_w = yp.T[target]
+
+                ## yp (K, C)
+                ## kp (B,T,K)
+                # if target is not None and 23 in target[7].detach().cpu().numpy().tolist():
+                #     pass
+                    # import pdb; pdb.set_trace()
+                lp = (model_w + kp)
+                return lp
+            else:
+                raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+        else:
+            raise NotImplementedError( CLS_NAME )
+        # if ret==''
+
 
 class DLM1(DLMPrototype):
     # pass
@@ -1591,6 +2097,978 @@ class DLM29(DLMPrototype):
         self.k_scale   =  nn.Parameter(x.weight.T)
         self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
 
+        W = config.window_size
+        assert W >=1, config
+
+        x = nn.Linear(W,  config.embed_dim).to(self.device)
+        self.w_init_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(W,  1).to(self.device)
+        self.w_init_logp     =  nn.Parameter(x.weight.T)
+
+
+class DLM50(DLMPrototype):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        E            = config.embed_dim
+        self.rnn_enc = nn.RNN(input_size = E, hidden_size=E, batch_first= True, num_layers=1, nonlinearity='tanh')
+        self.rnn_dec = nn.RNN(input_size = E, hidden_size=E, batch_first= True, num_layers=1, nonlinearity='tanh')
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T)
+
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+class DLM51(DLMPrototype):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(2, E ).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T)
+
+        x = nn.Linear(2, E ).to(self.device)
+        self.h_post    =  nn.Parameter(x.weight.T)
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+    # def dec(self,h1):
+    #     T = self.config.n_step
+    #     E = self.config.embed_dim
+    #     return h1.reshape((len(h1),-1,E))
+    #     # return self.rnn_dec(h1[None]).reshape((-1,T,E))
+
+
+
+class DLM57(DLMPrototype):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_post    =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+    def sample_token(self,B,T,prompt=None):
+        E = self.config.embed_dim
+        T = self.config.n_step
+        mu_p   = self.h_prior[0:1]
+        beta_p = self.h_prior[1:2].exp()
+        h1r = torch.normal( 0, 1, (B,T,E), device=self.device) / beta_p + mu_p
+        return self.sample_token_from_latent(h1r)
+
+    def sample_token_from_latent(self, h1r,return_logp=False):
+
+        yp = self.latent_to_emittor(h1r)
+        ## (B,T,C) tensor
+        logp = self._hidden_to_cats(yp,ret='full',target=None)
+        return self.sample_logp(logp,-1,return_logp)
+        # return lp,idx
+
+    def latent_to_emittor(self, h1r,h0=None):
+        h0 = self.get_default_init(h0,len(h1r))
+        # h1r = h1r.tanh()
+        # h1r = self.std_norm(h1r, dim=-1)
+        # h0  = torch.ones([1,B,E],device=self.device)
+        yp, h2      = self.rnn_dec(h1r, h0)
+        yp = yp / yp.std(dim=-1, keepdims=True)
+        return yp
+
+    def embed_to_latent(self, target_embed, h0=None):
+        h0 = self.get_default_init(h0,len(target_embed))
+        h1 , h1blah      = self.rnn_enc(target_embed[:,:].flip([1,]) , h0)
+        h1 = h1.flip([1,])
+        return h1,h1blah
+
+class DLM65(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_post    =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+    def sample_token(self,B,T,prompt=None):
+        E = self.config.embed_dim
+        T = self.config.n_step
+        mu_p   = self.h_prior[0:1]
+        beta_p = self.h_prior[1:2].exp()
+        h1r = torch.normal( 0, 1, (B,T,E), device=self.device) / beta_p + mu_p
+        return self.sample_token_from_latent(h1r)
+
+    def sample_token_from_latent(self, h1r,return_logp=False):
+
+        yp = self.latent_to_emittor(h1r)
+        ## (B,T,C) tensor
+        logp = self._hidden_to_cats(yp,ret='full',target=None)
+        return self.sample_logp(logp,-1,return_logp)
+        # return lp,idx
+
+    def latent_to_emittor(self, h1r,h0=None):
+        h0 = self.get_default_init(h0,len(h1r))
+        # h1r = h1r.tanh()
+        # h1r = self.std_norm(h1r, dim=-1)
+        # h0  = torch.ones([1,B,E],device=self.device)
+        yp, h2      = self.rnn_dec(h1r, h0)
+        yp = yp / yp.std(dim=-1, keepdims=True)
+        return yp
+
+    def embed_to_latent(self, target_embed, h0=None):
+        h0 = self.get_default_init(h0,len(target_embed))
+        h1 , h1blah      = self.rnn_enc(target_embed[:,:].flip([1,]) , h0)
+        h1 = h1.flip([1,])
+        return h1,h1blah
+
+
+
+class DLM63(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        W = config.window_size
+        x = nn.Linear(T*E*W,  3).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T.reshape((3,T,E,W)))
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_post    =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+    def latent_to_emittor(self, h1r,h0=None):
+        h0 = self.get_default_init(h0,len(h1r))
+        yp, h2      = self.rnn_dec(h1r, h0)
+        yp = yp / yp.std(dim=-1, keepdims=True)
+        return yp
+
+    def embed_to_latent(self, target_embed, h0=None):
+        h0 = self.get_default_init(h0,len(target_embed))
+        h1 , h1blah      = self.rnn_enc(target_embed[:,:].flip([1,]) , h0)
+        h1 = h1.flip([1,])
+        return h1,h1blah
+    def sample_token(self,B,T,prompt=None):
+        return None
+
+
+
+class DLM64(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        W = config.window_size
+        x = nn.Linear(T,  W).to(self.device)
+        self.z_prior   =  nn.Parameter(x.weight.T)
+        # .reshape((3,T,E,W)))
+
+        x = nn.Linear(W, E).to(self.device)
+        self.z_vector   =  nn.Parameter(x.weight.T)
+
+        x = nn.Linear(E,  W).to(self.device)
+        self.h_to_z   =  nn.Parameter(x.weight.T)
+        # x = nn.Linear(E,  E).to(self.device)
+        # self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+    def latent_to_emittor(self, h1r,h0=None):
+        h0 = self.get_default_init(h0,len(h1r))
+        yp, h2      = self.rnn_dec(h1r, h0)
+        yp = yp / yp.std(dim=-1, keepdims=True)
+        return yp
+
+    def embed_to_latent(self, target_embed, h0=None):
+        h0 = self.get_default_init(h0,len(target_embed))
+        h1 , h1blah      = self.rnn_enc(target_embed[:,:].flip([1,]) , h0)
+        h1 = h1.flip([1,])
+        return h1,h1blah
+    def sample_token(self,B,T,prompt=None):
+        return None
+    def sample_token_from_latent(self,h1):
+        return None
+
+
+
+class DLM67(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        W = config.window_size
+        x = nn.Linear(T,  W).to(self.device)
+        self.z_prior   =  nn.Parameter(x.weight.T)
+        # .reshape((3,T,E,W)))
+
+        x = nn.Linear(W, E).to(self.device)
+        self.z_vector   =  nn.Parameter(x.weight.T)
+
+        x = nn.Linear(E,  W).to(self.device)
+        self.h_to_z   =  nn.Parameter(x.weight.T)
+        # x = nn.Linear(E,  E).to(self.device)
+        # self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+    def latent_to_emittor(self, h1r,h0=None):
+        h0 = self.get_default_init(h0,len(h1r))
+        yp, h2      = self.rnn_dec(h1r, h0)
+        yp = yp / yp.std(dim=-1, keepdims=True)
+        return yp
+
+    def embed_to_latent(self, target_embed, h0=None):
+        h0 = self.get_default_init(h0,len(target_embed))
+        h1 , h1blah      = self.rnn_enc(target_embed[:,:].flip([1,]) , h0)
+        h1 = h1.flip([1,])
+        return h1,h1blah
+    def sample_token(self,B,T,prompt=None):
+        return None
+    def sample_token_from_latent(self,h1):
+        return None
+
+    def _hidden_to_cats(self,yp,target,ret):
+        CLS_NAME = self.__class__.__name__
+
+        ## (B, T ,K )
+        kp = self.embed_to_logp(yp).log_softmax(-1)
+        yp = self.unembed( self.std_norm(self.k_vector,-1))
+        yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+
+        # if class
+        if ret=='full':
+            lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+            return lp
+
+        elif ret =='target':
+            # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+            model_w = yp.T[target]
+
+            ## yp (K, C)
+            ## kp (B,T,K)
+            # if target is not None and 23 in target[7].detach().cpu().numpy().tolist():
+            #     pass
+                # import pdb; pdb.set_trace()
+            lp = (model_w + kp)
+            return lp
+        else:
+            raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+
+class DLM66(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        # self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec_2 = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        # W = config.window_size
+        # x = nn.Linear(T,  W).to(self.device)
+        # self.z_prior   =  nn.Parameter(x.weight.T)
+        # # .reshape((3,T,E,W)))
+        #
+        # x = nn.Linear(W, E).to(self.device)
+        # self.z_vector   =  nn.Parameter(x.weight.T)
+        #
+        # x = nn.Linear(E,  W).to(self.device)
+        # self.h_to_z   =  nn.Parameter(x.weight.T)
+        # # x = nn.Linear(E,  E).to(self.device)
+        # self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+    def latent_to_emittor(self, h1r,h0=None):
+        h0 = self.get_default_init(h0,len(h1r))
+        yp = h1r
+        for i in range(9):
+            ypo = yp
+            yp, h0      = self.rnn_dec(yp, h0)
+            yp = 0.5*(yp+ypo)
+            yp = yp.flip([1,])
+
+        yp = yp / yp.std(dim=-1, keepdims=True)
+        yp = yp.flip([1,])
+        return yp
+
+    def embed_to_latent(self, target_embed, h0=None):
+        h0 = self.get_default_init(h0,len(target_embed))
+        h1 , h1blah      = self.rnn_enc(target_embed[:,:].flip([1,]) , h0)
+        h1 = h1.flip([1,])
+        return h1,h1blah
+
+    def sample_token(self,B,T,prompt=None):
+        return None
+
+
+
+class DLM62(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+        self.h_post    =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+        submodel, self.embed = DLM40.get_mingpt_model(config)
+        self.transformer = submodel.transformer
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.rescale = x
+
+
+    def _ref_mingpt_foward(self):
+        # forward the GPT model itself
+        tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
+        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (1, t, n_embd)
+        x = self.transformer.drop(tok_emb + pos_emb)
+        for block in self.transformer.h:
+            x = block(x)
+        x = self.transformer.ln_f(x)
+
+
+    def latent_to_emittor(self, h1r,h0=None):
+        h0 = self.get_default_init(h0,len(h1r))
+        # h0  = torch.ones([1,B,E],device=self.device)
+        x = h1r
+        D = len(self.transformer.h)//2
+        for block in self.transformer.h[D:D*2]:
+            x = block(x)
+
+        yp = x
+        yp = yp / yp.std(dim=-1, keepdims=True)
+        return yp
+
+    def embed_to_latent(self, target_embed, h0=None):
+        # tfm = self.transformer
+
+        T = target_embed.shape[1]
+        pos = torch.arange(0, T, dtype=torch.long, device=self.device).unsqueeze(0) # shape (1, t)
+        pos_emb = self.transformer.wpe(pos)
+        tok_emb = target_embed
+        x = self.transformer.drop(tok_emb + pos_emb)
+        D = len(self.transformer.h)//2
+        for block in self.transformer.h[0:D]:
+            x = block(x)
+        x = self.rescale(x)
+
+
+        return x,None
+
+        # h0 = self.get_default_init(h0,len(target_embed))
+        # x = target_embed
+        # #(B,T,E)
+        # # h1 , h1blah      = self.rnn_enc(target_embed[:,:].flip([1,]) , h0)
+        # # h1 = h1.flip([1,])
+        # return h1,h1blah
+        #
+
+class DLM59(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_enc_2 = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec   = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec_2 = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+        self.h_post    =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+
+    def latent_to_emittor(self, h1r,h0=None):
+        h0 = self.get_default_init(h0,len(h1r))
+        # h0  = torch.ones([1,B,E],device=self.device)
+        # h1r = h1r.flip([1])
+        yp, h2      = self.rnn_dec(h1r, h0)
+        yp = yp.flip([1])
+
+        yp, h3      = self.rnn_dec_2(yp,h2)
+        yp = yp.flip([1])
+
+        yp = yp / yp.std(dim=-1, keepdims=True)
+        return yp
+
+
+    def embed_to_latent(self, target_embed, h0=None):
+        h0 = self.get_default_init(h0,len(target_embed))
+        # target_embed = target_embed.flip([1,])
+        ypo = target_embed
+        yp , h2      = self.rnn_enc(target_embed[:,:] , h0)
+        yp = yp.flip([1,])
+
+        ypo = yp
+        yp , h3      = self.rnn_enc_2(yp,h2)
+        yp = yp.flip([1,])
+        # target_embed[:,:].flip([1,]) , h0)
+        return yp, h3
+
+
+class DLM60(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_enc_2 = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec   = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec_2 = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+        self.h_post    =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+    #
+
+    def latent_to_emittor(self, h1r,h0=None):
+        h0 = self.get_default_init(h0,len(h1r))
+        # h0  = torch.ones([1,B,E],device=self.device)
+        # h1r = h1r.flip([1])
+        c = 1./2
+        ypo = h1r
+        yp, h2      = self.rnn_dec(h1r, h0)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1])
+
+        ypo = yp
+        yp, h3      = self.rnn_dec_2(yp,h2)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1])
+
+        yp = yp / yp.std(dim=-1, keepdims=True)
+        return yp
+
+
+    def embed_to_latent(self, target_embed, h0=None):
+        c = 1./2
+
+        h0 = self.get_default_init(h0,len(target_embed))
+        # target_embed = target_embed.flip([1,])
+        ypo = target_embed
+        yp , h2      = self.rnn_enc(target_embed[:,:] , h0)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1,])
+
+        ypo = yp
+        yp , h3      = self.rnn_enc_2(yp,h2)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1,])
+        # target_embed[:,:].flip([1,]) , h0)
+        return yp, h3
+
+class DLM61(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_enc_2 = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_enc_3 = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_enc_4 = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec   = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec_2 = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec_3 = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec_4 = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+        self.h_post    =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+    def latent_to_emittor(self, h1r,h0=None):
+        h0 = self.get_default_init(h0,len(h1r))
+        # h0  = torch.ones([1,B,E],device=self.device)
+        # h1r = h1r.flip([1])
+        c = 1./2
+        ypo = h1r
+        yp, h2      = self.rnn_dec(h1r, h0)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1])
+
+        ypo = yp
+        yp, h2      = self.rnn_dec_2(yp,h2)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1])
+
+        ypo = yp
+        yp, h2      = self.rnn_dec_3(yp,h2)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1])
+
+        ypo = yp
+        yp, h2      = self.rnn_dec_4(yp,h2)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1])
+
+        yp = yp / yp.std(dim=-1, keepdims=True)
+        return yp
+
+
+    def embed_to_latent(self, target_embed, h0=None):
+        c = 1./2
+
+        h0 = self.get_default_init(h0,len(target_embed))
+        # target_embed = target_embed.flip([1,])
+        ypo = target_embed
+        yp , h2      = self.rnn_enc(target_embed[:,:] , h0)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1,])
+
+        ypo = yp
+        yp , h3      = self.rnn_enc_2(yp,h2)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1,])
+
+        ypo = yp
+        yp , h3      = self.rnn_enc_3(yp,h3)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1,])
+
+        ypo = yp
+        yp , h3      = self.rnn_enc_4(yp,h3)
+        yp = (ypo + yp)*c
+        yp = yp.flip([1,])
+
+        # target_embed[:,:].flip([1,]) , h0)
+        return yp, h3
+
+
+class DLM58(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+        self.h_post    =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+    def latent_to_emittor(self, h1r,h0=None):
+        h0 = self.get_default_init(h0,len(h1r))
+        # h0  = torch.ones([1,B,E],device=self.device)
+        h1run = h1r*0
+        hc = h1run[:,0:1]*0
+        T = h1r.shape[1]
+        for t in range(T):
+            hc = hc*0.5 + 0.5*h1r[:,t:t+1,:]
+            h1run[:,t:t+1] = hc
+
+        yp, h2      = self.rnn_dec(h1run, h0)
+        # yp, h2      = self.rnn_dec(h1r.cumsum(1), h0)
+        yp = yp / yp.std(dim=-1, keepdims=True)
+        return yp
+
+
+class DLM52(DLMPrototype):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        # self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+
+        # x = nn.Linear(E,  2).to(self.device)
+        # self.h_prior   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  3).to(self.device)
+        self.h_mu_prior   =  nn.Parameter(x.weight.T)
+
+        x = nn.Linear(E,  E*3).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        # x = nn.Linear(E,  E).to(self.device)
+        # self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+class DLM53(DLMPrototype):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+
+class DLM54(DLMPrototype):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        E            = config.embed_dim
+        self.rnn_enc = nn.RNN(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.RNN(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+
+
+
+
+class DLM55(DLMPrototype):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        T = self.config.n_step
+        E = self.config.embed_dim
+        self.encoder = nn.Linear(T*E,E)
+        self.decoder = nn.Linear(E,T*E)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+
+
+        x = nn.Linear(E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+    def enc(self,x):
+        return self.encoder(x.reshape((len(x),-1)))
+    def dec(self,h1):
+        T = self.config.n_step
+        E = self.config.embed_dim
+        return self.decoder(h1).reshape((-1,T,E))
+
+
+
+class DLM56(DLMPrototype):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        T = self.config.n_step
+        E = self.config.embed_dim
+        E1 = E*10
+        self.encoder1 = nn.Linear(T*E,E1)
+        self.encoder2 = nn.Linear(E1,E)
+
+        self.decoder1 = nn.Linear(E,E1)
+        self.decoder2 = nn.Linear(E1,T*E)
+        # T*E)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+
+    def enc(self,x):
+        x = self.encoder1(x.reshape((len(x),-1)))
+        x = self.encoder2(x.relu())
+        return x.relu()
+
+    def dec(self,h1):
+        T = self.config.n_step
+        E = self.config.embed_dim
+        z = h1
+        z = self.decoder1(z).relu()
+        y = self.decoder2(z)
+        y = y.reshape((-1,T,E))
+        return y
+
 
 
 class DLM12(DLMPrototype):
@@ -1634,6 +3112,14 @@ class DLM44(DLMPrototype):
         self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
         # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
 
+        W = config.window_size
+        assert W >=1, config
+
+        x = nn.Linear(W,  config.embed_dim).to(self.device)
+        self.w_init_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(W,  1).to(self.device)
+        self.w_init_logp     =  nn.Parameter(x.weight.T)
+
 
 class DLM45(DLMPrototype):
     def __init__(self,device,config,_=None):
@@ -1668,11 +3154,11 @@ class DLM46(DLMPrototype):
         # self.rnn = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
         K = config.kernel_size
         assert K >=1,config
-        if self.window_size!=-1:
-            '''
-            Ablation studies
-            '''
-            self.rnn.mutate(self.window_size)
+        # if self.window_size!=-1:
+        #     '''
+        #     Ablation studies
+        #     '''
+        #     self.rnn.mutate(self.window_size)
         if ',' in config.loss_name:
             for k in config.loss_name.split(','):
                 self.rnn.mutate(int(k))
@@ -1690,15 +3176,27 @@ class DLM46(DLMPrototype):
         self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
         # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
 
+        W = config.window_size
+        assert W >=1, config
 
-from markov_lm.Model_rnn import MGRU,RNNConfig
+        x = nn.Linear(W,  config.embed_dim).to(self.device)
+        self.w_init_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(W,  1).to(self.device)
+        self.w_init_logp     =  nn.Parameter(x.weight.T)
+
+
+from markov_lm.Model_rnn import MGRU,RNNConfig,MGRUWithAttention
 class DLM47(DLMPrototype):
     def __init__(self,device,config,_=None):
         super().__init__(device,config)
         # K = config.kernel_size
         # assert K >=1,config
         E = config.embed_dim
-        self.rnn = MGRU(device, RNNConfig(input_size=E,hidden_size=E,num_layers=1))
+        if '10' in config.loss_name.split(',') or '11' in config.loss_name:
+            self.rnn = MGRUWithAttention(device, RNNConfig(input_size=E,hidden_size=E,num_layers=1,max_step=config.n_step,head_size=config.window_size))
+            # import pdb; pdb.set_trace()
+        else:
+            self.rnn = MGRU(device, RNNConfig(input_size=E,hidden_size=E,num_layers=1,max_step=config.n_step,head_size=config.window_size))
         # if config.window_size != 0
         # self.rnn = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
         K = config.kernel_size
@@ -1706,6 +3204,7 @@ class DLM47(DLMPrototype):
         if ',' in config.loss_name:
             for k in config.loss_name.split(','):
                 self.rnn.mutate(int(k))
+
         # import pdb; pdb.set_trace()
 
         # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
@@ -1767,10 +3266,151 @@ class DLM26(DLMPrototype):
         self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
         # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
 
+    def sample_token(self,B,T,return_logp=False, prompt=None):
+
+        h0 = self.get_default_init(None,B)
+        c0 = self.get_default_init(None,B)
+        E = self.config.embed_dim
+        T = self.config.n_step
+
+        if prompt is not None:
+            # target_embed = self.embed(prompt)
+            # target_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device),target_embed],dim=1)[:,:-1]
+            # target_embed_parent = target_embed_parent/target_embed_parent.std(dim=1,keepdims=True)
+            #
+            # h0 = torch.ones([1,B,E],device=self.device)
+            # c0 = torch.ones([1,B,E],device=self.device)
+            #
+            # prior = 0.
+            # prior_sum = 0.
+            # # (B, T, E)
+            # if CLS_NAME in 'DLM23 DLM26'.split():
+            #
+            #     # target_embed_parent[:,0:1] = h0.transpose(1,0)
+            #
+            #     # _ , (h0,c0) = self.rnn(  h0.transpose(1,0),(h0,c0))
+                # target_embed_parent[:,0:1] = h0.transpose(1,0)
+                # yp, (h1,c1) = self.rnn(target_embed_parent,(h0,c0))
+                # yp = yp / yp.std(dim=-1, keepdims=True)
+
+            # for i in range(T):
+
+            prompt_embed = self.embed(prompt)
+            prompt_embed = torch.cat([torch.ones((B,1,E),device=self.device), prompt_embed],dim=1)
+            # [:,:-1]
+
+            prompt_embed = self.std_norm(prompt_embed,-1)
+
+            offset = prompt.shape[1]
+
+            ypp, (h0,c0) = self.rnn(prompt_embed,(h0,c0))
+            ypp = ypp[:,-1:]
+
+            if 0:
+                ypp, (h0,c0) = self.rnn(prompt_embed[:,:-1],(h0,c0))
+                ypp = ypp[:,-1:]
+
+            # [DEBUG]
+            if 0:
+                ypp, (h0,c0) = self.rnn(prompt_embed[:,:-1],(h0,c0))
+
+
+                ii = 7
+                seq2sent = lambda x,self=self:[self.dataset.tgt_wordize(vv) for vv in x]
+                xprompt_ypp = ypp
+                expected = 23
+                old_rnn_state = (ypp,(h0,c0))
+
+                ypo,(h1,h1) = self.rnn(prompt_embed[:,-1:],(h0,c0))
+                ypp = ypp[:,-1:]
+        else:
+            tok_embed = h0.transpose(0,1)
+            tok_embed = self.std_norm(tok_embed,-1)
+            ypp, (h0,c0) = self.rnn(  tok_embed,(h0,c0))
+            offset = 0
+
+        sampled = torch.zeros((B,T),dtype=torch.long,device=self.device)
+        lps     = torch.zeros((B,T),dtype=torch.float,device=self.device)
+
+        for i in range(T):
+            if i<offset:
+                tok = prompt[:,i:i+1]
+                lp = tok*0
+            else:
+                # import pdb; pdb.set_trace()
+
+                # logp = self._hidden_to_cats(ypp,ret='full',target=None).log_softmax(-1)
+                # if prompt
+                if 0:
+                    'DEBUG'
+                    ypp = xprompt_ypp[:,-1:]
+                    ypp,(h0,c0) = old_rnn_state; ypp = ypp[:,-2:-1]
+                    lp, tok = self.sample_token_from_latent(ypp, return_logp=True); xp=self._hidden_to_cats(ypp,ret='full',target=None).exp(); tok[7][0],lp[7],xp[7][0][23]
+                    '''
+                    (tensor(23), tensor([-0.9267], grad_fn=<SelectBackward0>), tensor(0.3958, grad_fn=<SelectBackward0>))
+
+                    From loss evaluation
+                    tensor(-0.0102, grad_fn=<SelectBackward0>)
+                    tensor([ 0.1841, -0.6415,  0.0125,  1.4693, -0.0258], grad_fn=<SliceBackward0>)
+                    '''
+
+                    tok_embed = self.embed(tok)
+                    tok_embed = self.std_norm(tok_embed,-1)
+
+                    h0,c0 = old_rnn_state[1]
+                    ypp, (h0,c0) = self.rnn(tok_embed,(h0,c0))
+
+
+                    ypo[7,0,:3],ypp[7,0,:3]
+
+
+                ypp = self.std_norm(ypp,-1)
+                logp = self._hidden_to_cats(ypp,ret='full',target=None).log_softmax(-1)
+                lp,tok =  self.sample_logp(logp,-1,return_logp=True)
+
+                # if prompt is not None and prompt[7][9]==23 and i-offset==0:
+                #     print(logp[7,0,23])
+                # import pdb; pdb.set_trace()
+
+#
+                # lp, tok = self.sample_token_from_latent(ypp, return_logp=True);
+                tok_embed = self.embed(tok)
+                tok_embed = self.std_norm(tok_embed,-1)
+                ypp, (h0,c0) = self.rnn(tok_embed,(h0,c0))
+                # lp, tok = self.sample_logp
+
+                # tok[7][0],lp[7]
+                # ypp = xprompt_ypp[:,-2:-1]
+                # import pdb; pdb.set_trace()
+
+                # else:?
+            sampled[:,i:i+1] = tok
+            lps[:,i:i+1] = lp
+
+        if return_logp:
+            return lps,sampled
+        else:
+            return sampled
+
+    def sample_token_from_latent(self, h1r,return_logp=False,prompt=None):
+        yp = h1r
+
+        ## (B,T,C) tensor
+        logp = self._hidden_to_cats(yp,ret='full',target=None).log_softmax(-1)
+        return self.sample_logp(logp,-1,return_logp)
 
 class DLM40(DLMPrototype):
     def __init__(self,device,config,_=None):
         super().__init__(device,config)
+        self.submodel, self.embed__ = self.get_mingpt_model(config)
+    @property
+    def embed(self):
+        return self.submodel.transformer.wte
+
+    @staticmethod
+    def get_mingpt_model(config):
+        from markov_lm.mingpt.model import GPT
+
         # K = config.kernel_size
         # assert K >=1,config
         E = config.embed_dim
@@ -1778,9 +3418,9 @@ class DLM40(DLMPrototype):
         # ?kernel_size
         D = config.depth
         G = config.graph_dim
+
         # assert K >=1,config
 
-        from markov_lm.mingpt.model import GPT
         model_config = GPT.get_default_config()
         model_config.model_type = None
         model_config.vocab_size = G # openai's model vocabulary
@@ -1789,9 +3429,10 @@ class DLM40(DLMPrototype):
         model_config.n_layer = D
         model_config.n_head = W
         model_config.n_embd = E
-        self.submodel = GPT(model_config)
-        self.embed = self.submodel.transformer.wte
-        self.embed.weight.data.normal_(mean=0.0, std=1E-5)
+        submodel = GPT(model_config)
+        embed = submodel.transformer.wte
+        return submodel,embed
+        # self.embed.weight.data.normal_(mean=0.0, std=1E-5)
 
 class DLM41(DLM40):
     # Prototype):
@@ -2294,7 +3935,7 @@ def mean_notnull(val, target_notnull):
 
     target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
     '''
-    loss =  (val * target_notnull ).sum(-1) / target_notnull.sum(-1)
+    loss =  (val * target_notnull ).sum(-1) / target_notnull.sum(-1).clip(1,None)
     return loss
 
 

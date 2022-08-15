@@ -231,6 +231,9 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
     # conf.batch_size    = 100
     # conf.batch_size    = 5
     conf.task = 'translate-multi30k-de2en-l20'
+    conf.task = 'translate-multi30k-de2en-chardata-l100'
+    # conf.task = 'protein-cath-s35-l100'
+    # conf.task = 'protein-cath-s35-l20'
     # conf.task = 'translate-ptb-l20'
     # conf.task = 'translate-ptb-l100'
     # conf.task = 'translate-wmt14-de2en-50k'
@@ -280,7 +283,6 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
             kernel_size = 400,
             window_size=-1,
             loss_name='0,4,5,7',
-
 
             #
             # window_size= 4,
@@ -365,9 +367,11 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
         # config.__dict__.update(model_dict)
         conf.model = model = conf.lconf.to_model(conf.device).to(conf.device)
         # conf.learning_rate = 0.00001
-        # conf.learning_rate = 0.0001
+        conf.learning_rate = 0.0001
+        # conf.learning_rate = 0.00005
         # conf.learning_rate = 0.001
-        conf.learning_rate = 0.001
+        # conf.learning_rate = 0.001
+        # conf.learning_rate = 0.005
         # conf.learning_rate = 0.01
         return model
 

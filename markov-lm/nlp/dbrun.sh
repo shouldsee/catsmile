@@ -1,1 +1,1 @@
-python3 -mpdb -cc -cq train.py "$@"
+python3 -mpdb -cc train.py "$@"

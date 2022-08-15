@@ -356,18 +356,7 @@ class BertMiddleLayer(EnglishToGermanDataset):
 
 
 
-class Vocab(object):
-    def __init__(self,vocab,offset):
-        self.offset = offset
-        self.i2w = list(sorted(vocab))
-        self.w2i = {w:i+offset for i,w in enumerate(self.i2w)}
-    def __len__(self):
-        return self.i2w.__len__()
-    def tokenize(self,k):
-        return self.w2i[k]
-
-    def wordize(self,i):
-        return self.i2w[i-self.offset]
+from markov_lm.util_html import Vocab
 
 import collections
 
@@ -470,8 +459,10 @@ class WMT14(DeviceDataset):
 
     def src_wordize(self,v):
         return self.src_vocab.wordize(v)
+
     def tgt_wordize(self,v):
         return self.tgt_vocab.wordize(v)
+
     def __len__(self):
         if(self.mode=="test"):
             return self.test_count
