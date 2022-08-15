@@ -1,5 +1,12 @@
 from io import BytesIO
 import base64
+import requests
+import os
+# from tqdm import tdqm
+from tqdm import tqdm
+import shutil
+
+
 def write_png_tag(fig,props=''):
 	with BytesIO() as temp:
 		fig.savefig(temp,format='png')
@@ -25,3 +32,57 @@ def abline(ax,slope, intercept):
 	x_vals = np.array(ax.get_xlim())
 	y_vals = intercept + slope * x_vals
 	ax.plot(x_vals, y_vals, 'r--')
+
+
+class Vocab(object):
+	def __init__(self,vocab,offset):
+		self.offset = offset
+		self.i2w = list(sorted(vocab))
+		self.w2i = {w:i+offset for i,w in enumerate(self.i2w)}
+	def add(self,v):
+		self.i2w.append(v)
+		self.w2i[v] = self.i2w.__len__()-1 + self.offset
+	def __len__(self):
+		return self.i2w.__len__()
+	def tokenize(self,k):
+		return self.w2i[k]
+
+	def wordize(self,i):
+		return self.i2w[i-self.offset]
+
+
+def lazy_if_file_exists(func, argi):
+	def lazy_func(*a,verbose=0):
+		a = list(a)
+		fname = a[argi]
+		if os.path.exists(fname):
+			if verbose>=1:
+				print(f'[skipped]{func!r}{a!r}')
+			pass
+		else:
+			a[argi] = fname+'.temp'
+			ret = func(*a)
+			shutil.move(fname+'.temp',fname)
+		return fname
+
+	return lazy_func
+
+def get_url(url,fname):
+	'''
+	Adapted from SO: https://stackoverflow.com/a/35997720/8083313
+	'''
+	r = requests.get(url, stream=True)
+	with open(fname, 'wb') as f:
+		total_length = int(r.headers.get('content-length'))
+		for chunk in tqdm(r.iter_content(chunk_size=1024), total=(total_length/1024) + 1):
+			if chunk:
+				f.write(chunk)
+				f.flush()
+		# shutil.move(fname+'.temp', fname)
+
+get_url_lazy = lazy_if_file_exists(get_url, 1)
+
+if __name__ == '__main__':
+	fname = 'guppy-0.1.10.tar.gz'
+	# get_url('https://pypi.python.org/packages/source/g/guppy/' + fname, fname)
+	get_url_lazy('https://pypi.python.org/packages/source/g/guppy/' + fname, fname,verbose=1)

@@ -9,8 +9,11 @@ import uvicorn
 
 templates = Jinja2Templates(directory='.')
 
+import torch
 class env(object):
     conf = None
+    CUDA = 0
+    device = torch.device('cpu' if not CUDA else 'gpu:0')
 import markov_lm.service
 from markov_lm.util_html import write_png_tag
 CONFS = {}
@@ -23,8 +26,9 @@ translate-wmt14-de2en-50k
 translate-wmt14-de2en-20k
 translate-mutli30k-de2en-l50
 translate-multi30k-de2en-l20
+translate-multi30k-de2en-chardata-l100
 '''.strip().splitlines():
-        CONFS[k] = markov_lm.service.init_conf(k)
+        CONFS[k] = markov_lm.service.init_conf(k,device=env.device)
     # 'fashion-mnist-compress')
 # translate-german-english
     return
@@ -72,7 +76,7 @@ async def server_error(request, exc):
 import io
 from pprint import pprint
 # @app.route('/fashion_mnist_rec',methods=["GET", "POST"])
-def prepare_target(conf_name, plotter):
+def prepare_target(default_conf_task, plotter):
     '''
     args: plotter  a function with signature `plotter(model, images)`
     '''
@@ -82,8 +86,10 @@ def prepare_target(conf_name, plotter):
         form = await  request.form()
         def _fill(globkey='',model_name='',sql='',params='',**kw):
             buf = io.StringIO()
-            conf = CONFS[conf_name]
-            model = markov_lm.service.get_model(model_name, device=conf.device, strict='--nostrict' not in params)
+            model = markov_lm.service.get_model(model_name, device=env.device, strict='--nostrict' not in params)
+            # conf_name =
+            conf_task = model.meta.get('conf_task', default_conf_task)
+            conf = CONFS[conf_task]
             train_fig = plotter(model, buf = buf, dataset=conf.dataset,**conf.train_data)
             test_fig = plotter(model, buf = buf, dataset=conf.dataset,**conf.test_data)
             # fig = plotter(model, env.conf.test_data['images'], env.conf.test_data['labels'])
@@ -106,6 +112,7 @@ app.route('/fashion_mnist_perp',methods=["GET", "POST"])(prepare_target('fashion
 # app.route('/translation_attention',methods=["GET", "POST"])(prepare_target('translate-wmt14-de2en-5k', markov_lm.service.plot_translation_attention))
 # app.route('/translation_attention',methods=["GET", "POST"])(prepare_target('translate-mutli30k-de2en-l50', markov_lm.service.plot_translation_attention))
 app.route('/translation_attention',methods=["GET", "POST"])(prepare_target('translate-multi30k-de2en-l20', markov_lm.service.plot_translation_attention))
+app.route('/plot_latent',methods=["GET", "POST"])(prepare_target('translate-multi30k-de2en-chardata-l100', markov_lm.service.plot_latent))
 
 
 BUTTONS_HTML = ''
@@ -113,6 +120,7 @@ BUTTONS_HTML = ''
 BUTTONS_HTML += '''<button onclick="submitTarget(`main-form`,`/fashion_mnist_rec`)">GO /fashion_mnist_rec</button>'''
 BUTTONS_HTML +=  '''<button onclick="submitTarget(`main-form`,`/fashion_mnist_perp`)">GO /fashion_mnist_perp</button>'''
 BUTTONS_HTML +=  '''<button onclick="submitTarget(`main-form`,`/translation_attention`)">GO /translation_attention</button>'''
+BUTTONS_HTML +=  '''<button onclick="submitTarget(`main-form`,`/plot_latent`)">GO /plot_latent</button>'''
 # SUBMIT_FASHION_MNIST_REC  = '''<button onclick="submitTarget(`main-form`,`/fashion_mnist_rec`)">GO /fashion_mnist_rec</button>'''
 # SUBMIT_FASHION_MNIST_PERP = '''<button onclick="submitTarget(`main-form`,`/fashion_mnist_perp`)">GO /fashion_mnist_perp</button>'''
 # SUBMIT_TRANSLATION_ATTENTION = '''<button onclick="submitTarget(`main-form`,`/translation_attention`)">GO /translation_attention</button>'''
