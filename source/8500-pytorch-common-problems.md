@@ -70,4 +70,10 @@
 
 
     ```
+- **8506**
+   - 现象: 
+
+   ```TypeError: default_collate: batch must contain tensors, numpy arrays, numbers, dicts or lists; found <class 'markov_lm.util_html.Vocab'>```
+
+   - 原因: 使用`torch.utils.data.Dataset`类,进行多条数据聚合时,使用了不能被pytorch batching自动处理的类
 

@@ -10,7 +10,7 @@
     - 嵌入向量的单位球归一化是一个效果很好的魔法...这可能和相似度的点积形式有关?
     - 在单位球归一化的基础上,LSTM可以取得比5-gram好得多的每词困惑度. 如果不使用单位球归一化,LSTM和5gram基本上一样糟糕.这个现象很令人费解.从概率上讲,不对嵌入向量使用单位球归一化,其概率分布在多维空间是无法归一化的,尽管对于有限的token来说概率可以被强行归一化...可能需要检查一下未归一化模型里嵌入向量的模长是否有异动[TBC]
     - Multi30K-EN pplpt=exp(2.963)=19.3
-    - 对于含有隐变量的自编码模型一定要加噪,否则其损失函数有可能过拟合/无法采样.
+    - 对于含有隐变量的自编码模型一定要加噪,否则其损失函数有可能过拟合/无法采样. VAE框架是一个非常好用的,有理论支撑的加噪方法
 - 背景与动机: 
     - [CATSMILE-9017](./9017-attention)验证了PGM对于构建调试工具的有效性. 但是机器翻译MT没有语言模型LM来得广泛,鲁棒的模型也不多,并不适合做针对transformer架构的深入研究.因此考虑在LM领域开展对于Transformer的架构研究
     - 高效的诊断工具是确保模型健康的前提. 诊断错误会导致没法治病
@@ -21,6 +21,7 @@
     - [TBC,解决字符级别词表的自动生成]
 - 相关篇目:
     - [CATSMILE-9017](./9017-attention) 
+    - [CATSMILE-1019](./1019-vaml) VAE-L2目标
 - CHANGLOG:
     - 20220810 更新GRU相关的DLM46,DLM47消融/变异实验
     - 20220801 INIT
@@ -29,7 +30,7 @@
 
 衡量一个语言模型的目标自然是对数似然 $\log P(s_1,s_2,s_3,\dots,s_T)$ .对于有标准Token化的数据,一般对序列长度进行归一化来进行计算,称之为困惑度 $\log \text{ppl}= - E_{q(\{s\})_b}[{1\over T_b} \log P(s_1,s_2,s_3,\dots,s_T)]$ .可以发现,对于同样的序列和似然,切分Token数量越少,其负困惑度就越高,困惑度就越低. 因此在不同的分词标准上,比较困惑度是没有意义的.
 
-### Perplexity per token 每词困惑度
+### 方法: Perplexity per token 每词困惑度
 
 困惑度本身是一个非线性指标/指数线性指标,其换算应当在对数空间内进行
 
@@ -42,19 +43,52 @@ $$\begin{align}
 \\ & =  \sum_b {T_b  \over  \sum_b T_b }   \log (\text{ppl-per-token})  
 \end{align}$$
 
-我们发现,对于每一个序列,我们可以计算pplpt,然后在合并不同批次/不同序列的时候,需要按照其包含的token数量对于pplpt赋予不同权重再进行加权平均. 如果直接采取平均的方式,就不能很好地处理不同批次间的Token数量差异了.
+我们发现,对于每一个序列,我们可以计算pplpt,然后在合并不同批次/不同序列的时候,需要按照其包含的token数量对于pplpt赋予不同权重再进行加权平均. 如果直接采取平均的方式,就不能很好地处理不同批次间的Token数量差异了. 所以计算每词困惑度的时候,要同时维护词语数量,来随时恢复成总困惑度,确保能在不同令牌化方法之间互相比较.
 
 模型困惑度 from PaperWithCode
 - PTB ppl: <https://paperswithcode.com/sota/language-modelling-on-penn-treebank-word>
 - Wikidata2 ppl: <https://paperswithcode.com/sota/language-modelling-on-wikitext-2>
 
 
-### 迭代语言模型的损失函数 Recursive Language Model
+### 方法: 迭代语言模型的损失函数结构 Recursive Language Model
 
-关于从RNN/AR模型里采样的问题,我们可以先观察一下RNN的损失函数,对于观测序列 $\{s\}_b=\{s_0,s_1,\dots,s_T\}$ 和隐态序列 $\{z\}_b=\{z_0,z_1,\dots,z_T\}$ 
+关于从RNN/AR模型里采样的问题,我们可以先观察一下RNN的损失函数,对于观测序列 $\{s\}_b=\{s_0,s_1,\dots,s_T\}$ 和隐态序列 $\{z\}_b=\{z_0,z_1,\dots,z_T\}$ .我们可以把自回归(Auto Regression)目标理解为一种从左到右的条件概率建模.
 
+$$\begin{align}
+L(m) &= \log P(s_1|s_0,m) 
+\\&+ \log P(s_2| s_1,s_0, m) 
+\\&+ \log P(s_3| s_2, s_1, s_0, m) 
+\\&+ \dots
+\end{align}$$
 
+同时用一个隐态节点来控制生成模型的结构.并且做了一个点估计
 
+$$\begin{align}
+& P(s_t|s_{1:t-1})  
+\\ &= \sum_{z_t} P(s_t|z_t) P(z_t|s_{1:t-1})
+\\ &= \sum_{z_t} P(s_t|z_t) \delta(z_t - v(z_t)|s_{1:t-1}) 
+\\ &= P(s_t|z_t=v(z_t))
+\end{align}$$
+
+同样的,我们可以把隐藏状态的演变写成一个类似的形式.这样允许我们直接考察隐藏状态的演变轨迹. 可以看出,这种RNN模型,实际上利用了观测序列去构造了隐变量本身的离散动力学. 要直接对这个动力学采样,是必须要在 $s_{t-1}$ 上求和的,而且会造成每个隐态状态 $\delta$ 节点,新生成 $|S|$ 个子节点,造成隐态维护非常困难,从而采样过程很困难,因此大家引入了BeamSearch线束搜索的技巧. 
+
+$$\begin{align}
+& P(z_t|z_{t-1})
+\\ &= \sum_{s_{t-1}} P(s_{t-1}|z_{t-1}) P(z_t|s_{t-1},z_{t-1})
+\\ &= \sum_{z_t} P(s_{t-1}|z_{t-1}) \delta (z_t-v(z_t)|s_{t-1},z_{t-1})
+\end{align}$$
+
+### Thoughts:
+
+对于LSTM和GRU来说,可以看到其参数形式是完全无噪的,这令人有点担忧,是否会造成过拟合呢? 参照DDIM和DDPM,其实可以考虑重新对具有同样marginal的概率进行参数化.
+
+对于传统的RNN,一个核心假设是隐态的条件分布可以用点估计表示,这延续了大多数传统神经网络的做法. 事实上,传统HMM也可以写成类似的形式,只要把 $v(z_t)$ 看成是前向算法里的前向变量的归一化就可以了. 我们可以认为,点估计收集的是某个随机变量的参数,其本身并不是什么罪大恶极的近似,只不过其对应的具体概率形式并不如HMM清楚而已.
+
+$$\begin{align}
+P(z_t|s_{1:t-1}) = \delta(z_t - v(z_t)|s_{1:t-1}) 
+\end{align}$$
+
+类似HMM,我们可以把GRU和LSTM的前向过程看成是从前续序列里吸收信息来计算隐态分布的形式.但是这两个形式的heuristic性质都比较强,而且隐态的采样受到词表大小限制,如梗在喉.一个简单的办法是回归到HMM,但是HMM对于长期依赖的处理是糟糕的.所以需要对HMM或者RNN做恰当修改,来确保高效的采样.要同时满足相空间的复杂度,推断的便利性,和采样简易度,其实并不是那么容易.
 
 ### DLM1: 简单的带N-gram模型 
 
@@ -298,6 +332,9 @@ $$
 
 <!-- 目前跑不出啥好看的效果 -->
 
+minGPT有个奇怪的现象,testLoss会小于trainLoss,不知道是不是内部加了Dropout的原因.
+
+
 ### DLM43: GRU-RNN with vector emission
 
 ### DLM44: GRU-RNN with mixture emission
@@ -442,8 +479,16 @@ MGRU的长程关联是受到门控单元控制的,而不是像transformer可以�
 | DLM29,W5   | -1          | 20    | 1.115  | 1.068 |
 | DLM29,W1   | -1          | 20    | 1.119  | 1.081 |
 | DLM47      | -1          | 20    | 1.136  | 1.078 |
-| DLM40,W8,D6| -1          | 20    |        |       |
 | DLM26,E64  | -1          | 20    | 1.167  | 1.105 |
+| DLM40,W8,D6| -1          | 20    | 1.807  |       |
+| DLM61,E128  | -1         | 20    | 2.208  | 1.941 |
+| DLM60,E128  | -1         | 20    | 2.124  | 1.983 |
+| DLM59,E128  | -1         | 20    | 2.516  | 2.046 |
+| DLM57,E128  | -1         | 20    | 2.403  | 2.242 |
+| DLM58,E128  | -1         | 20    | 2.334  | 2.212 |
+| DLM63,E128  | -1         | 20    | 2.439  | 2.261 |
+
+
 
 ### Thoughts: RNN级别的混合模型?
 
@@ -456,7 +501,6 @@ MGRU的长程关联是受到门控单元控制的,而不是像transformer可以�
 在[CATSMILE-1019](./1019-vaml)中我们已经验证过VAE框架的KL损失严格大于等于交叉熵,主要有一步在变分后验上采样的步骤 $E_{q_e(z|x)}$ .对于LSTM或者GRU模型来说,高斯先验并不那么合适,多维伯努利可能会好一点. 不过多维高斯先验倒是可以加入协方差矩阵,多维伯努利的协方差注入可能还没有那么容易.
 
 实验结果: 目前得到的后验都是在原点附近的,没有啥variance...
-
 
 $$
 \begin{align}
@@ -504,6 +548,145 @@ VAE形式的损失函数有点不太稳定,还是先回归到纯粹AE的框架�
 | DLM53,E128,K90 | -1    | 20    | 0.933 | 0.857   |
 | DLM53,E20,K90  | -1    | 20    | 1.507 | 1.434   |
 
+### DLM57: 分布式VAE框架
+
+鉴于DLM51在运行时很不客气地直接把prior fit到了原点上,说明VAE框架多少是能够通过prior参数调试的.接下来我考虑继续增广隐变量的量,给每个位置都放一个隐变量,因此沿用VAE的损失函数,采样后加上 $E_{q_e(z|x)}[ \log w(z) - \log q_e(z|x) ]$ ,同时固定先验和后验方差来确保数值稳定性. 我就不信了这模型还能把所有位置都设成0不成?
+
+实验结果: <del>模型:我真的可以把你所有的隐变量都设成零向量. (orz)</del>
+
+在共享了方差以后,得到了看似正常的lossFunc,换算成log(pplpt)大约有2.2? 目前比AR是差很多,但是多少算是能够快速采样了?
+
+![隐变量from: DLM57,E30,loss=2.217,x=dataPieceIndex*embed_dim,y=time_step](./9020-p6-DLM57-LAT.png)
+
+### DLM58
+
+如果我把 $q_e(z|x)$ 和 $w(z)$ 做某种分解,加入一些相互依赖的链式结构,可能会释放一些自由度出来?采样使用一下随机变量的累加就可以,似然的计算也比较简单. 当然,可能最好是用一下ddpm的variance preserving技巧,不然方差可能会不断累积....
+
+实验结果: 比DLM57糟很多,cumsum可能造成了一些不太好的累计,可能最好用一个running avg试试.
+
+$$
+w(z) = w(z_1|0) w(z_2|z_1) w(z_3|z_2) \cdots w(z_{T-1}|z_{T}) \\
+q_e(z|x) = q_e(z_1|0,x) q_e(z_2|z_1,x) \cdots q_e(z_{T-1}|z_{T},x) 
+$$
+
+### DLM59: DLM57 + 双层GRU编码器 + 双层GRU解码器
+
+继续堆复杂度
+
+### DLM60: DLM57 + 2层GRU编码器 + 2层GRU解码器 + 残差连接
+
+继续堆复杂度
+
+### DLM61: DLM57 + 4层GRU编码器 + 4层GRU解码器 + 残差连接
+
+继续堆复杂度. 从似然损失上来讲,比AR的GRU要差很多(DLM29),但是这个框架可能更适合复现Transformer的效果
+
+### DLM62: DLM57 + TFM编码器 + TFM解码器
+
+结果:Transformer你为什么这么拉???
+
+`translate-multi30k-de2en-chardata-l100 E140 loss 1.543`
+
+```
+样本
+
+log(pplpt):1.5739706754684448
+rand_log(pplpt):1.5739706754684448
+
+[TARGET]: Four guys three wearing hats one not are jumping at the top of a staircase.
+
+[RECONS]: ASsur oan srvar wearing aats aae at are jumping at the tva of a shaircaoe.cAAAAAAAAAAdAgsuiAttn
+
+[RANDOM]: Acvmen in lasem ihhamtranere ler vne lrnnaa rm jumps ihh titting hn a ioaange haadrel holring lhron
+```
+
+`markov_lm/gmm/Checkpoints/-S29-tasktranslate-multi30k-de2en-chardata-l100-shuffle1-graph-dim82-model-nameDLM61-window-size-1-loss-name0,4,5,7-grad-loss-nameKLD-depth1-beta0.0-n-step100-kernel-size90-embed-dim128-p-null0.0001-submodel-name-loglr-3.0_140_1.54346.pkl`
+
+[DONE:RecurrentModel,logpplpt_plot]
+[TBC,ChangeThePriorForVAE]
+
+### 例子: DLM26
+
+![DLM26,LSTM](./9020-p7-DLM26-logpplpt.png)
+
+可以看到RNN模型在预测的时候,在词首产生的困惑度较高,随着词语
+被生成,困惑度逐渐降低.这似乎是自回归模型的共性.
+
+
+```
+log(pplpt):1.0464675426483154
+
+rand_log(pplpt):6.1143951416015625
+
+[TARGET]:|bos|A trendy girl talking on her cellphone while gliding slowly down the street.
+
+[RECONS]:uAnloiedo serl lhlking tn tir llllphone,liile teoving dpepes tiwn the snreet."rrrrwrwuwwiyyuupriiiuu
+
+[RANDOM]:|bos|A trendy |p|mopical furnit musicy SXarty puck firrwyld.".Y puck.".A mop.Amp.".".Sonted.".".Phardoo..ph
+```
+
+### DLM66: 要么把编码器直接固定成简单的扩散?
+
+$$
+\begin{align}
+&-D_{KL}(p_{data}(x,z)||q(x,z)) 
+\\ &= -D_{KL}(p_{data}(x)q_e(z|x)||q_r(x|z)w(z)) 
+\\
+&= c + E_{p_{data}(x)} \left [ E_{q_e(z|x)}[ \log q_r(x|z)] - D_{KL}( q_e(z|x)  || w(z) )  \right ]\\
+&= c + E_{p_{data}(x)} \left [ E_{q_e(z|x)}[ \log q_r(x|z)- \log q_e(z|x) + \log w(z) ]\right ]\\
+\end{align}
+$$
+
+用一个共享的高斯核将概率扩散到空间中去
+
+对于一个没有使用重参数化
+
+实验结果: 类似于前述的VAE
+
+### DLM67,DLM68,DLM69: 层级化的生成模型 Hierarchical Variational Language model
+
+观察到RNN模型善于解决自回归问题,而自回归又同时在word level和character level发生,于是我们就可以问,能否用一个层级化的模型来描述语言的生成? aka,生成过程是,我们先选定一个词,然后再把词语拷贝到下一段buffer里. 根据VAE目标,我们可以搭配一个编码过程,来找到生成过错边际负KL的下界. 
+
+生成/解码过程: 先生成元组序列 $\{(w_i,l_i)\}$ , 然后用 $l_i$ 确定的对齐模式,填充成 $\{c_i\}$
+
+编码过程: 从观测到的序列 $\{c_i\}$ 中,采样 $\{(w_i,l_i)\}$ 
+
+编码过程很明显是RNN所擅长的目标,生成过程的第一步应该也可以用RNN实现,第二步可以用简单的发射分布.
+
+考虑比较极端的情况,元组序列生成的都是长度为1的序列,那么生成模型退化成一个简单RNN.在编码的时候,也就不会预测任何的空白令牌(-),这个时候拷贝矩阵退化成简单的Identity操作. 所以训练的时候要确保底层模型更多地发射空白令牌,来充实 $l_i$ 词语长度.
+
+考虑我们的生成模型,如果出现一个misalignment,会引起比较大的损失波动,不过只要编码器靠谱,这应当不是太糟糕的问题
+
+bug1: 直接采样的话,pytorch并不能计算出采样算子对应的分数
+
+bug2: 直接训练自编码都没啥太好的效果,看来离散编码对于连续模型来说还是不太好处理
+
+Application: Text Summarization?
+
+### Refs:
+
+层次模型似乎不是很多
+
+- <https://arxiv.org/abs/1507.04808.pdf>
+
+VAE
+
+- Diverse Text Generation via Variational Encoder-Decoder Models with Gaussian Process Priors <https://arxiv.org/abs/2204.01227.pdf>
+
+
+- Pointer Generator For summarization <https://aclanthology.org/P17-1099.pdf
+
+- Hierarchical Representation in Neural Language Models: Suppression and Recovery of Expectations <http://aclanthology.lst.uni-saarland.de/W19-4819.pdf>
+
+- Stochastic RNN SRNN: Sequential Neural Models with Stochastic Layers <https://arxiv.org/abs/1605.07571>
+
+### DLM70: DLM57的基础上改进
+
+DLM67/68/69 实验表明离散编码序列上的采样是比较困难的,所以考虑直接用一个RNN替代高斯作为先验.这个做法有点类似于SRNN
+
+
+
+DLM57这个模型或者说经典的repar
 
 ### Thoughts
 
@@ -535,3 +718,6 @@ $$
 - GBZhou2016 MGU: Minimal Gated Unit for Recurrent Neural Networks <https://arxiv.org/abs/1603.09420>
 
 - Heck2017 More MGU: Simplified Minimal Gated Unit Variations for Recurrent Neural Networks. <https://arxiv.org/abs/1701.03452>
+
+- WYDu2022: Diverse Text Generation via Variational Encoder-Decoder Models with Gaussian Process Priors <https://arxiv.org/abs/2204.01227.pdf>
+    - 这篇跑了一个编码器,然后用rbf kenernel加了一个噪声.
