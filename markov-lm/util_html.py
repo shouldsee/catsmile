@@ -7,6 +7,42 @@ from tqdm import tqdm
 import shutil
 
 
+
+'''
+Object level methods
+'''
+def register_object_method(self):
+    '''
+    将某个动态方法挂载到一个object上
+    '''
+    def decorator(method):
+        def wrapper(*args, **kwargs):
+            return method(self,*args, **kwargs)
+        setattr(self, method.__name__, wrapper)
+        return wrapper
+    return decorator
+
+class my_cls():
+    def __init__(self,i ):
+        if i==1:
+            @register_object_method(self)
+            def func(self,x):
+                return -x
+        elif i==2:
+            @register_object_method(self)
+            def func(self,x):
+                return x**2
+        else:
+            assert 0
+    def __call__(self, x):
+        v = self.func(x)
+        return v
+
+if __name__=='__main__':
+    print(my_cls(1)(2))
+    print(my_cls(2)(2))
+
+
 def write_png_tag(fig,props=''):
 	with BytesIO() as temp:
 		fig.savefig(temp,format='png')

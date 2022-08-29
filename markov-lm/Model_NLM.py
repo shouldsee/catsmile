@@ -8,7 +8,7 @@ from markov_lm.Model_gmm import AbstractLayerConfig
 # from transformers.models.bert.modeling_bert import BertLayer,BertConfig
 from markov_lm.nlp.model_seq2seq import Seq2SeqWithAttention
 from markov_lm.Model_rnn import GRUMinimal,RNNConfig
-
+from markov_lm.util_html import register_object_method
 
 class Seq2SeqWithNoAttention(Seq2SeqWithAttention):
     # USE_ATTENTION = 0
@@ -46,10 +46,13 @@ def get_kperm_tensor(k,device=None,dtype=torch.long):
     return torch.tensor( list(itertools.permutations(range(k))),device=device,dtype=dtype)
 
 
+
+
 class DLMPrototype(LanguageModelPrototype):
     '''
     Use autoregression objective
     '''
+    _custom_hidden_to_cats = 0
     @staticmethod
     def std_norm(v, dim,keepdims=True):
         v = v/(1E-10+v.std(dim=dim,keepdims=keepdims))
@@ -79,6 +82,65 @@ class DLMPrototype(LanguageModelPrototype):
         #### share embed usually works
         # self.vocab      = nn.Linear(embed_dim,graph_dim,).to(self.device)
         self.embed      = nn.Embedding(graph_dim,embed_dim,).to(self.device)
+        self._init_attach_method()
+
+    def _init_attach_method(self):
+        '''
+        Dynamically attaches method to new object to allows easier code sharing
+        '''
+        # self._hidden_to_cats()
+        CLS_NAME = self.__class__.__name__
+        '''
+        Setting _hidden_to_cats()
+        '''
+        if CLS_NAME in 'DLM23 DLM43'.split():
+            @register_object_method(self)
+            def _hidden_to_cats(self, yp, target, ret):
+                '''
+                Convert hidden vector to explicit categorical distribution
+                '''
+                # (B, T, C)
+                lyp = self.unembed(yp).log_softmax(-1)
+                lp =  torch.gather(lyp [:,:,:], index=target[:,:,None],dim=-1)[:,:,:]
+                if ret=='full':
+                    raise NotImplementedError
+                    # lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+                    # return lp
+                    # pass
+                elif ret =='target':
+                    return lp
+                else:
+                    raise NotImplementedError(f'{ret}')
+
+        elif CLS_NAME in ('DLM26 DLM28 DLM29 DLM44 DLM46 DLM47 DLM50 DLM51 DLM52 DLM53 DLM54 DLM55 DLM56 DLM57 DLM58 DLM59 DLM60 DLM61 DLM62 DLM63 '
+            'DLM64 DLM65 DLM66 DLM67 DLM68 DLM69 DLM70 DLM71 DLM72').split():
+            @register_object_method(self)
+            def _hidden_to_cats(self, yp, target, ret):
+                # CLS_NAME = self.__class__.__name__
+                ## (B, T ,K )
+                kp = self.embed_to_logp(yp).log_softmax(-1)
+                yp = self.unembed( self.std_norm(self.k_vector,-1))
+                yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+
+                # if class
+                if ret=='full':
+                    lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+                    return lp
+
+                elif ret =='target':
+                    # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+                    model_w = yp.T[target]
+
+                    ## yp (K, C)
+                    ## kp (B,T,K)
+                    lp = (model_w + kp)
+                    return lp
+                else:
+                    raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+        elif self._custom_hidden_to_cats:
+            pass
+        else:
+            raise NotImplementedError( CLS_NAME )
 
     def unembed(self,x):
         y = x.matmul(self.embed.weight.T)
@@ -94,8 +156,11 @@ class DLMPrototype(LanguageModelPrototype):
         return self._loss(item, 'loss')
 
     @staticmethod
-    def sample_logp(lp,dim,return_logp=False):
-        xp = lp.softmax(dim)
+    def sample_logp(lp,dim,return_logp=False, is_log=True):
+        if is_log:
+            xp = lp.softmax(dim)
+        else:
+            xp = lp
         # p = lp.log_softmax(dim).exp()
         '''
         Sampling bug....
@@ -154,6 +219,9 @@ class DLMPrototype(LanguageModelPrototype):
 
         att = torch.ones((B,1,1),device=self.device)
         # (P,W)
+
+
+
         if CLS_NAME  in  'DLM2 DLM5'.split():
             '# Calc loss with mixture model directrly'
             '(B,T,E)'
@@ -281,55 +349,544 @@ class DLMPrototype(LanguageModelPrototype):
             prior = 0.
             prior_sum = 0.
 
+            def s(xx):
+                if xx.isnan().any():
+                    import pdb; pdb.set_trace()
+
             if 1:
 
                 '''
                 parse to get a state distrib
                 '''
-                h1, _ = self.embed_to_latent(target_embed)
+                ### (B,T,E)
+                encd, h1 = self.encode(target_embed,h0)
 
                 ### (1,T,E,K)
                 '''
                 Sample a sequence (w_i,l_i) from parser
+                First sample whether to skip.
+                Then for the none-null postion, sample the actual state (maybe just uses the projected context vector?).
                 '''
+                self.encode
+                self.e_to_null
+                self.e_to_token
+                self.w_embed
+                self.w_unembed
+                self.prior_logp
+                self.H
+                self.h_matrix
+                # (H, E, E)
+
+
 
                 ### (B,T,W)
-                z_lp = (self.std_norm(h1,-1)@self.h_to_z).log_softmax(-1)
 
-                idx     = self.sample_logp(z_lp, return_logp=False, dim=-1)
+                ### two state gate.. controls whether the vector is passed into the prior lstm.
+                ### it seeems the prior lstm does not needs to emit discrete sequence?
+                ### to be safe, uses discrete seq to model prior seq for now.
+
+                encd = self.std_norm(encd,-1)
+
+                lp_is_skip = self.e_to_null(encd).log_softmax(-1)
+                lp_token   = self.e_to_token(encd).log_softmax(-1)
+
+                lp_is_skip_s, idx_is_skip = self.sample_logp( lp_is_skip, return_logp=True, dim=-1)
+                lp_token_s,   idx_token = self.sample_logp( lp_token[:,:,:-1], return_logp=True, dim=-1)
+                idx_token = idx_token + 1
+
+                idx_is_token = (1-idx_is_skip).bool()
+                idx_emit     = idx_is_token * idx_token
+                ## (B,T,)
+
+                ### if no token emitted, then omit the logp required to encode token
+                lp_emit_s = idx_is_token * ( (1E-10+1-lp_is_skip_s.exp()).log() + lp_token_s ) + (~idx_is_token) * lp_is_skip_s
+                lp_emit_s, idx_emit
+                ### ends sample generation
+
+
+                lp_emit_s_embed = self.w_embed(idx_emit)
+
+                # target_embed_parent =
+                _E = lp_emit_s_embed.shape[2]
+                lp_emit_s_embed_parent =  torch.cat([torch.ones((B,1,_E),device=self.device), lp_emit_s_embed],dim=1)[:,:-1]
+                lp_emit_s_pred, _ = self.prior_logp(self.std_norm(lp_emit_s_embed_parent  ,-1), h0 )
+                # lp_emit_s_pred, _ = self.prior_logp(self.std_norm(lp_emit_s_embed_parent * idx_is_token.unsqueeze(-1) + ~idx_is_token.unsqueeze(-1) * torch.ones_like(lp_emit_s_embed_parent,device=self.device) ,-1), h0 )
+                # lp_emit_s_pred, _ = self.prior_logp(lp_emit_s_embed_parent, h0 )
+
+                s(lp_emit_s_embed_parent)
+                # s(lp_emi)
+                # s(lp_emit_s_embed_parent)
+                ## (P, E)
+                _x  =  lp_emit_s_pred[idx_is_token,:]
+                unb = self.w_unembed(self.std_norm(_x,-1)).log_softmax(-1)
+
+                # unb = self.std_norm(_x,-1) @ (self.std_norm(self.w_embed.weight,-1).T)
+                # unb =unb.log_softmax(-1)
+                # s(unb)
+                ## (P,)
+                prior_lp = torch.gather(unb,index=idx_emit[idx_is_token][:,None],dim=-1).squeeze(-1)
+                # import pdb; pdb.set_trace()
+                _x = torch.zeros_like(idx_is_token,device=self.device,dtype=torch.float)
+                lp_prior = _x.masked_scatter_(idx_is_token,prior_lp)
+                # xx = lp_prior
+                # lp_prior = prior_lp
+
+                'Calculate decode proba given a sequence and a convolution expansion'
                 '''
-                calculate score as log_p_decode(sampled_code) - log_p_encode(sampled_code) + log_p_prior(sampled_code)
+                needs to calculates w,delta for each character position...
+                seems we need a for-loop here.. needs fast impl.
+
+                forces to backfill from a token pos?
+
+                if is_token, then memorize token, empty counter,
+                print token
+                print counter
+                inc counter
+                step
                 '''
 
-                post_lp = torch.gather(z_lp,index=idx.unsqueeze(-1),dim=-1).squeeze(-1)
+                '''
+                H: maximum word length
+                '''
+                H = self.H
+                # H = self.config.H
+                tok= torch.ones((B,1),device=self.device,dtype=torch.long)
+                ct = torch.zeros((B,1),device=self.device, dtype=torch.long) - 1
 
-                ## (1, T, W)
-                z_lp_p  = self.z_prior.log_softmax(-1)[None]
-                prior_lp= torch.gather(z_lp_p.repeat((B,1,1)), index=idx.unsqueeze(-1), dim=-1).squeeze(-1)
+                tok_arr= torch.zeros((B,T),device=self.device,dtype=torch.long)
+                ct_arr = torch.zeros((B,T),device=self.device,dtype=torch.long)
+                for t in range(T):
+                    t= T-1-t
+                    is_tok = idx_is_token[:,t:t+1]
+                    tok = is_tok * idx_token[:,t:t+1] + (~is_tok) * tok
+                    ct  = is_tok * 0 + (~is_tok)*(ct+1)
+                    tok_arr[:,t:t+1] = tok
+                    ct_arr[:,t:t+1] = ct
+                ### then gets
+                ct_arr = ct_arr.clip(None, H - 1)
 
-                # prior = prior + prior_lp - post_lp
+                ### uses h matrix to score between char and word
+                # (H, E, E)
+                # (B, T, E, E)
+                # import pdb; pdb.set_trace()
+                head_left = self.h_matrix[ct_arr] @ self.std_norm(self.w_embed(tok_arr),-1).unsqueeze(-1)
+                lps = self.unembed( head_left.squeeze(-1) ).log_softmax(-1)
+                lps = torch.gather(lps,index=target.unsqueeze(-1),dim=-1).squeeze(-1)
+                lp_decode = lps
 
-                kl = (z_lp.exp() * (z_lp_p - z_lp)).sum(-1)
-                prior = prior + kl
-
-                # h1r = self.z_vector[idx]
-                # h1r = self.std_norm(self.z_vector,-1)[idx]
-                yp = self.latent_to_emittor(h1r)
-
-                self._temp = dict(h1r=h1r,idx=idx,z_lp=z_lp,)
-                if ret=='encode': return z_lp.softmax(-1)
+                # lp = lp_decode + lp_prior - lp_emit_s
+                lp = lp_decode + 1* lp_prior - 0 * lp_emit_s
+                # lp = lp_decode + 1* lp_prior + 1 * lp_emit_s
+                self.last = dict(lp_decode=lp_decode,lp_prior=lp_prior,lp_emit_s = lp_emit_s)
 
 
-            lp = self._hidden_to_cats(yp,ret='target',target=target)
+                # if ret=='encode': return encd
+                # if ret=='encode': return tok_arr
+                if ret=='encode': return lp_emit_s_embed
 
 
-            att = lp.softmax(dim=2).transpose(2,1)
-            lp  = lp.logsumexp(-1)
+            att = torch.stack([lp_decode,lp_prior,lp_emit_s],dim=-1)
 
+            # print(att.mean(dim=(0,1)))
+            # # if att.mean(dim=(0,1)).min()<-20:
+            # if att.mean(dim=(0,1))[-1]<-20:
+            #     import pdb; pdb.set_trace()
+
+            lp = lp
+
+            # lp = self._hidden_to_cats(yp,ret='target',target=target)
+            # att = lp.softmax(dim=2).transpose(2,1)
+            # lp  = lp.logsumexp(-1)
             # logp_sum = (lp * target_notnull).sum(dim=1)
             logp_sum = ((lp + prior) * target_notnull).sum(dim=1)
             logp_sum = logp_sum + prior_sum
             # logp_sum = logp_sum + prior
+
+
+        elif CLS_NAME in 'DLM68 DLM69'.split():
+            '''
+            This branch predicts a discrete mixer instead of a vector to speeds up final softmax
+            '''
+
+            target_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device),target_embed],dim=1)[:,:-1]
+            target_embed_parent = target_embed_parent/target_embed_parent.std(dim=1,keepdims=True)
+
+            h0 = torch.ones([1,B,E],device=self.device)
+            c0 = torch.ones([1,B,E],device=self.device)
+
+            prior = 0.
+            prior_sum = 0.
+
+            def s(xx):
+                if xx.isnan().any():
+                    import pdb; pdb.set_trace()
+
+            if 1:
+
+                '''
+                parse to get a state distrib
+                '''
+                ### (B,T,E)
+                encd, h1 = self.encode(target_embed,h0)
+
+                ### (1,T,E,K)
+                '''
+                Sample a sequence (w_i,l_i) from parser
+                First sample whether to skip.
+                Then for the none-null postion, sample the actual state (maybe just uses the projected context vector?).
+                '''
+                self.encode
+                self.e_to_null
+                self.e_to_token
+                self.w_embed
+                self.w_unembed
+                self.prior_logp
+                self.H
+                self.h_matrix
+                # (H, E, E)
+                ### (B,T,W)
+
+                ### two state gate.. controls whether the vector is passed into the prior lstm.
+                ### it seeems the prior lstm does not needs to emit discrete sequence?
+                ### to be safe, uses discrete seq to model prior seq for now.
+
+                encd = self.std_norm(encd,-1)
+
+                lp_is_skip = self.e_to_null(encd).log_softmax(-1)
+                lp_token   = self.e_to_token(encd).log_softmax(-1)
+
+                lp_is_skip_s, idx_is_skip = self.sample_logp( lp_is_skip, return_logp=True, dim=-1)
+                lp_token_s,   idx_token = self.sample_logp( lp_token[:,:,:-1], return_logp=True, dim=-1)
+                idx_token = idx_token + 1
+
+                idx_is_token = (1-idx_is_skip).bool()
+                idx_emit     = idx_is_token * idx_token
+                ## (B,T,)
+
+                ### if no token emitted, then omit the logp required to encode token
+                lp_emit_s = idx_is_token * ( (1E-10+1-lp_is_skip_s.exp()).log() + lp_token_s ) + (~idx_is_token) * lp_is_skip_s
+                lp_emit_s, idx_emit
+                ### ends sample generation
+
+
+                lp_emit_s_embed = self.w_embed(idx_emit)
+
+                # target_embed_parent =
+                _E = lp_emit_s_embed.shape[2]
+                lp_emit_s_embed_parent =  torch.cat([torch.ones((B,1,_E),device=self.device), lp_emit_s_embed],dim=1)[:,:-1]
+                lp_emit_s_pred, _ = self.prior_logp(self.std_norm(lp_emit_s_embed_parent  ,-1), h0 )
+                # lp_emit_s_pred, _ = self.prior_logp(self.std_norm(lp_emit_s_embed_parent * idx_is_token.unsqueeze(-1) + ~idx_is_token.unsqueeze(-1) * torch.ones_like(lp_emit_s_embed_parent,device=self.device) ,-1), h0 )
+                # lp_emit_s_pred, _ = self.prior_logp(lp_emit_s_embed_parent, h0 )
+
+                s(lp_emit_s_embed_parent)
+                # s(lp_emi)
+                # s(lp_emit_s_embed_parent)
+                ## (P, E)
+                _x  =  lp_emit_s_pred[idx_is_token,:]
+                unb = self.w_unembed(self.std_norm(_x,-1)).log_softmax(-1)
+
+                # unb = self.std_norm(_x,-1) @ (self.std_norm(self.w_embed.weight,-1).T)
+                # unb =unb.log_softmax(-1)
+                # s(unb)
+                ## (P,)
+                prior_lp = torch.gather(unb,index=idx_emit[idx_is_token][:,None],dim=-1).squeeze(-1)
+                # import pdb; pdb.set_trace()
+                _x = torch.zeros_like(idx_is_token,device=self.device,dtype=torch.float)
+                lp_prior = _x.masked_scatter_(idx_is_token,prior_lp)
+                # xx = lp_prior
+                # lp_prior = prior_lp
+
+                'Calculate decode proba given a sequence and a convolution expansion'
+                '''
+                needs to calculates w,delta for each character position...
+                seems we need a for-loop here.. needs fast impl.
+
+                forces to backfill from a token pos?
+
+                if is_token, then memorize token, empty counter,
+                print token
+                print counter
+                inc counter
+                step
+                '''
+
+                '''
+                H: maximum word length
+                '''
+                H = self.H
+                # H = self.config.H
+                tok= torch.ones((B,1),device=self.device,dtype=torch.long)
+                ct = torch.zeros((B,1),device=self.device, dtype=torch.long) - 1
+
+                tok_arr= torch.zeros((B,T),device=self.device,dtype=torch.long)
+                ct_arr = torch.zeros((B,T),device=self.device,dtype=torch.long)
+                for t in range(T):
+                    t= T-1-t
+                    is_tok = idx_is_token[:,t:t+1]
+                    tok = is_tok * idx_token[:,t:t+1] + (~is_tok) * tok
+                    ct  = is_tok * 0 + (~is_tok)*(ct+1)
+                    tok_arr[:,t:t+1] = tok
+                    ct_arr[:,t:t+1] = ct
+                ### then gets
+                ct_arr = ct_arr.clip(None, H - 1)
+
+                ### uses h matrix to score between char and word
+                # (H, E, E)
+                # (B, T, E, E)
+                # import pdb; pdb.set_trace()
+                head_left = self.h_matrix[ct_arr] @ self.std_norm(self.w_embed(tok_arr),-1).unsqueeze(-1)
+                lps = self.unembed( head_left.squeeze(-1) ).log_softmax(-1)
+                lps = torch.gather(lps,index=target.unsqueeze(-1),dim=-1).squeeze(-1)
+                lp_decode = lps
+
+
+                # if ret=='encode': return encd
+                # if ret=='encode': return tok_arr
+                if ret=='encode': return lp_emit_s_embed
+
+
+            lp_decode = lp_decode * target_notnull
+
+            att = torch.stack([lp_decode,lp_prior,lp_emit_s],dim=-1)
+
+            'branch'
+            if CLS_NAME in 'DLM68'.split():
+                lpv = lp_decode + 1* lp_prior - 1 * lp_emit_s
+                grad_lp  =  lpv + lpv.detach() * lp_emit_s
+                v_lp = lpv
+
+                self.last = dict(lp_decode=lp_decode,lp_prior=lp_prior,lp_emit_s = lp_emit_s)
+
+
+                logp_sum = ((v_lp + prior) * target_notnull).sum(dim=1)
+                logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+                v_loss = -logp_per_token
+
+                logp_sum = ((grad_lp + prior) * target_notnull).sum(dim=1)
+                logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+                grad_loss = -logp_per_token
+
+                if ret=='forward':
+                    return v_loss,att
+                elif ret in 'loss'.split():
+                    return v_loss
+                elif ret in 'grad_loss'.split():
+                    return grad_loss
+                elif ret=='loss_per_loc':
+                    return -v_lp,target_notnull
+                else:
+                    raise NotImplementedError(f'''{ret} for ._loss()''')
+
+            elif CLS_NAME in 'DLM69'.split():
+                '''
+                Calculation must be done at sequence level
+                '''
+                lpv = lp_decode * target_notnull + 0* lp_prior - lp_emit_s
+                lpv_sum = lpv.sum(1)
+                lps_sum = lp_emit_s.sum(1)
+                v_lp = lpv_sum[:,None]
+                grad_lp = (lpv_sum + lpv_sum.detach()*lps_sum)[:,None]
+
+
+                self.last = dict(lp_decode=lp_decode,lp_prior=lp_prior,lp_emit_s = lp_emit_s)
+
+                v_loss = - v_lp.squeeze(-1) / T
+                grad_loss = - grad_lp.squeeze(-1) / T
+                print(att.mean((0,1)))
+
+                # logp_sum = ((v_lp + prior) * target_notnull).sum(dim=1)
+                # logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+                # v_loss = -logp_per_token
+                #
+                # logp_sum = ((grad_lp + prior) * target_notnull).sum(dim=1)
+                # logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+                # grad_loss = -logp_per_token
+
+                if ret=='forward':
+                    return v_loss,att
+                elif ret in 'loss'.split():
+                    return v_loss
+                elif ret in 'grad_loss'.split():
+                    return grad_loss
+                elif ret=='loss_per_loc':
+                    return -v_lp,target_notnull
+                else:
+                    raise NotImplementedError(f'''{ret} for ._loss()''')
+            else:
+                raise NotImplementedError(f'''{CLS_NAME}''')
+
+        elif CLS_NAME in 'DLM70 DLM71 DLM72'.split():
+            '''
+            This branch predicts a discrete mixer instead of a vector to speeds up final softmax
+            '''
+
+            target_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device),target_embed],dim=1)[:,:-1]
+            target_embed_parent = target_embed_parent/target_embed_parent.std(dim=1,keepdims=True)
+
+            h0 = torch.ones([1,B,E],device=self.device)
+            c0 = torch.ones([1,B,E],device=self.device)
+
+            prior = 0.
+            prior_sum = 0.
+            # (B, T, E)
+            if 1:
+
+                '''
+                Encode right to left, decode left to right
+                '''
+                h1, _ = self.embed_to_latent(target_embed)
+
+                '''
+                Needs to sample from h1
+                '''
+
+                mu_p   = self.h_prior[0:1]
+                beta_p = self.h_prior[1:2].exp() * 10
+                # if self.meta.get('epoch',0)<=5:
+                #     prior_w = 0.
+                # else:
+                prior_w = 1.
+                mu   = h1 @self.h_to_mu
+                # mu   = h1
+                beta = self.h_post[1:2].exp() * 10
+
+                '''
+                Resampling
+                '''
+                h1r = torch.normal( 0, 1, mu.shape, device=self.device) / beta + mu
+                yp = self.latent_to_emittor(self.gain(h1r))
+
+
+                # import pdb; pdb.set_trace()
+                '''
+                Calculate extra terms due to posterior correction from prior dist
+                '''
+                if CLS_NAME in 'DLM70'.split():
+                    lp_prior  = ( -0.5*((h1r - mu_p)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi) ).sum(-1)
+                elif CLS_NAME in 'DLM71'.split():
+
+                    h1rp = torch.cat([torch.ones((B,1,E),device=self.device),h1r[:,:-1]],dim=1)
+                    h1rp = self.std_norm(h1rp,-1)
+                    h1ro,_ = self.rnn_prior(h1rp,h0)
+                    mu_p = h1ro
+
+                    # h1rp = torch.cat([mu_p[:,0:1].repeat((B,1,1)),h1r[:,:-1]],dim=1)
+                    # mu_p= h1rp
+                    # beta_p = beta_p
+
+                    lp_prior  = ( -0.5*((h1r - mu_p)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi) ).sum(-1)
+                elif CLS_NAME in 'DLM72'.split():
+
+                    h1rp = torch.cat([torch.ones((B,1,E),device=self.device),h1r[:,:-1]],dim=1)
+                    ### (B, T, E, W)
+                    h1rph = torch.tensordot( h1rp,self.e_to_we,1)
+                    # h1rph
+
+                    # h1rp = self.std_norm(h1rp,-1)
+                    # h1ro,_ = self.rnn_prior(h1rp,h0)
+                    # mu_p = h1ro
+                    W = self.config.window_size
+                    beta_p = beta_p.ravel()[0]
+                    # lp_prior  = ( -0.5*((h1r.unsqueeze(-1) - h1rph )*beta_p.unsqueeze(-1)).square() + beta_p.log() - 0.5 * math.log(2*math.pi) ).sum(-1)
+                    lp_prior  = ( -0.5*((h1r.unsqueeze(-1) - h1rph )*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi))
+                    # att = lp_prior.
+                    lp_prior =  (math.log(1./W) + lp_prior.sum(-2))
+                    att = lp_prior.softmax(-1)
+                    lp_prior = lp_prior.logsumexp(-1)
+
+                    # if ret=='encode': return att
+                    # if ret=='encode': return
+                    if ret=='encode': return h1r * target_notnull.unsqueeze(-1)
+
+                else:
+                    raise NotImplementedError
+                    # -0.5 * (h1ro - h1r
+
+                lp_encode = ( -0.5*((h1r - mu)*beta).square() + beta.log() - 0.5 * math.log(2*math.pi) ).sum(-1)
+
+                # if ret=='encode': return mu * target_notnull.unsqueeze(-1)
+                if ret=='encode': return h1r * target_notnull.unsqueeze(-1)
+
+            lp_decode = self._hidden_to_cats(yp,ret='target',target=target)
+            lp_decode = torch.gather(lp_decode,index=target.unsqueeze(-1),dim=-1).squeeze(-1)
+            # lps = lp_decode * target_notnull + lp_prior - lp_encode
+            '''
+            Strictly speaking the nodes are not conditionally independent in rnn prior,
+            '''
+
+
+            lpv = lp_decode * target_notnull + 1* lp_prior - 1 * lp_encode
+            grad_lp  =  lpv + lpv.detach() * lp_encode
+            v_lp = lpv
+
+            att = torch.stack([lp_decode*target_notnull,lp_prior,lp_encode],dim=-1)
+            att = att *target_notnull.unsqueeze(-1)
+            if getattr(self,'debug',0)>=1:
+                print(f'''{beta.mean():.3f} {beta_p.mean():.3f}''' )
+                print(att.mean((0,1)))
+
+
+            self.last = dict(lp_decode=lp_decode,lp_prior=lp_prior,lp_encode = lp_encode)
+
+            logp_sum = ((v_lp + prior) * target_notnull).sum(dim=1)
+            logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+            v_loss = -logp_per_token
+
+            logp_sum = ((grad_lp + prior) * target_notnull).sum(dim=1)
+            logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+            grad_loss = -logp_per_token
+
+            if ret=='forward':
+                return v_loss,att
+            elif ret in 'loss'.split():
+                return v_loss
+            elif ret in 'grad_loss'.split():
+                return grad_loss
+            elif ret=='loss_per_loc':
+                return -v_lp,target_notnull
+            else:
+                raise NotImplementedError(f'''{ret} for ._loss()''')
+
+
+
+        elif CLS_NAME in 'DLM28'.split():
+            '''
+            This branch predicts a discrete mixer instead of a vector to speeds up final softmax
+            '''
+
+            target_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device),target_embed],dim=1)[:,:-1]
+            target_embed_parent = target_embed_parent/target_embed_parent.std(dim=1,keepdims=True)
+
+            h0 = torch.ones([1,B,E],device=self.device)
+            c0 = torch.ones([1,B,E],device=self.device)
+
+            prior = 0.
+            prior_sum = 0.
+
+            yp, h1 = self.rnn(target_embed_parent, h0)
+            yp = yp / yp.std(dim=-1, keepdims=True)
+            if ret=='encode': return yp
+
+
+
+            lp = self._hidden_to_cats(yp,ret='target',target=target)
+
+            att = lp.softmax(dim=2).transpose(2,1)
+            lp  = lp.logsumexp(-1)
+            # logp_sum = (lp * target_notnull).sum(dim=1)
+            logp_sum = ((lp + prior) * target_notnull).sum(dim=1)
+            logp_sum = logp_sum + prior_sum
+            # logp_sum = logp_sum + prior
+
+
+            if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+                wp = self.w_init_logp.log_softmax(0)[None].repeat((B,1,1)).reshape((B*W,))
+                ## (BW, 1)
+                logp_sum = logp_sum + wp
+                logp_sum = logp_sum.reshape((B,W)).logsumexp(-1)
+                target_notnull = target_notnull.reshape((B,W,T))[:,0]
+
+
 
 
 
@@ -356,6 +913,7 @@ class DLMPrototype(LanguageModelPrototype):
                 yp, (h1,c1) = self.rnn(target_embed_parent,(h0,c0))
                 yp = yp / yp.std(dim=-1, keepdims=True)
                 if ret=='encode': return yp
+
 
 
             elif CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
@@ -450,7 +1008,6 @@ class DLMPrototype(LanguageModelPrototype):
 
 
                 if ret=='encode': return mu
-
 
 
             elif CLS_NAME in 'DLM66'.split():
@@ -721,10 +1278,8 @@ class DLMPrototype(LanguageModelPrototype):
 
             lp = self._hidden_to_cats(yp,ret='target',target=target)
 
-
             att = lp.softmax(dim=2).transpose(2,1)
             lp  = lp.logsumexp(-1)
-
             # logp_sum = (lp * target_notnull).sum(dim=1)
             logp_sum = ((lp + prior) * target_notnull).sum(dim=1)
             logp_sum = logp_sum + prior_sum
@@ -987,7 +1542,7 @@ class DLMPrototype(LanguageModelPrototype):
             lp  = lp.logsumexp(-1)
             logp_sum = (lp * target_notnull).sum(dim=1)
 
-        elif CLS_NAME=='DLM28':
+        elif CLS_NAME=='DLM73':
             ### padding one
             ## (K, E) -> (K, C)
             yp = self.unembed(self.std_norm(self.k_vector,-1)).log_softmax(-1)
@@ -1399,6 +1954,7 @@ class DLMPrototype(LanguageModelPrototype):
             return loss,att
         elif ret in 'loss grad_loss'.split():
             return loss
+            # return -logp_sum
         # elif ret=='grad_loss':
         #     return loss
         elif ret=='loss_per_loc':
@@ -2037,7 +2593,11 @@ class DLM18(DLMPrototype):
         plt.suptitle('')
         buf.write(write_png_tag(fig))
 
-class DLM28(DLMPrototype):
+class DLM73(DLMPrototype):
+    '''
+    Choosing between two models.
+    Renamed from DLM28
+    '''
     def __init__(self,device,config,_=None):
         super().__init__(device,config)
         K = config.kernel_size
@@ -2239,6 +2799,8 @@ class DLM57(DLMPrototype):
         h1 = h1.flip([1,])
         return h1,h1blah
 
+
+
 class DLM65(DLM57):
     def __init__(self,device,config,_=None):
         super().__init__(device,config)
@@ -2303,6 +2865,137 @@ class DLM65(DLM57):
         h1 , h1blah      = self.rnn_enc(target_embed[:,:].flip([1,]) , h0)
         h1 = h1.flip([1,])
         return h1,h1blah
+
+
+class DLM70(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+        # self.gain = nn.Identity()
+        self.gain = nn.Linear(E,E).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_post    =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+    def sample_token(self,B,T,prompt=None):
+        return None
+    def sample_token_from_latent(self,h1):
+        return None
+
+
+class DLM71(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        T = config.n_step
+        # data_dim
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_prior = nn.RNN(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+        self.gain = nn.Linear(E,E).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_post    =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+    def sample_token(self,B,T,prompt=None):
+        return None
+    def sample_token_from_latent(self,h1):
+        return None
+
+
+
+
+class DLM72(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        K = config.kernel_size
+        assert K >=1,config
+        T = config.n_step
+        E            = config.embed_dim
+        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.rnn_prior = nn.RNN(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+        self.gain = nn.Linear(E,E).to(self.device)
+
+        K = config.kernel_size
+        assert K >=1,config
+        W = config.window_size
+        # x
+        x = nn.Linear(E,W*E).to(self.device)
+        self.e_to_we   =  nn.Parameter(x.weight.reshape((E,E,W)))
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_prior   =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+        x = nn.Linear(T*E,  2).to(self.device)
+        self.h_post    =  nn.Parameter(x.weight.T.reshape((2,T,E)))
+
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_mu   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(E,  E).to(self.device)
+        self.h_to_beta   =  nn.Parameter(x.weight.T)
+
+
+    def sample_token(self,B,T,prompt=None):
+        return None
+    def sample_token_from_latent(self,h1):
+        return None
 
 
 
@@ -2393,7 +3086,6 @@ class DLM64(DLM57):
         # x = nn.Linear(E,  E).to(self.device)
         # self.h_to_beta   =  nn.Parameter(x.weight.T)
 
-
     def latent_to_emittor(self, h1r,h0=None):
         h0 = self.get_default_init(h0,len(h1r))
         yp, h2      = self.rnn_dec(h1r, h0)
@@ -2405,6 +3097,8 @@ class DLM64(DLM57):
         h1 , h1blah      = self.rnn_enc(target_embed[:,:].flip([1,]) , h0)
         h1 = h1.flip([1,])
         return h1,h1blah
+
+
     def sample_token(self,B,T,prompt=None):
         return None
     def sample_token_from_latent(self,h1):
@@ -2420,76 +3114,131 @@ class DLM67(DLM57):
         T = config.n_step
         # data_dim
         E            = config.embed_dim
-        self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
-        self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
-        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
-
         K = config.kernel_size
         assert K >=1,config
+
+        W = config.window_size
+        assert W>=1 ,config
+
+        # self.rnn_enc = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.encode = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        # self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+        x = nn.Linear(E,  2).to(self.device)
+        self.e_to_null   =  x
+         # nn.Parameter(x.weight.T)
+
+
+        x = nn.Linear(E,  W).to(self.device)
+        self.e_to_token   =  x
+        # nn.Parameter(x.weight.T)
+
+        # x = nn.Linear(W,  E,bias=False).to(self.device)
+        x = nn.Embedding(W,  E).to(self.device)
+        self.w_embed   =  x
+        self.w_unembed = lambda x: (x @ self.w_embed.weight.T) #.log_softmax(-1)
+
+
+        self.prior_logp = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+
+        self.H = H= 30
+
+        x = nn.Linear(H,  E*E).to(self.device)
+        self.h_matrix   =  nn.Parameter(x.weight.T.reshape((H,E,E)))
 
         x = nn.Linear(K,  config.embed_dim).to(self.device)
         self.k_vector   =  nn.Parameter(x.weight.T)
         x = nn.Linear(K,  1).to(self.device)
         self.k_scale   =  nn.Parameter(x.weight.T)
         self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
-        self.embed_to_logp2  = nn.Linear(config.embed_dim, K).to(self.device)
 
-        W = config.window_size
-        x = nn.Linear(T,  W).to(self.device)
-        self.z_prior   =  nn.Parameter(x.weight.T)
-        # .reshape((3,T,E,W)))
-
-        x = nn.Linear(W, E).to(self.device)
-        self.z_vector   =  nn.Parameter(x.weight.T)
-
-        x = nn.Linear(E,  W).to(self.device)
-        self.h_to_z   =  nn.Parameter(x.weight.T)
-        # x = nn.Linear(E,  E).to(self.device)
-        # self.h_to_beta   =  nn.Parameter(x.weight.T)
-
-
-    def latent_to_emittor(self, h1r,h0=None):
-        h0 = self.get_default_init(h0,len(h1r))
-        yp, h2      = self.rnn_dec(h1r, h0)
-        yp = yp / yp.std(dim=-1, keepdims=True)
-        return yp
-
-    def embed_to_latent(self, target_embed, h0=None):
-        h0 = self.get_default_init(h0,len(target_embed))
-        h1 , h1blah      = self.rnn_enc(target_embed[:,:].flip([1,]) , h0)
-        h1 = h1.flip([1,])
-        return h1,h1blah
     def sample_token(self,B,T,prompt=None):
         return None
     def sample_token_from_latent(self,h1):
         return None
 
-    def _hidden_to_cats(self,yp,target,ret):
-        CLS_NAME = self.__class__.__name__
+class DLM68(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        T = config.n_step
+        E            = config.embed_dim
+        K = config.kernel_size
+        assert K >=1,config
+        W = config.window_size
+        assert W>=1 ,config
 
-        ## (B, T ,K )
-        kp = self.embed_to_logp(yp).log_softmax(-1)
-        yp = self.unembed( self.std_norm(self.k_vector,-1))
-        yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+        self.encode = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
 
-        # if class
-        if ret=='full':
-            lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
-            return lp
 
-        elif ret =='target':
-            # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
-            model_w = yp.T[target]
+        x = nn.Linear(E,  2).to(self.device)
+        self.e_to_null   =  x
+        x = nn.Linear(E,  W).to(self.device)
+        self.e_to_token   =  x
 
-            ## yp (K, C)
-            ## kp (B,T,K)
-            # if target is not None and 23 in target[7].detach().cpu().numpy().tolist():
-            #     pass
-                # import pdb; pdb.set_trace()
-            lp = (model_w + kp)
-            return lp
-        else:
-            raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+        x = nn.Embedding(W,  E).to(self.device)
+        self.w_embed   =  x
+        self.w_unembed = lambda x: (x @ self.w_embed.weight.T) #.log_softmax(-1)
+
+        self.prior_logp = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+
+        self.H = H= 30
+        x = nn.Linear(H,  E*E).to(self.device)
+        self.h_matrix   =  nn.Parameter(x.weight.T.reshape((H,E,E)))
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+
+    def sample_token(self,B,T,prompt=None):
+        return None
+    def sample_token_from_latent(self,h1):
+        return None
+
+class DLM69(DLM57):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        T = config.n_step
+        E            = config.embed_dim
+        K = config.kernel_size
+        assert K >=1,config
+        W = config.window_size
+        assert W>=1 ,config
+
+        self.encode = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+        self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+        x = nn.Linear(E,  2).to(self.device)
+        self.e_to_null   =  x
+        x = nn.Linear(E,  W).to(self.device)
+        self.e_to_token   =  x
+
+        x = nn.Embedding(W,  E).to(self.device)
+        self.w_embed   =  x
+        self.w_unembed = lambda x: (x @ self.w_embed.weight.T) #.log_softmax(-1)
+
+        self.prior_logp = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=1, )
+
+        self.H = H= 30
+        x = nn.Linear(H,  E*E).to(self.device)
+        self.h_matrix   =  nn.Parameter(x.weight.T.reshape((H,E,E)))
+
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+
+    def sample_token(self,B,T,prompt=None):
+        return None
+    def sample_token_from_latent(self,h1):
+        return None
+
 
 class DLM66(DLM57):
     def __init__(self,device,config,_=None):
@@ -3245,6 +3994,2515 @@ class DLM43(DLMPrototype):
 
 
 
+
+class DLM28(DLMPrototype):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        self.rnn = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        K = config.kernel_size
+        assert K >=1,config
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        # x = nn.Linear(1,K)
+        # self.shared_log_align = nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        # self.embed_to_logp = nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+
+
+
+class DLM100(DLMPrototype):
+    _custom_hidden_to_cats = 1
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        self.rnn = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        K = config.kernel_size
+        assert K >=1,config
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        # x = nn.Linear(1,K)
+        # self.shared_log_align = nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        # self.embed_to_logp = nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+    _hidden_to_cats = None
+    def _hidden_to_cats(self, yp, target, ret):
+        # assert self._custom_hidden_to_cats == 1
+        # CLS_NAME = self.__class__.__name__
+        ## (B, T ,K )
+        kp = self.embed_to_logp(yp).log_softmax(-1)
+        yp = self.unembed( self.std_norm(self.k_vector,-1))
+        yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+
+        # if class
+        if ret=='full':
+            lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+            return lp
+
+        elif ret =='target':
+            # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+            model_w = yp.T[target]
+
+            ## yp (K, C)
+            ## kp (B,T,K)
+            lp = (model_w + kp)
+            return lp
+        else:
+            raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+
+
+    def _loss(self,item, ret):
+        CLS_NAME = self.__class__.__name__
+
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+
+        # source_embed = self.embed(source)
+        # source_len = item['source_len']
+        # source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        target_embed = self.embed(target)
+        # target_isblank = item['target_isblank']
+        T = target.size(1)
+        B = target.size(0)
+        N = W = self.config.window_size
+        K = self.config.kernel_size
+        target_len = item['target_len']
+        # target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        # import pdb; pdb.set_trace()
+        if (item['has_start_token'].__class__==int and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
+            target_notnull[:,0] = False
+
+
+        WS = self.window_size
+        logp_sum = 0.
+        E = self.embed_dim
+        target_embed = self.embed(target)
+        B = len(target)
+        i = 0
+
+        att = torch.ones((B,1,1),device=self.device)
+        # (P,W)
+
+        if 1:
+
+
+            '''
+            This branch predicts a discrete mixer instead of a vector to speeds up final softmax
+            '''
+
+            target_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device),target_embed],dim=1)[:,:-1]
+            # target_embed_parent = target_embed_parent/target_embed_parent.std(dim=1,keepdims=True)
+            # target_embed_parent = target_embed_parent/(0.001 + target_embed_parent.std(dim=-1,keepdims=True))
+
+            h0 = torch.ones([1,B,E],device=self.device)
+            c0 = torch.ones([1,B,E],device=self.device)
+
+            prior = 0.
+            prior_sum = 0.
+
+            yp, h1 = self.rnn(target_embed_parent, h0)
+            yp = yp / yp.std(dim=-1, keepdims=True)
+            if ret=='encode': return yp
+
+
+
+            lp = self._hidden_to_cats(yp,ret='target',target=target)
+
+            att = lp.softmax(dim=2).transpose(2,1)
+            lp  = lp.logsumexp(-1)
+            # logp_sum = (lp * target_notnull).sum(dim=1)
+            logp_sum = ((lp + prior) * target_notnull).sum(dim=1)
+            logp_sum = logp_sum + prior_sum
+            # logp_sum = logp_sum + prior
+
+        ### normalise by average token count, but sum by batchsize
+        # lossVal = lossVal/ (source_notnull.sum() / B)
+        # print('[mean]',target_notnull.sum(1).float().mean())
+
+        # logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+        # loss = - logp_sum.sum(dim=0) / target_notnull.sum()
+        loss = - logp_sum
+        # [None]
+        # / target_notnull.sum()
+        # loss = -logp_per_token
+
+        if ret=='forward':
+            return loss,att
+        elif ret in 'loss grad_loss'.split():
+            return loss
+        # elif ret=='grad_loss':
+        #     return loss
+        elif ret=='loss_per_loc':
+            return -lp,target_notnull
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
+
+
+
+
+
+class DLM101(DLMPrototype):
+    _custom_hidden_to_cats = 1
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+        G = config.graph_dim +1
+        self.G = G
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        self.embed      = nn.Embedding(G, E).to(self.device)
+        self.rnn = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        K = config.kernel_size
+        assert K >=1,config
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        # x = nn.Linear(1,K)
+        # self.shared_log_align = nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.S = 31
+        self.W = W = config.window_size
+        assert W >=1,config.window_size
+        # self.embed_to_logp = nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(W,K*E).to(self.device)
+        self.kv_k_vector  = nn.Parameter(x.weight.reshape(W,K,E))
+
+        x = nn.Linear(1,K*E).to(self.device)
+        self.kv_v_vector  = nn.Parameter(x.weight.reshape(K,E))
+
+
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+    _hidden_to_cats = None
+    def _hidden_to_cats(self, yp, target, ret):
+        # assert self._custom_hidden_to_cats == 1
+        # CLS_NAME = self.__class__.__name__
+        ## (B, T ,K )
+        kp = self.embed_to_logp(yp).log_softmax(-1)
+        yp = self.unembed( self.std_norm(self.k_vector,-1))
+        yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+
+        # if class
+        if ret=='full':
+            lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+            return lp
+
+        elif ret =='target':
+            # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+            model_w = yp.T[target]
+
+            ## yp (K, C)
+            ## kp (B,T,K)
+            lp = (model_w + kp)
+            return lp
+        else:
+            raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+
+
+    def _loss(self,item, ret):
+        CLS_NAME = self.__class__.__name__
+
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+
+        # source_embed = self.embed(source)
+        # source_len = item['source_len']
+        # source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        target_embed = self.embed(target)
+
+
+        T = target.size(1)
+        B = target.size(0)
+        N = W = self.config.window_size
+        K = self.config.kernel_size
+        target_len = item['target_len']
+        # target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        # import pdb; pdb.set_trace()
+        if (item['has_start_token'].__class__==int and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
+            target_notnull[:,0] = False
+
+
+
+        WS = self.window_size
+        logp_sum = 0.
+        G = self.G
+        E = self.embed_dim
+        target_embed = self.embed(target)
+        B = len(target)
+        i = 0
+        att = torch.ones((B,1,1),device=self.device)
+
+
+        def s(v):
+            if torch.isnan(v).any():
+                import pdb; pdb.set_trace()
+
+        if 1:
+
+            target_isblank = item['target_isblank'] | ~target_notnull
+
+            ## (B, T)
+            '''
+            Segmenting sequences into sub-sequences
+
+            Restruct the input by cutting at blank position.
+
+            bound maximum segment count
+            '''
+
+
+
+            idx_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            idx      = torch.zeros((B,1),dtype=torch.long,device=self.device)
+            seg_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            seg      = torch.ones((B,1),dtype=torch.long,device=self.device)
+            # seg_list = torch.zeros()
+            for i in range(T):
+                idx_list[:,i:i+1] = idx
+                seg_list[:,i:i+1] = seg * target_notnull[:,i:i+1] + 0 * ~target_notnull[:,i:i+1]
+                idx = target_isblank[:,i:i+1] * 0 + (idx+1) * ~target_isblank[:,i:i+1]
+                new_segment = target_isblank[:,i:i+1] & target_notnull[:,i:i+1]
+                seg = new_segment * (seg+1) + ~new_segment * seg
+            # torch.scatter()
+
+            S = self.S
+            # W = self.W
+            seg_list = seg_list.clip(0,S)
+            pos_list = seg_list * W + idx_list
+            segments = (G - 1)*torch.ones((B,S*W),dtype=torch.long,device=self.device)
+            segments = segments.scatter_(src=target,index=pos_list,dim=1).reshape((B,S,W))
+            segments[:,0]=0
+
+
+            # print(idx_list[0])
+            # print(seg_list[0])
+            # import pdb; pdb.set_trace()
+            ## (B, S, W)
+
+            ## (B, S, W, E ) x (W, E, K) -> (B, S, K)
+            # torch.gather()
+            # torch.eye()
+
+            '''
+            Encoding the segments
+            with KV attention
+            '''
+            v = torch.tensordot( self.embed(segments),self.kv_k_vector.transpose(2,1),2)
+            ## (B, S, K) @ (K,E) = (B,S,E)
+            segment_embed = v.softmax(-1) @ self.kv_v_vector
+
+
+            '''
+            Run RNN on encoded segments
+            '''
+            segment_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device), segment_embed],dim=1)[:,:-1]
+            # segment_embed_parent = segment_embed_parent/segment_embed_parent.std(dim=-1,keepdims=True)
+            h0 = torch.ones([1,B,E],device=self.device)
+            c0 = torch.ones([1,B,E],device=self.device)
+
+            prior = 0.
+            prior_sum = 0.
+
+            yp, h1 = self.rnn(segment_embed_parent, h0)
+            # yp = yp /(1E-3 + yp.std(dim=-1, keepdims=True))
+            yp = yp /(yp.std(dim=-1, keepdims=True))
+            # s(yup)
+
+
+            if ret=='encode': return yp
+
+            '''
+            Decoding the predicted segments into predicted words
+            '''
+
+            ### (B, S, K)
+            kp = (yp @ self.kv_v_vector.T).log_softmax(-1)
+
+            ### (W, K, G)
+            # config.graph_dim
+            # C = self.embed.weight.shapekv_v_vector.shape[0]
+            yup = self.unembed( self.kv_k_vector ).log_softmax(-1)
+
+            yup = yup.transpose(0,1).reshape((K,W*G))
+            sel = segments + torch.arange(W,device=self.device)[None,None,:]*G
+            ## (WG, K) -> (B,S,W,K)
+            yupp  = yup.T[sel]
+            lp  = kp.unsqueeze(2) + yupp
+
+
+            ### (B,S,W,K,C)
+            # lp = (kp[:,:,None,:,None] + yup[None,None,:,:,:])
+            # lp = torch.gather(lp,index=segments.unsqueeze(-1).unsqueeze(-1).repeat((1,1,1,K,1)),dim=-1).squeeze(-1)
+
+            ### (B,S,W,K)->(B,S,W)
+            lp = lp.logsumexp(-1)
+
+            '''
+            Concat segments back into seqs
+            '''
+
+            lp = torch.gather(lp.reshape((B,S*W)),index=pos_list,dim=-1)
+            loss_per_loc = lp
+            # logp_sum = (lp * target_notnull_segment).sum(dim=(1,2))
+            logp_sum = (lp * target_notnull).sum(dim=1)
+
+
+            # att = lp.softmax(dim=2).transpose(2,1)
+            # lp  = lp.logsumexp(-1)
+            # # logp_sum = (lp * target_notnull).sum(dim=1)
+            # logp_sum = ((lp + prior) * target_notnull).sum(dim=1)
+            # logp_sum = logp_sum + prior_sum
+            # logp_sum = logp_sum + prior
+
+        ### normalise by average token count, but sum by batchsize
+        # lossVal = lossVal/ (source_notnull.sum() / B)
+        # print('[mean]',target_notnull.sum(1).float().mean())
+
+        logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+        # loss = -logp_per_token
+        loss = -logp_sum
+
+        if ret=='forward':
+            return loss,att
+        elif ret in 'loss grad_loss'.split():
+            return loss
+        # elif ret=='grad_loss':
+        #     return loss
+        elif ret=='loss_per_loc':
+            return -loss_per_loc,target_notnull
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
+
+
+
+class DLM102(DLMPrototype):
+    _custom_hidden_to_cats = 1
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+        G = config.graph_dim +1
+        self.G = G
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        self.embed      = nn.Embedding(G, E).to(self.device)
+        self.rnn      = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        self.rnn_word_enc = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        self.rnn_word_dec = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        K = config.kernel_size
+        assert K >=1,config
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+        # x = nn.Linear(1,K)
+        # self.shared_log_align = nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  config.embed_dim).to(self.device)
+        self.k_vector   =  nn.Parameter(x.weight.T)
+        x = nn.Linear(K,  1).to(self.device)
+        self.k_scale   =  nn.Parameter(x.weight.T)
+        self.S = 31
+        self.W = W = config.window_size
+        assert W >=1,config.window_size
+        # self.embed_to_logp = nn.Parameter(x.weight.T)
+        self.embed_to_logp  = nn.Linear(config.embed_dim, K).to(self.device)
+
+        x = nn.Linear(W,K*E).to(self.device)
+        self.kv_k_vector  = nn.Parameter(x.weight.reshape(W,K,E))
+
+        x = nn.Linear(1,K*E).to(self.device)
+        self.kv_v_vector  = nn.Parameter(x.weight.reshape(K,E))
+
+
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+    _hidden_to_cats = None
+    def _hidden_to_cats(self, yp, target, ret):
+        # assert self._custom_hidden_to_cats == 1
+        # CLS_NAME = self.__class__.__name__
+        ## (B, T ,K )
+        kp = self.embed_to_logp(yp).log_softmax(-1)
+        yp = self.unembed( self.std_norm(self.k_vector,-1))
+        yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+
+        # if class
+        if ret=='full':
+            lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+            return lp
+
+        elif ret =='target':
+            # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+            model_w = yp.T[target]
+
+            ## yp (K, C)
+            ## kp (B,T,K)
+            lp = (model_w + kp)
+            return lp
+        else:
+            raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+
+
+    def _loss(self,item, ret):
+        CLS_NAME = self.__class__.__name__
+
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+
+        # source_embed = self.embed(source)
+        # source_len = item['source_len']
+        # source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        target_embed = self.embed(target)
+
+
+        T = target.size(1)
+        B = target.size(0)
+        N = W = self.config.window_size
+        K = self.config.kernel_size
+        target_len = item['target_len']
+        # target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        # import pdb; pdb.set_trace()
+        if (item['has_start_token'].__class__==int and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
+            target_notnull[:,0] = False
+
+
+
+        WS = self.window_size
+        logp_sum = 0.
+        G = self.G
+        E = self.embed_dim
+        target_embed = self.embed(target)
+        B = len(target)
+        i = 0
+        att = torch.ones((B,1,1),device=self.device)
+
+
+        def s(v):
+            if torch.isnan(v).any():
+                import pdb; pdb.set_trace()
+
+        if 1:
+
+            target_isblank = item['target_isblank'] | ~target_notnull
+
+            ## (B, T)
+            '''
+            Segmenting sequences into sub-sequences
+
+            Restruct the input by cutting at blank position.
+
+            bound maximum segment count
+            '''
+
+
+
+            idx_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            idx      = torch.zeros((B,1),dtype=torch.long,device=self.device)
+            seg_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            seg      = torch.ones((B,1),dtype=torch.long,device=self.device)
+            # seg_list = torch.zeros()
+            for i in range(T):
+                idx_list[:,i:i+1] = idx
+                seg_list[:,i:i+1] = seg * target_notnull[:,i:i+1] + 0 * ~target_notnull[:,i:i+1]
+                idx = target_isblank[:,i:i+1] * 0 + (idx+1) * ~target_isblank[:,i:i+1]
+                new_segment = target_isblank[:,i:i+1] & target_notnull[:,i:i+1]
+                seg = new_segment * (seg+1) + ~new_segment * seg
+            # torch.scatter()
+
+            S = self.S
+            # W = self.W
+            seg_list = seg_list.clip(0,S)
+            pos_list = seg_list * W + idx_list
+            segments = (G - 1)*torch.ones((B,S*W),dtype=torch.long,device=self.device)
+            segments = segments.scatter_(src=target,index=pos_list,dim=1).reshape((B,S,W))
+            segments[:,0]=0
+
+
+            # print(idx_list[0])
+            # print(seg_list[0])
+            # import pdb; pdb.set_trace()
+
+            ## (B, S, W)
+            '''
+            Encoding the segments
+            with lower-level RNN
+            with KV attention
+            '''
+            ## (B, S, W, E ) x (W, E, K) -> (B, S, K)
+            segments_embed_seq = self.embed(segments)
+            segments_embed_seq = segments_embed_seq.reshape((B*S,W,E))
+
+            h0 = torch.ones([1,B*S,E],device=self.device)
+            v1 , h1 = self.rnn_word_enc(segments_embed_seq,h0)
+            segment_embed = h1.reshape((B,S,E))
+
+
+            '''
+            Run RNN on encoded segments
+
+            Make sure the encoding is calculated from left segments
+            '''
+            segment_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device), segment_embed],dim=1)[:,:-1]
+            # segment_embed_parent = segment_embed_parent/segment_embed_parent.std(dim=-1,keepdims=True)
+            h0 = torch.ones([1,B,E],device=self.device)
+            c0 = torch.ones([1,B,E],device=self.device)
+
+            prior = 0.
+            prior_sum = 0.
+
+            yp, h1 = self.rnn(segment_embed_parent, h0)
+            # yp = yp /(1E-3 + yp.std(dim=-1, keepdims=True))
+            yp = yp /(yp.std(dim=-1, keepdims=True))
+
+            ## (B,S,E)
+            segment_decoded = yp
+
+            if ret=='encode': return yp
+
+            '''
+            Decoding the predicted segments into predicted words
+
+            make sure the decoder does not see the required character
+            '''
+
+            h0 = torch.ones([1,B*S,E],device=self.device,dtype=torch.float)
+            # h0 = h0 /(h0.std(dim=-1, keepdims=True))
+
+
+            if 0:
+                # h0 = h0 /(h0.std(dim=-1, keepdims=True))
+                s1,_,s3 =  segments_embed_seq.shape
+                segments_embed_seq_parent = torch.cat([segment_decoded.reshape((B*S,1,E)), segments_embed_seq],dim=1)[:,:-1]
+                # segments_embed_seq_parent = self.std_norm(segments_embed_seq_parent,-1)
+                # segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , h0 )
+                segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , segment_decoded.reshape((1,B*S,E)) )
+                # segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq    _parent , h0)
+
+
+            if 0:
+                # h0 = h0 /(h0.std(dim=-1, keepdims=True))
+                s1,_,s3 =  segments_embed_seq.shape
+                segments_embed_seq_parent = torch.cat([torch.ones((s1,1,s3),device=self.device), segments_embed_seq],dim=1)[:,:-1]
+                segments_embed_seq_parent = (segments_embed_seq_parent + segment_decoded.reshape((B*S,1,E))) * 0.5
+                # segments_embed_seq_parent = torch.cat([ segments_embed_seq_parent[:,:,:E//2], segment_decoded.reshape((B*S,1,E)).repeat((1,W,1))[:,:,:E//2]],dim=-1)
+
+                # segments_embed_seq_parent = self.std_norm(segments_embed_seq_parent,-1)
+                segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , h0 )
+                # segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq    _parent , h0)
+
+            if 0:
+                s1,_,s3 =  segments_embed_seq.shape
+                segments_embed_seq_parent = torch.cat([torch.ones((s1,1,s3),device=self.device), segments_embed_seq],dim=1)[:,:-1]
+                # segments_embed_seq_parent = self.std_norm(segments_embed_seq_parent,-1)
+                segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , segment_decoded.reshape((1,B*S,E)) )
+                # segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq    _parent , h0)
+
+            if 1:
+                '''
+                Best so far
+                '''
+                s1,_,s3 =  segments_embed_seq.shape
+                # segments_embed_seq_parent = torch.cat([torch.ones((s1,1,s3),device=self.device), segments_embed_seq],dim=1)[:,:-1]
+                segments_embed_seq_parent = torch.cat([segment_decoded.reshape((B*S,1,E)), segments_embed_seq],dim=1)[:,:-1]
+                # segments_embed_seq_parent = self.std_norm(segments_embed_seq_parent,-1)
+                # segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , segment_decoded.reshape((1,B*S,E)) )
+                segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , h0)
+                # segment_decoded.reshape((1,B*S,E)) )
+                # segments_embed_seq_decoded = self.std_norm(segments_embed_seq_decoded,-1)
+
+            ## (B,S,W,G)
+            lpc = self.unembed(segments_embed_seq_decoded).log_softmax(-1).reshape((B,S,W,G))
+            lp = torch.gather(lpc,index=segments.unsqueeze(-1),dim=-1).squeeze(-1)
+
+
+            '''
+            Concat segments back into seqs
+            '''
+
+            lp = torch.gather(lp.reshape((B,S*W)),index=pos_list,dim=-1)
+            loss_per_loc = lp
+            # logp_sum = (lp * target_notnull_segment).sum(dim=(1,2))
+            logp_sum = (lp * target_notnull).sum(dim=1)
+
+
+        ### normalise by average token count, but sum by batchsize
+        # lossVal = lossVal/ (source_notnull.sum() / B)
+        # print('[mean]',target_notnull.sum(1).float().mean())
+
+        logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+        # loss = -logp_per_token
+        loss = -logp_sum
+
+        if ret=='forward':
+            return loss,att
+        elif ret in 'loss grad_loss'.split():
+            return loss
+        # elif ret=='grad_loss':
+        #     return loss
+        elif ret=='loss_per_loc':
+            return -loss_per_loc,target_notnull
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
+
+
+class DLM103(DLMPrototype):
+    _custom_hidden_to_cats = 1
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+        G = config.graph_dim +1
+        self.G = G
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        self.S = 31
+        self.W = W = config.window_size
+        assert W >=1,config.window_size
+
+        self.embed      = nn.Embedding(G, E).to(self.device)
+
+        self.rnn      = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        self.word_enc = nn.Linear(W*E,E)
+        self.word_dec = nn.Linear(E,W*E)
+        # nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        # self.rnn_word_dec = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        K = config.kernel_size
+        assert K >=1,config
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+
+    _hidden_to_cats = None
+    def _hidden_to_cats(self, yp, target, ret):
+        # assert self._custom_hidden_to_cats == 1
+        # CLS_NAME = self.__class__.__name__
+        ## (B, T ,K )
+        kp = self.embed_to_logp(yp).log_softmax(-1)
+        yp = self.unembed( self.std_norm(self.k_vector,-1))
+        yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+
+        # if class
+        if ret=='full':
+            lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+            return lp
+
+        elif ret =='target':
+            # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+            model_w = yp.T[target]
+
+            ## yp (K, C)
+            ## kp (B,T,K)
+            lp = (model_w + kp)
+            return lp
+        else:
+            raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+
+
+    def _loss(self,item, ret):
+        CLS_NAME = self.__class__.__name__
+
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+
+        # source_embed = self.embed(source)
+        # source_len = item['source_len']
+        # source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        target_embed = self.embed(target)
+
+
+        T = target.size(1)
+        B = target.size(0)
+        N = W = self.config.window_size
+        K = self.config.kernel_size
+        target_len = item['target_len']
+        # target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        # import pdb; pdb.set_trace()
+        if (item['has_start_token'].__class__==int and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
+            target_notnull[:,0] = False
+
+
+
+        WS = self.window_size
+        logp_sum = 0.
+        G = self.G
+        E = self.embed_dim
+        target_embed = self.embed(target)
+        B = len(target)
+        i = 0
+        att = torch.ones((B,1,1),device=self.device)
+
+
+        def s(v):
+            if torch.isnan(v).any():
+                import pdb; pdb.set_trace()
+
+        if 1:
+
+            target_isblank = item['target_isblank'] | ~target_notnull
+
+            ## (B, T)
+            '''
+            Segmenting sequences into sub-sequences
+
+            Restruct the input by cutting at blank position.
+
+            bound maximum segment count
+            '''
+
+
+
+            idx_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            idx      = torch.zeros((B,1),dtype=torch.long,device=self.device)
+            seg_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            seg      = torch.ones((B,1),dtype=torch.long,device=self.device)
+            # seg_list = torch.zeros()
+            for i in range(T):
+                idx_list[:,i:i+1] = idx
+                seg_list[:,i:i+1] = seg * target_notnull[:,i:i+1] + 0 * ~target_notnull[:,i:i+1]
+                idx = target_isblank[:,i:i+1] * 0 + (idx+1) * ~target_isblank[:,i:i+1]
+                new_segment = target_isblank[:,i:i+1] & target_notnull[:,i:i+1]
+                seg = new_segment * (seg+1) + ~new_segment * seg
+            # torch.scatter()
+
+            S = self.S
+            # W = self.W
+            seg_list = seg_list.clip(0,S)
+            pos_list = seg_list * W + idx_list
+            segments = (G - 1)*torch.ones((B,S*W),dtype=torch.long,device=self.device)
+            segments = segments.scatter_(src=target,index=pos_list,dim=1).reshape((B,S,W))
+            segments[:,0]=0
+
+
+            # print(idx_list[0])
+            # print(seg_list[0])
+            # import pdb; pdb.set_trace()
+            ## (B, S, W)
+
+
+            '''
+            Encoding the segments
+            with lower-level RNN
+            with KV attention
+            '''
+            ## (B, S, W, E ) x (W, E, K) -> (B, S, K)
+            segments_embed_seq = self.embed(segments)
+            segments_embed_seq = segments_embed_seq.reshape((B*S,W,E))
+            ## (B,S,W*E) -> (B,S,E)
+            segment_embed = self.word_enc(segments_embed_seq.reshape((B,S,W*E)))
+            segment_embed = self.std_norm(segment_embed,-1)
+
+
+
+            '''
+            Run RNN on encoded segments
+
+            Make sure the encoding is calculated from left segments
+            '''
+            segment_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device), segment_embed],dim=1)[:,:-1]
+            # segment_embed_parent = segment_embed_parent/segment_embed_parent.std(dim=-1,keepdims=True)
+            h0 = torch.ones([1,B,E],device=self.device)
+            c0 = torch.ones([1,B,E],device=self.device)
+
+            prior = 0.
+            prior_sum = 0.
+
+            yp, h1 = self.rnn(segment_embed_parent, h0)
+            # yp = yp /(1E-3 + yp.std(dim=-1, keepdims=True))
+            yp = yp /(yp.std(dim=-1, keepdims=True))
+
+            ## (B,S,E)
+            segment_decoded = yp
+
+            if ret=='encode': return yp
+
+            '''
+            Decoding the predicted segments into predicted words
+
+            make sure the decoder does not see the required character
+            '''
+
+            ## (B,S,E) -> (B,S,W,E)
+            segments_decoded_seq = self.word_dec(segment_decoded).reshape((B,S,W,E))
+            # h0 = torch.ones([1,B*S,E],device=self.device,dtype=torch.float)
+            # h0 = h0 /(h0.std(dim=-1, keepdims=True))
+
+
+
+            ## (B,S,W,G)
+            lpc = self.unembed(segments_decoded_seq).log_softmax(-1).reshape((B,S,W,G))
+            lp = torch.gather(lpc,index=segments.unsqueeze(-1),dim=-1).squeeze(-1)
+
+
+            '''
+            Concat segments back into seqs
+            '''
+
+            lp = torch.gather(lp.reshape((B,S*W)),index=pos_list,dim=-1)
+            loss_per_loc = lp
+            # logp_sum = (lp * target_notnull_segment).sum(dim=(1,2))
+            logp_sum = (lp * target_notnull).sum(dim=1)
+
+
+        ### normalise by average token count, but sum by batchsize
+        # lossVal = lossVal/ (source_notnull.sum() / B)
+        # print('[mean]',target_notnull.sum(1).float().mean())
+
+        logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+        # loss = -logp_per_token
+        loss = -logp_sum
+
+        if ret=='forward':
+            return loss,att
+        elif ret in 'loss grad_loss'.split():
+            return loss
+        # elif ret=='grad_loss':
+        #     return loss
+        elif ret=='loss_per_loc':
+            return -loss_per_loc,target_notnull
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
+
+class DLM104(DLMPrototype):
+    '''
+    Conv-GRU
+    '''
+
+    _custom_hidden_to_cats = 1
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+        G = config.graph_dim +1
+        self.G = G
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        self.S = 31
+        self.W = W = config.window_size
+        assert W >=1,config.window_size
+
+        self.embed      = nn.Embedding(G, E).to(self.device)
+
+        self.rnn      = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        self.word_enc = nn.Linear(W*E,E)
+        self.word_enc_2 = nn.Linear(E,E)
+        # self.word_enc_3 = nn.Linear(E,E)
+
+        self.word_dec = nn.Linear(E,W*E)
+        self.word_dec_2 = nn.Linear(E,E)
+        # self.word_dec_3 = nn.Linear(E,E)
+
+        # nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        # self.rnn_word_dec = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        K = config.kernel_size
+        assert K >=1,config
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+
+    _hidden_to_cats = None
+    def _hidden_to_cats(self, yp, target, ret):
+        # assert self._custom_hidden_to_cats == 1
+        # CLS_NAME = self.__class__.__name__
+        ## (B, T ,K )
+        kp = self.embed_to_logp(yp).log_softmax(-1)
+        yp = self.unembed( self.std_norm(self.k_vector,-1))
+        yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+
+        # if class
+        if ret=='full':
+            lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+            return lp
+
+        elif ret =='target':
+            # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+            model_w = yp.T[target]
+
+            ## yp (K, C)
+            ## kp (B,T,K)
+            lp = (model_w + kp)
+            return lp
+        else:
+            raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+
+
+    def _loss(self,item, ret):
+        CLS_NAME = self.__class__.__name__
+
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+
+        # source_embed = self.embed(source)
+        # source_len = item['source_len']
+        # source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        target_embed = self.embed(target)
+
+
+        T = target.size(1)
+        B = target.size(0)
+        N = W = self.config.window_size
+        K = self.config.kernel_size
+        target_len = item['target_len']
+        # target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        # import pdb; pdb.set_trace()
+        if (item['has_start_token'].__class__==int and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
+            target_notnull[:,0] = False
+
+
+
+        WS = self.window_size
+        logp_sum = 0.
+        G = self.G
+        E = self.embed_dim
+        target_embed = self.embed(target)
+        B = len(target)
+        i = 0
+        att = torch.ones((B,1,1),device=self.device)
+
+
+        def s(v):
+            if torch.isnan(v).any():
+                import pdb; pdb.set_trace()
+
+        if 1:
+
+            target_isblank = item['target_isblank'] | ~target_notnull
+
+            ## (B, T)
+            '''
+            Segmenting sequences into sub-sequences
+
+            Restruct the input by cutting at blank position.
+
+            bound maximum segment count
+            '''
+
+
+
+            idx_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            idx      = torch.zeros((B,1),dtype=torch.long,device=self.device)
+            seg_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            seg      = torch.ones((B,1),dtype=torch.long,device=self.device)
+            # seg_list = torch.zeros()
+            for i in range(T):
+                idx_list[:,i:i+1] = idx
+                seg_list[:,i:i+1] = seg * target_notnull[:,i:i+1] + 0 * ~target_notnull[:,i:i+1]
+                idx = target_isblank[:,i:i+1] * 0 + (idx+1) * ~target_isblank[:,i:i+1]
+                new_segment = target_isblank[:,i:i+1] & target_notnull[:,i:i+1]
+                seg = new_segment * (seg+1) + ~new_segment * seg
+            # torch.scatter()
+
+            S = self.S
+            # W = self.W
+            seg_list = seg_list.clip(0,S)
+            pos_list = seg_list * W + idx_list
+            segments = (G - 1)*torch.ones((B,S*W),dtype=torch.long,device=self.device)
+            segments = segments.scatter_(src=target,index=pos_list,dim=1).reshape((B,S,W))
+            segments[:,0]=0
+
+
+            # print(idx_list[0])
+            # print(seg_list[0])
+            # import pdb; pdb.set_trace()
+            ## (B, S, W)
+
+
+            '''
+            Encoding the segments
+            with lower-level RNN
+            with KV attention
+            '''
+            ## (B, S, W, E ) x (W, E, K) -> (B, S, K)
+            segments_embed_seq = self.embed(segments)
+            segments_embed_seq = segments_embed_seq.reshape((B*S,W,E))
+            ## (B,S,W*E) -> (B,S,E)
+            segment_embed = self.word_enc(segments_embed_seq.reshape((B,S,W*E))).relu()
+            # segment_embed = segment_embed + self.word_enc_2(segment_embed).relu()
+            # segment_embed = segment_embed + self.word_enc_3(segment_embed)
+            segment_embed = self.word_enc_2(segment_embed)
+            segment_embed = self.std_norm(segment_embed,-1)
+
+
+
+            '''
+            Run RNN on encoded segments
+
+            Make sure the encoding is calculated from left segments
+            '''
+            segment_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device), segment_embed],dim=1)[:,:-1]
+            # segment_embed_parent = segment_embed_parent/segment_embed_parent.std(dim=-1,keepdims=True)
+            h0 = torch.ones([1,B,E],device=self.device)
+            c0 = torch.ones([1,B,E],device=self.device)
+
+            prior = 0.
+            prior_sum = 0.
+
+            yp, h1 = self.rnn(segment_embed_parent, h0)
+            # yp = yp /(1E-3 + yp.std(dim=-1, keepdims=True))
+            yp = yp /(yp.std(dim=-1, keepdims=True))
+
+            ## (B,S,E)
+            segment_decoded = yp
+
+            if ret=='encode': return yp
+
+            '''
+            Decoding the predicted segments into predicted words
+
+            make sure the decoder does not see the required character
+            '''
+
+            ## (B,S,E) -> (B,S,W,E)
+            # segment_decoded = segment_decoded+self.word_dec_3(segment_decoded).relu()
+            # segment_decoded = segment_decoded+ self.word_dec_2(segment_decoded).relu()
+            segment_decoded = self.word_dec_2(segment_decoded).relu()
+            segments_decoded_seq = self.word_dec(segment_decoded).reshape((B,S,W,E))
+            # h0 = torch.ones([1,B*S,E],device=self.device,dtype=torch.float)
+            # h0 = h0 /(h0.std(dim=-1, keepdims=True))
+            segments_decoded_seq = self.std_norm(segments_decoded_seq,-1)
+
+
+
+            ## (B,S,W,G)
+            lpc = self.unembed(segments_decoded_seq).log_softmax(-1).reshape((B,S,W,G))
+            lp = torch.gather(lpc,index=segments.unsqueeze(-1),dim=-1).squeeze(-1)
+
+
+            '''
+            Concat segments back into seqs
+            '''
+
+            lp = torch.gather(lp.reshape((B,S*W)),index=pos_list,dim=-1)
+            loss_per_loc = lp
+            # logp_sum = (lp * target_notnull_segment).sum(dim=(1,2))
+            logp_sum = (lp * target_notnull).sum(dim=1)
+
+
+        ### normalise by average token count, but sum by batchsize
+        # lossVal = lossVal/ (source_notnull.sum() / B)
+        # print('[mean]',target_notnull.sum(1).float().mean())
+
+        logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+        # loss = -logp_per_token
+        loss = -logp_sum
+
+        if ret=='forward':
+            return loss,att
+        elif ret in 'loss grad_loss'.split():
+            return loss
+        # elif ret=='grad_loss':
+        #     return loss
+        elif ret=='loss_per_loc':
+            return -loss_per_loc,target_notnull
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
+
+
+class DLM106(DLMPrototype):
+    '''
+    Conv-GRU
+    '''
+
+    _custom_hidden_to_cats = 1
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+        ### 1 extra token for stop token
+        G = config.graph_dim +1
+        self.G = G
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        self.S = 101
+        self.W = W = config.window_size
+        assert W >=1,config.window_size
+
+        self.embed      = nn.Embedding(G, E).to(self.device)
+
+        self.rnn      = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        self.word_enc = nn.Linear(W*E,E)
+        self.word_enc_2 = nn.Linear(E,E)
+        # self.word_enc_3 = nn.Linear(E,E)
+
+        self.word_dec = nn.Linear(E,W*E)
+        self.word_dec_2 = nn.Linear(E,E)
+        # self.word_dec_3 = nn.Linear(E,E)
+        self.parser_rnn      = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        self.project_isblank = nn.Linear(E,2)
+        # self.parser_rnn = nn.GRU()
+        # nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        # self.rnn_word_dec = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        K = config.kernel_size
+        assert K >=1,config
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+
+    _hidden_to_cats = None
+    def _hidden_to_cats(self, yp, target, ret):
+        ## (B, T ,K )
+        kp = self.embed_to_logp(yp).log_softmax(-1)
+        yp = self.unembed( self.std_norm(self.k_vector,-1))
+        yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+        # if class
+        if ret=='full':
+            lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+            return lp
+        elif ret =='target':
+            # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+            model_w = yp.T[target]
+
+            ## yp (K, C)
+            ## kp (B,T,K)
+            lp = (model_w + kp)
+            return lp
+        else:
+            raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+
+
+    def _loss(self,item, ret):
+        CLS_NAME = self.__class__.__name__
+
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+
+        # source_embed = self.embed(source)
+        # source_len = item['source_len']
+        # source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        target_embed = self.embed(target)
+
+
+        T = target.size(1)
+        B = target.size(0)
+        N = W = self.config.window_size
+        K = self.config.kernel_size
+        target_len = item['target_len']
+        # target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        # import pdb; pdb.set_trace()
+        if (item['has_start_token'].__class__==int and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
+            target_notnull[:,0] = False
+
+
+
+        WS = self.window_size
+        logp_sum = 0.
+        G = self.G
+        E = self.embed_dim
+        target_embed = self.embed(target)
+        B = len(target)
+        i = 0
+        att = torch.ones((B,1,1),device=self.device)
+
+
+        def s(v):
+            if torch.isnan(v).any():
+                import pdb; pdb.set_trace()
+
+        # if 1:
+        K = self.config.kernel_size
+        lp_prior_list = torch.zeros((B,K),device=self.device,dtype=torch.float)
+        lp_encode_list = torch.zeros((B,K),device=self.device,dtype=torch.float)
+        # lp_weight_list = torch.zeros((B,K),device=self.device,dtype=torch.float)
+        for ik in range(K):
+
+
+            ## (B, T)
+            '''
+            Segmenting sequences into sub-sequences
+
+            Restruct the input by cutting at blank position.
+
+            bound maximum segment count
+            '''
+
+
+            h0 = torch.ones([1,B,E],device=self.device)
+            c0 = torch.ones([1,B,E],device=self.device)
+
+            S = self.S
+            # W = self.W
+            STOP_TOKEN=G-1
+
+
+            idx_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            idx      = torch.zeros((B,1),dtype=torch.long,device=self.device)
+            seg_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            seg      = torch.ones ((B,1),dtype=torch.long,device=self.device)
+            # seg_list = torch.zeros()
+            # target_isblank =
+            if CLS_NAME in 'DLM106'.split():
+                target_isblank = item['target_isblank'] | ~target_notnull
+            elif CLS_NAME in 'DLM107 DLM108'.split():
+                target_isblank_logp = self.project_isblank(self.parser_rnn(target_embed,h0)[0]).log_softmax(-1)
+                lp_isblank, idx_isblank = self.sample_logp(target_isblank_logp,return_logp=True,dim=-1)
+                target_isblank = idx_isblank==1
+            else:
+                raise NotImplementedError
+
+            for i in range(T):
+                idx_list[:,i:i+1] = idx
+                # seg_list[:,i:i+1] = seg * target_notnull[:,i:i+1] + 0 * ~target_notnull[:,i:i+1]
+                seg_list[:,i:i+1] = seg
+                idx = target_isblank[:,i:i+1] * 0 + (idx+1) * ~target_isblank[:,i:i+1]
+                idx = idx.clip(None,W-2)
+                new_segment = target_isblank[:,i:i+1] & target_notnull[:,i:i+1]
+                seg = new_segment * (seg+1) + ~new_segment * seg
+
+
+            '''
+            Needs to repack the segments with <s> token
+            '''
+            # import pdb; pdb.set_trace()
+            # torch.scatter()
+
+            seg_list = seg_list.clip(0,S-1)
+            pos_list = seg_list * W + idx_list
+            segments = STOP_TOKEN*torch.ones((B,S*W),dtype=torch.long,device=self.device)
+            segments = segments.scatter_(src=target,index=pos_list,dim=1).reshape((B,S,W))
+            segments_notnull = False * torch.ones((B,S*W),dtype=torch.bool,device=self.device)
+            segments_notnull = segments_notnull.scatter_(src=target_notnull,index=pos_list,dim=1).reshape((B,S,W))
+            segments_notnull = segments_notnull | segments_notnull.roll((1,),dims=(2,))
+            segments[:,0]=0
+
+
+                # assert (seg<=S-1).all(),seg.max()
+                # assert (idx<=W-1).all()
+
+            idx_list_new = torch.zeros((B,T+S),dtype=torch.long,device=self.device)
+            idx          = torch.zeros((B,1  ),dtype=torch.long,device=self.device)
+            seg_list_new = torch.zeros((B,T+S),dtype=torch.long,device=self.device)
+            seg          = torch.ones ((B,1  ),dtype=torch.long,device=self.device)
+            offset       = torch.zeros((B,1  ),dtype=torch.long,device=self.device)
+
+            bid = torch.arange(B,device=self.device)[:,None]
+            for i in range(T+S):
+                '''
+                Keep a pointer to segments. with seg and idx
+                '''
+                assert (seg<=S-1).all(),seg.max()
+                assert (idx<=W-1).all()
+                val = segments[bid,seg,idx]
+                seg_list_new[:,i:i+1]=seg
+                idx_list_new[:,i:i+1]=idx
+
+                is_stop =  val == STOP_TOKEN
+                is_end = is_stop & (seg==S-1)
+                is_inc = ~is_end & is_stop
+                seg = is_inc * (seg+1) + ~is_inc *seg
+                idx = (~is_end & is_stop) * 0 + (~is_end & ~is_stop) *(idx+1) + is_end * idx
+                # is_end =
+                '''
+                if is_stop, increment segment number
+                '''
+
+            pos_list_new = seg_list_new * W + idx_list_new
+            target_mapped = torch.gather(segments.reshape((B,S*W)),index=pos_list_new,dim=-1)
+            target_mapped_notnull = torch.gather(segments_notnull.reshape((B,S*W)),index=pos_list_new,dim=-1)
+            # import pdb; pdb.set_trace()
+
+            if CLS_NAME in 'DLM106 DLM107'.split():
+                ## (B, S, W)
+                '''
+                Encoding the segments
+                with lower-level RNN
+                with KV attention
+                '''
+                ## (B, S, W, E ) x (W, E, K) -> (B, S, K)
+                segments_embed_seq = self.embed(segments)
+                segments_embed_seq = segments_embed_seq.reshape((B*S,W,E))
+                ## (B,S,W*E) -> (B,S,E)
+                segment_embed = self.word_enc(segments_embed_seq.reshape((B,S,W*E))).relu()
+                segment_embed = self.word_enc_2(segment_embed)
+                segment_embed = self.std_norm(segment_embed,-1)
+
+
+                '''
+                Run RNN on encoded segments
+
+                Make sure the encoding is calculated from left segments
+                '''
+                segment_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device), segment_embed],dim=1)[:,:-1]
+                # segment_embed_parent = segment_embed_parent/segment_embed_parent.std(dim=-1,keepdims=True)
+
+                prior = 0.
+                prior_sum = 0.
+
+                yp, h1 = self.rnn(segment_embed_parent, h0)
+                # yp = yp /(1E-3 + yp.std(dim=-1, keepdims=True))
+                yp = yp /(yp.std(dim=-1, keepdims=True))
+
+                ## (B,S,E)
+                segment_decoded = yp
+
+                if ret=='encode': return yp
+
+                '''
+                Decoding the predicted segments into predicted words
+
+                make sure the decoder does not see the required character
+                '''
+
+                ## (B,S,E) -> (B,S,W,E)
+                segment_decoded      = self.word_dec_2(segment_decoded).relu()
+                segments_decoded_seq = self.word_dec(segment_decoded).reshape((B,S,W,E))
+                # h0 = torch.ones([1,B*S,E],device=self.device,dtype=torch.float)
+                # h0 = h0 /(h0.std(dim=-1, keepdims=True))
+                segments_decoded_seq = self.std_norm(segments_decoded_seq,-1)
+
+                ## (B,S,W,G)
+                lpc = self.unembed(segments_decoded_seq).log_softmax(-1).reshape((B,S,W,G))
+
+            elif CLS_NAME in 'DLM108':
+
+                ## (B, S, W)
+                '''
+                Encoding the segments
+                with lower-level RNN
+                with KV attention
+                '''
+                ## (B, S, W, E ) x (W, E, K) -> (B, S, K)
+                segments_embed_seq = self.embed(segments)
+                segments_embed_seq = segments_embed_seq.reshape((B*S,W,E))
+
+                h0 = torch.ones([1,B*S,E],device=self.device)
+                v1 , h1 = self.rnn_word_enc(segments_embed_seq,h0)
+                segment_embed = h1.reshape((B,S,E))
+
+                '''
+                Run RNN on encoded segments
+
+                Make sure the encoding is calculated from left segments
+                '''
+                segment_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device), segment_embed],dim=1)[:,:-1]
+                # segment_embed_parent = segment_embed_parent/segment_embed_parent.std(dim=-1,keepdims=True)
+                h0 = torch.ones([1,B,E],device=self.device)
+                c0 = torch.ones([1,B,E],device=self.device)
+
+                prior = 0.
+                prior_sum = 0.
+
+                yp, h1 = self.rnn(segment_embed_parent, h0)
+                # yp = yp /(1E-3 + yp.std(dim=-1, keepdims=True))
+                yp = yp /(yp.std(dim=-1, keepdims=True))
+
+                ## (B,S,E)
+                segment_decoded = yp
+
+                if ret=='encode': return yp
+
+                '''
+                Decoding the predicted segments into predicted words
+
+                make sure the decoder does not see the required character
+                '''
+
+                h0 = torch.ones([1,B*S,E],device=self.device,dtype=torch.float)
+                # h0 = h0 /(h0.std(dim=-1, keepdims=True))
+
+
+                if 0:
+                    # h0 = h0 /(h0.std(dim=-1, keepdims=True))
+                    s1,_,s3 =  segments_embed_seq.shape
+                    segments_embed_seq_parent = torch.cat([segment_decoded.reshape((B*S,1,E)), segments_embed_seq],dim=1)[:,:-1]
+                    # segments_embed_seq_parent = self.std_norm(segments_embed_seq_parent,-1)
+                    # segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , h0 )
+                    segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , segment_decoded.reshape((1,B*S,E)) )
+                    # segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq    _parent , h0)
+
+
+                if 0:
+                    # h0 = h0 /(h0.std(dim=-1, keepdims=True))
+                    s1,_,s3 =  segments_embed_seq.shape
+                    segments_embed_seq_parent = torch.cat([torch.ones((s1,1,s3),device=self.device), segments_embed_seq],dim=1)[:,:-1]
+                    segments_embed_seq_parent = (segments_embed_seq_parent + segment_decoded.reshape((B*S,1,E))) * 0.5
+                    # segments_embed_seq_parent = torch.cat([ segments_embed_seq_parent[:,:,:E//2], segment_decoded.reshape((B*S,1,E)).repeat((1,W,1))[:,:,:E//2]],dim=-1)
+
+                    # segments_embed_seq_parent = self.std_norm(segments_embed_seq_parent,-1)
+                    segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , h0 )
+                    # segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq    _parent , h0)
+
+                if 0:
+                    s1,_,s3 =  segments_embed_seq.shape
+                    segments_embed_seq_parent = torch.cat([torch.ones((s1,1,s3),device=self.device), segments_embed_seq],dim=1)[:,:-1]
+                    # segments_embed_seq_parent = self.std_norm(segments_embed_seq_parent,-1)
+                    segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , segment_decoded.reshape((1,B*S,E)) )
+                    # segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq    _parent , h0)
+
+                if 1:
+                    '''
+                    Best so far
+                    '''
+                    s1,_,s3 =  segments_embed_seq.shape
+                    # segments_embed_seq_parent = torch.cat([torch.ones((s1,1,s3),device=self.device), segments_embed_seq],dim=1)[:,:-1]
+                    segments_embed_seq_parent = torch.cat([segment_decoded.reshape((B*S,1,E)), segments_embed_seq],dim=1)[:,:-1]
+                    # segments_embed_seq_parent = self.std_norm(segments_embed_seq_parent,-1)
+                    # segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , segment_decoded.reshape((1,B*S,E)) )
+                    segments_embed_seq_decoded, h1 = self.rnn_word_dec( segments_embed_seq_parent , h0)
+                    # segment_decoded.reshape((1,B*S,E)) )
+                    # segments_embed_seq_decoded = self.std_norm(segments_embed_seq_decoded,-1)
+
+                ## (B,S,W,G)
+                lpc = self.unembed(segments_embed_seq_decoded).log_softmax(-1).reshape((B,S,W,G))
+
+            else:
+                raise NotImplementedError
+
+
+
+            lpc
+            lp_seg = torch.gather(lpc,index=segments.unsqueeze(-1),dim=-1).squeeze(-1)
+
+
+            '''
+            Concat segments back into seqs
+
+            Needs to sample concatenation tokens at the end of segment.
+            '''
+
+            lp = torch.gather(lp_seg.reshape((B,S*W)),index=pos_list_new,dim=-1)
+            loss_per_loc = lp
+            # encode_lp =
+            lp_prior = (lp * target_mapped_notnull).sum(dim=1)
+            if CLS_NAME in 'DLM106'.split():
+                lp_encode = 0
+            elif CLS_NAME in 'DLM107 DLM108'.split():
+
+                lp_encode = (lp_isblank * target_notnull).sum(dim=1)
+            else:
+                raise NotImplementedError
+            # lp_prior_sum =
+            # lp_prior_sum = lp_prior_sum + lp_prior
+            lp_prior_list[:,ik] = lp_prior
+            lp_encode_list[:,ik] = lp_encode
+            # lp_weight[:,ik] = (lp_prior-lp_encode).detach()
+
+            # logp_sum = logp_sum +  (lp_prior + lp_encode * (lp_prior - lp_encode).detach())
+            # logp_sum
+        lp_weight_list = (lp_prior_list - lp_encode_list).detach()
+        if K>1:
+            lp_weight_list = lp_weight_list - lp_weight_list.mean(dim=1,keepdims=True)
+
+        logp_sum_grad = (lp_prior_list + lp_encode_list * lp_weight_list).mean(dim=1)
+        # logp_sum = logp_sum / (1.+ik)
+        logp_sum = (lp_prior_list - lp_encode_list).detach().mean(1)
+        print(lp_prior_list.mean(),lp_encode_list.mean())
+
+        ### normalise by average token count, but sum by batchsize
+        # lossVal = lossVal/ (source_notnull.sum() / B)
+        # print('[mean]',target_notnull.sum(1).float().mean())
+
+        logp_per_token = logp_sum/ target_mapped_notnull.sum(dim=1)
+        # loss = -logp_per_token
+        # logp_sum_grad
+
+        if ret=='forward':
+            return loss,att
+        elif ret in 'loss '.split():
+            return -logp_sum
+        elif ret=='grad_loss':
+            return -logp_sum_grad
+        elif ret=='loss_per_loc':
+            return -loss_per_loc,target_mapped_notnull
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
+
+
+
+class DLM107(DLM106):
+    pass
+
+class DLM108(DLM106):
+    pass
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        # self.G = G
+        E = config.embed_dim
+        self.rnn_word_enc = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        self.rnn_word_dec = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+
+
+class DLM105(DLMPrototype):
+    '''
+    Conv-GRU with lower channelcount for chars
+    '''
+    _custom_hidden_to_cats = 1
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+
+        G = config.graph_dim +1
+        self.G = G
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        self.S = 31
+        self.W = W = config.window_size
+        assert W >=1,config.window_size
+
+        self.embed      = nn.Embedding(G, E).to(self.device)
+
+        self.rnn      = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        self.word_enc = nn.Linear(W*E//4,E)
+        self.word_enc_2 = nn.Linear(E,E)
+        # self.word_enc_3 = nn.Linear(E,E)
+
+        self.word_dec = nn.Linear(E,W*E//4)
+        self.word_dec_2 = nn.Linear(E,E)
+        # self.word_dec_3 = nn.Linear(E,E)
+        # nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        # self.rnn_word_dec = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        K = config.kernel_size
+        assert K >=1,config
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+
+    _hidden_to_cats = None
+    def _hidden_to_cats(self, yp, target, ret):
+        # assert self._custom_hidden_to_cats == 1
+        # CLS_NAME = self.__class__.__name__
+        ## (B, T ,K )
+        kp = self.embed_to_logp(yp).log_softmax(-1)
+        yp = self.unembed( self.std_norm(self.k_vector,-1))
+        yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+
+        # if class
+        if ret=='full':
+            lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+            return lp
+
+        elif ret =='target':
+            # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+            model_w = yp.T[target]
+
+            ## yp (K, C)
+            ## kp (B,T,K)
+            lp = (model_w + kp)
+            return lp
+        else:
+            raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+
+
+    def _loss(self,item, ret):
+        CLS_NAME = self.__class__.__name__
+
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+
+        # source_embed = self.embed(source)
+        # source_len = item['source_len']
+        # source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        target_embed = self.embed(target)
+
+
+        T = target.size(1)
+        B = target.size(0)
+        N = W = self.config.window_size
+        K = self.config.kernel_size
+        target_len = item['target_len']
+        # target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+        # import pdb; pdb.set_trace()
+        if (item['has_start_token'].__class__==int and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
+            target_notnull[:,0] = False
+
+
+
+        WS = self.window_size
+        logp_sum = 0.
+        G = self.G
+        E = self.embed_dim
+        target_embed = self.embed(target)
+        B = len(target)
+        i = 0
+        att = torch.ones((B,1,1),device=self.device)
+
+
+        def s(v):
+            if torch.isnan(v).any():
+                import pdb; pdb.set_trace()
+
+        if 1:
+
+            target_isblank = item['target_isblank'] | ~target_notnull
+
+            ## (B, T)
+            '''
+            Segmenting sequences into sub-sequences
+
+            Restruct the input by cutting at blank position.
+
+            bound maximum segment count
+            '''
+
+
+
+            idx_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            idx      = torch.zeros((B,1),dtype=torch.long,device=self.device)
+            seg_list = torch.zeros((B,T),dtype=torch.long,device=self.device)
+            seg      = torch.ones((B,1),dtype=torch.long,device=self.device)
+            # seg_list = torch.zeros()
+            for i in range(T):
+                idx_list[:,i:i+1] = idx
+                seg_list[:,i:i+1] = seg * target_notnull[:,i:i+1] + 0 * ~target_notnull[:,i:i+1]
+                idx = target_isblank[:,i:i+1] * 0 + (idx+1) * ~target_isblank[:,i:i+1]
+                new_segment = target_isblank[:,i:i+1] & target_notnull[:,i:i+1]
+                seg = new_segment * (seg+1) + ~new_segment * seg
+            # torch.scatter()
+
+            S = self.S
+            # W = self.W
+            seg_list = seg_list.clip(0,S)
+            pos_list = seg_list * W + idx_list
+            segments = (G - 1)*torch.ones((B,S*W),dtype=torch.long,device=self.device)
+            segments = segments.scatter_(src=target,index=pos_list,dim=1).reshape((B,S,W))
+            segments[:,0]=0
+
+
+            # print(idx_list[0])
+            # print(seg_list[0])
+            # import pdb; pdb.set_trace()
+            ## (B, S, W)
+
+
+            '''
+            Encoding the segments
+            with lower-level RNN
+            with KV attention
+            '''
+            ## (B, S, W, E ) x (W, E, K) -> (B, S, K)
+            segments_embed_seq = self.embed(segments)
+            segments_embed_seq = segments_embed_seq.reshape((B*S,W,E))
+            ## (B,S,W*E) -> (B,S,E)
+            segment_embed = self.word_enc(segments_embed_seq[:,:,:E//4].reshape((B,S,W*E//4))).relu()
+            # segment_embed = segment_embed + self.word_enc_2(segment_embed).relu()
+            # segment_embed = segment_embed + self.word_enc_3(segment_embed)
+            segment_embed = self.word_enc_2(segment_embed)
+            segment_embed = self.std_norm(segment_embed,-1)
+
+
+
+            '''
+            Run RNN on encoded segments
+
+            Make sure the encoding is calculated from left segments
+            '''
+            segment_embed_parent = torch.cat([torch.ones((B,1,E),device=self.device), segment_embed],dim=1)[:,:-1]
+            # segment_embed_parent = segment_embed_parent/segment_embed_parent.std(dim=-1,keepdims=True)
+            h0 = torch.ones([1,B,E],device=self.device)
+            c0 = torch.ones([1,B,E],device=self.device)
+
+            prior = 0.
+            prior_sum = 0.
+
+            yp, h1 = self.rnn(segment_embed_parent, h0)
+            # yp = yp /(1E-3 + yp.std(dim=-1, keepdims=True))
+            yp = yp /(yp.std(dim=-1, keepdims=True))
+
+            ## (B,S,E)
+            segment_decoded = yp
+
+            if ret=='encode': return yp
+
+            '''
+            Decoding the predicted segments into predicted words
+
+            make sure the decoder does not see the required character
+            '''
+
+            ## (B,S,E) -> (B,S,W,E)
+            # segment_decoded = segment_decoded+self.word_dec_3(segment_decoded).relu()
+            # segment_decoded = segment_decoded+ self.word_dec_2(segment_decoded).relu()
+            segment_decoded = self.word_dec_2(segment_decoded).relu()
+            segments_decoded_seq = self.word_dec(segment_decoded).reshape((B,S,W,E//4)).repeat((1,1,1,4))
+            # h0 = torch.ones([1,B*S,E],device=self.device,dtype=torch.float)
+            # h0 = h0 /(h0.std(dim=-1, keepdims=True))
+            segments_decoded_seq = self.std_norm(segments_decoded_seq,-1)
+
+
+
+            ## (B,S,W,G)
+            lpc = self.unembed(segments_decoded_seq).log_softmax(-1).reshape((B,S,W,G))
+            lp = torch.gather(lpc,index=segments.unsqueeze(-1),dim=-1).squeeze(-1)
+
+
+            '''
+            Concat segments back into seqs
+            '''
+
+            lp = torch.gather(lp.reshape((B,S*W)),index=pos_list,dim=-1)
+            loss_per_loc = lp
+            # logp_sum = (lp * target_notnull_segment).sum(dim=(1,2))
+            logp_sum = (lp * target_notnull).sum(dim=1)
+
+
+        ### normalise by average token count, but sum by batchsize
+        # lossVal = lossVal/ (source_notnull.sum() / B)
+        # print('[mean]',target_notnull.sum(1).float().mean())
+
+        logp_per_token = logp_sum/ target_notnull.sum(dim=1)
+        # loss = -logp_per_token
+        loss = -logp_sum
+
+        if ret=='forward':
+            return loss,att
+        elif ret in 'loss grad_loss'.split():
+            return loss
+        # elif ret=='grad_loss':
+        #     return loss
+        elif ret=='loss_per_loc':
+            return -loss_per_loc,target_notnull
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
+
+
+class DLM112(DLMPrototype):
+    '''
+    Conv-GRU with lower channelcount for chars
+    '''
+    _custom_hidden_to_cats = 1
+    debug = 0
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+
+        G = config.graph_dim +1
+        self.G = G
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        # self.S = 31
+        self.W = W = config.window_size
+        # assert W >=1,config.window_size
+
+        self.embed      = nn.Embedding(G, E).to(self.device)
+
+        x = nn.Linear(1, E ).to(self.device)
+        self.prior_mu   =  nn.Parameter(x.weight.T[None])
+
+        x = nn.Linear(1, E ).to(self.device)
+        self.prior_beta   =  nn.Parameter(x.weight.T[None])
+
+        x = nn.Linear(1, E ).to(self.device)
+        self.encoder_beta   =  nn.Parameter(x.weight.T[None])
+
+        # self.rnn      = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        K = config.kernel_size
+        assert K >=1,config
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+
+    def log_param(self,buf,plt):
+        # return
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        key = 'prior_beta'
+        mat = getattr(self,key).cpu().detach().ravel()[:50,None]
+        # mat = self.prior_beta.cpu().detach().ravel()[:50,None]
+        # im = ax.imshow(mat,vmin=0.0,vmax=0.5)
+        im = ax.imshow(mat.T,vmin=None,vmax=None,origin='lower')
+        # im = ax.imshow(mat,)
+        plt.sca(ax)
+        plt.colorbar(im)
+        epoch = self.meta['epoch']
+        ax.set_title(f'[log_param]{key}\nModel_name={self.config.model_name}\nEpoch:{epoch}\nmeanSquared:{mat.square().mean()}')
+        plt.suptitle('')
+        buf.write(write_png_tag(fig))
+
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        key = 'prior_mu'
+        mat = getattr(self,key).cpu().detach().ravel()[:50,None]
+        # im = ax.imshow(mat,vmin=0.0,vmax=0.5)
+        im = ax.imshow(mat.T,vmin=None,vmax=None,origin='lower')
+        # im = ax.imshow(mat,)
+        plt.sca(ax)
+        plt.colorbar(im)
+        epoch = self.meta['epoch']
+        ax.set_title(f'[log_param]{key}\nModel_name={self.config.model_name}\nEpoch:{epoch}\nmeanSquared:{mat.square().mean()}')
+        plt.suptitle('')
+        buf.write(write_png_tag(fig))
+
+
+        fig,ax = plt.subplots(1,1,figsize=[10,10])
+        key = 'encoder_beta'
+        mat = getattr(self,key).cpu().detach().ravel()[:50,None]
+        # mat = getattr(self,key).cpu().detach().ravel()[:,None]
+        # im = ax.imshow(mat,vmin=0.0,vmax=0.5)
+        im = ax.imshow(mat.T,vmin=None,vmax=None,origin='lower')
+        # im = ax.imshow(mat,)
+        plt.sca(ax)
+        plt.colorbar(im)
+        epoch = self.meta['epoch']
+        ax.set_title(f'[log_param]{key}\nModel_name={self.config.model_name}\nEpoch:{epoch}\nmeanSquared:{mat.square().mean()}')
+        plt.suptitle('')
+        buf.write(write_png_tag(fig))
+
+        pass
+
+
+    _hidden_to_cats = None
+    def _hidden_to_cats(self, yp, target, ret):
+        # assert self._custom_hidden_to_cats == 1
+        # CLS_NAME = self.__class__.__name__
+        ## (B, T ,K )
+        kp = self.embed_to_logp(yp).log_softmax(-1)
+        yp = self.unembed( self.std_norm(self.k_vector,-1))
+        yp = (torch.exp(self.k_scale)* yp ).log_softmax(-1)
+
+        # if class
+        if ret=='full':
+            lp = (yp[None,None] + kp.unsqueeze(-1)).logsumexp(2)
+            return lp
+
+        elif ret =='target':
+            # if CLS_NAME in 'DLM29 DLM43 DLM44 DLM46 DLM47'.split():
+            model_w = yp.T[target]
+
+            ## yp (K, C)
+            ## kp (B,T,K)
+            lp = (model_w + kp)
+            return lp
+        else:
+            raise NotImplementedError( f'{ret!r} for {CLS_NAME!r}' )
+    @staticmethod
+    def _diag_normal_logp(zs,mu_p,beta_p):
+        return (( -0.5*(( zs - mu_p)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi) ))
+
+    def shift_pad_left(self,target_embed, n=1,c=1):
+        B,_,E = target_embed.shape
+        target_embed_parent = torch.cat([c*torch.ones((B,n,E),device=self.device),target_embed],dim=1)[:,:-n]
+        return target_embed_parent
+
+    def _loss(self,item, ret):
+        CLS_NAME = self.__class__.__name__
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+        # source_embed = self.embed(source)
+        # source_len = item['source_len']
+        # source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        target_embed = self.embed(target)
+
+
+        T = target.size(1)
+        B = target.size(0)
+        E = self.config.embed_dim
+        N = W = self.config.window_size
+        K = self.config.kernel_size
+        target_len = item['target_len']
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+
+        if (item['has_start_token'].__class__==int and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
+            target_notnull[:,0] = False
+
+        lp_prior_list = torch.zeros((B,W),device=self.device,dtype=torch.float)
+        lp_encode_list = torch.zeros((B,W),device=self.device,dtype=torch.float)
+        lp_decode_list = torch.zeros((B,W),device=self.device,dtype=torch.float)
+        lp_weight_list = torch.zeros((B,W),device=self.device,dtype=torch.float)
+        for iw in range(W):
+            # target_embed_parent = target_embed_parent/target_embed_parent.std(dim=1,keepdims=True)
+            # h0 = torch.ones([1,B,E],device=self.device)
+            # c0 = torch.ones([1,B,E],device=self.device)
+            '''
+            Resampling Encoder
+            '''
+            ### (B,T,E)
+            ### (1,1,E)
+            encoder_mu    = target_embed
+            encoder_beta  = self.encoder_beta.exp()
+
+            prior_mu   = self.prior_mu
+            prior_beta = self.prior_beta.exp()
+
+            if ret=='encode':
+                return encoder_mu
+
+            ### (B*K,T,E)
+            if CLS_NAME in 'DLM112 DLM113'.split():
+                encoder_beta = encoder_beta.clip(0.4,None)
+
+                zs = torch.normal( 0, 1, encoder_mu.shape, device=self.device) / encoder_beta + encoder_mu
+                lp_prior  = self._diag_normal_logp(zs, prior_mu, prior_beta).sum(-1)
+                lp_encode = self._diag_normal_logp(zs, encoder_mu,  encoder_beta).sum(-1)
+
+            elif CLS_NAME in 'DLM114'.split():
+                encoder_beta = encoder_beta.clip(0.4,None)
+                zs = torch.normal( 0, 1, encoder_mu.shape, device=self.device) / encoder_beta + encoder_mu
+                # (B,T,E,1) - (1,1,E,K)
+                lp_prior  = self._diag_normal_logp(zs.unsqueeze(-1), prior_mu, prior_beta)
+                lp_prior = ((lp_prior ).sum(2) - math.log(K) ).logsumexp(-1)
+
+                lp_encode = self._diag_normal_logp( zs, encoder_mu,  encoder_beta).sum(-1)
+
+            elif CLS_NAME in 'DLM115'.split():
+                encoder_beta = encoder_beta.clip(0.4,None)
+                zs = torch.normal( 0, 1, encoder_mu.shape, device=self.device) / encoder_beta + encoder_mu
+                # (B,T,E,1) - (1,1,E,K)
+                lp_prior  = torch.cat(
+                [self._diag_normal_logp(zs.unsqueeze(-1), prior_mu,                                prior_beta)[:,:,:,:-1],
+                 self._diag_normal_logp(zs.unsqueeze(-1), self.shift_pad_left(self.lin_layer(zs)).unsqueeze(-1), prior_beta),
+                 ],dim=-1)
+
+                lp_prior = ((lp_prior ).sum(2) - math.log(K) ).logsumexp(-1)
+
+                lp_encode = self._diag_normal_logp( zs, encoder_mu,  encoder_beta).sum(-1)
+            elif CLS_NAME in 'DLM116'.split():
+                encoder_mu = self.project((target_embed*target_notnull.unsqueeze(-1)).reshape((B,1,T*E)))
+
+                zs = torch.normal( 0, 1, encoder_mu.shape, device=self.device) / encoder_beta + encoder_mu
+                # (B,T,E,1) - (1,1,E,K)
+                lp_prior  = torch.cat(
+                [self._diag_normal_logp(zs.unsqueeze(-1), prior_mu,                                prior_beta)[:,:,:,:-1],
+                 self._diag_normal_logp(zs.unsqueeze(-1), self.shift_pad_left(self.lin_layer(zs)).unsqueeze(-1), prior_beta),
+                 ],dim=-1)
+                lp_prior = ((lp_prior ).sum(2) - math.log(K) ).logsumexp(-1)
+                lp_encode = self._diag_normal_logp( zs, encoder_mu,  encoder_beta).sum(-1)
+                zs  =self.unproject(zs).reshape((B,T,E))
+
+            elif CLS_NAME in 'DLM117'.split():
+                encoder_mu = self.conv_layer(encoder_mu.transpose(1,2)).transpose(1,2)
+                encoder_beta = encoder_beta.clip(0.4,None)
+                zs = torch.normal( 0, 1, encoder_mu.shape, device=self.device) / encoder_beta + encoder_mu
+                # (B,T,E,1) - (1,1,E,K)
+                lp_prior  = self._diag_normal_logp(zs.unsqueeze(-1), prior_mu, prior_beta)
+                lp_prior = ((lp_prior ).sum(2) - math.log(K) ).logsumexp(-1)
+
+                lp_encode = self._diag_normal_logp( zs, encoder_mu,  encoder_beta).sum(-1)
+                zs = self.convt_layer(zs.transpose(1,2)).transpose(1,2)
+            elif CLS_NAME in 'DLM118'.split():
+                x0 = encoder_mu
+                encoder_mu = self.conv_layer(x0.transpose(1,2)).transpose(1,2)
+                encoder_mu = x0 + encoder_mu
+                encoder_beta = encoder_beta.clip(0.4,None)
+
+                zs = torch.normal( 0, 1, encoder_mu.shape, device=self.device) / encoder_beta + encoder_mu
+
+                # (B,T,E,1) - (1,1,E,K)
+                lp_prior  = self._diag_normal_logp(zs.unsqueeze(-1), prior_mu, prior_beta)
+                lp_prior = ((lp_prior ).sum(2) - math.log(K) ).logsumexp(-1)
+
+                lp_encode = self._diag_normal_logp( zs, encoder_mu,  encoder_beta).sum(-1)
+                zs = self.convt_layer(zs.transpose(1,2)).transpose(1,2) + zs
+            elif CLS_NAME in 'DLM119 DLM120'.split():
+                x0 = encoder_mu
+                encoder_mu = self.conv_layer(x0.transpose(1,2)).transpose(1,2)
+                if CLS_NAME in 'DLM119'.split():
+                    encoder_mu = x0 + encoder_mu
+                elif CLS_NAME in 'DLM120'.split():
+                    encoder_mu
+                else:
+                    raise NotImplementedError
+                encoder_beta = encoder_beta.clip(0.4,None)
+
+                zs = torch.normal( 0, 1, encoder_mu.shape, device=self.device) / encoder_beta + encoder_mu
+
+                # (B,T,E,1) - (1,1,E,K)
+                lp_prior  = self._diag_normal_logp(zs.unsqueeze(-1), prior_mu, prior_beta)
+                lp_prior = ((lp_prior ).sum(2) - math.log(K) ).logsumexp(-1)
+
+                lp_encode = self._diag_normal_logp( zs, encoder_mu,  encoder_beta).sum(-1)
+                zs =self.convt_layer(zs.tanh().transpose(1,2)).transpose(1,2)
+                # zs = self.convt_layer(zs.transpose(1,2)).transpose(1,2) + zs
+            elif CLS_NAME in 'DLM121'.split():
+                x0 = encoder_mu
+                encoder_mu = encoder_mu + self.conv_layer(encoder_mu.transpose(1,2)).transpose(1,2)
+                encoder_mu = encoder_mu + self.conv_layer(encoder_mu.transpose(1,2)).transpose(1,2)
+                encoder_beta = encoder_beta.clip(0.4,None)
+
+                zs = torch.normal( 0, 1, encoder_mu.shape, device=self.device) / encoder_beta + encoder_mu
+
+                # (B,T,E,1) - (1,1,E,K)
+                lp_prior  = self._diag_normal_logp(zs.unsqueeze(-1), prior_mu, prior_beta)
+                lp_prior = ((lp_prior ).sum(2) - math.log(K) ).logsumexp(-1)
+
+                lp_encode = self._diag_normal_logp( zs, encoder_mu,  encoder_beta).sum(-1)
+                zs =self.convt_layer(zs.tanh().transpose(1,2)).transpose(1,2)
+                zs =self.convt_layer(zs.tanh().transpose(1,2)).transpose(1,2)
+                # zs = self.convt_layer(zs.transpose(1,2)).transpose(1,2) + zs
+            elif CLS_NAME in 'DLM123 DLM125'.split():
+                x0 = encoder_mu
+                D = self.config.depth
+                for i in range(D):
+                    encoder_mu = encoder_mu + self.conv_layer(encoder_mu.transpose(1,2)).transpose(1,2)
+                # encoder_mu = encoder_mu + self.conv_layer(encoder_mu.transpose(1,2)).transpose(1,2)
+                # encoder_mu = encoder_mu + self.conv_layer(encoder_mu.transpose(1,2)).transpose(1,2)
+                encoder_beta = encoder_beta.clip(0.4,None)
+
+                if CLS_NAME in 'DLM125'.split():
+                    '''
+                    noise-free model
+                    '''
+                    zs = encoder_mu
+                    lp_prior  = self._diag_normal_logp(zs.unsqueeze(-1), prior_mu, prior_beta)
+                    lp_prior = ((lp_prior ).sum(2) - math.log(K) ).logsumexp(-1)
+
+                    lp_encode = self._diag_normal_logp( zs, encoder_mu,  encoder_beta).sum(-1)
+
+                elif CLS_NAME in 'DLM123'.split():
+                    zs = torch.normal( 0, 1, encoder_mu.shape, device=self.device) / encoder_beta + encoder_mu
+
+                    # (B,T,E,1) - (1,1,E,K)
+                    lp_prior  = self._diag_normal_logp(zs.unsqueeze(-1), prior_mu, prior_beta)
+                    lp_prior = ((lp_prior ).sum(2) - math.log(K) ).logsumexp(-1)
+
+                    lp_encode = self._diag_normal_logp( zs, encoder_mu,  encoder_beta).sum(-1)
+                else:
+                    raise NotImplementedError
+                for i in range(D):
+                    zs =self.convt_layer(zs.tanh().transpose(1,2)).transpose(1,2)
+                # zs =self.convt_layer(zs.tanh().transpose(1,2)).transpose(1,2)
+                # zs =self.convt_layer(zs.tanh().transpose(1,2)).transpose(1,2)
+                # zs = self.convt_layer(zs.transpose(1,2)).transpose(1,2) + zs
+
+            elif CLS_NAME in 'DLM124'.split():
+                x0 = encoder_mu
+                D = self.config.depth
+                for i in range(D):
+                    encoder_mu = encoder_mu + self.conv_layer(encoder_mu.tanh().transpose(1,2)).transpose(1,2)
+                # encoder_mu = encoder_mu + self.conv_layer(encoder_mu.transpose(1,2)).transpose(1,2)
+                # encoder_mu = encoder_mu + self.conv_layer(encoder_mu.transpose(1,2)).transpose(1,2)
+                encoder_beta = encoder_beta.clip(0.6,None)
+
+                zs = torch.normal( 0, 1, encoder_mu.shape, device=self.device) / encoder_beta + encoder_mu
+
+                # (B,T,E,1) - (1,1,E,K)
+                lp_prior  = self._diag_normal_logp(zs.unsqueeze(-1), prior_mu, prior_beta)
+                lp_prior = ((lp_prior ).sum(2) - math.log(K) ).logsumexp(-1)
+
+                lp_encode = self._diag_normal_logp( zs, encoder_mu,  encoder_beta).sum(-1)
+                for i in range(D):
+                    zs =self.convt_layer(zs.tanh().transpose(1,2)).transpose(1,2)
+                # zs =self.convt_layer(zs.tanh().transpose(1,2)).transpose(1,2)
+                # zs =self.convt_layer(zs.tanh().transpose(1,2)).transpose(1,2)
+                # zs = self.convt_layer(zs.transpose(1,2)).transpose(1,2) + zs
+
+            elif CLS_NAME in 'DLM122'.split():
+                x0 = encoder_mu
+                encoder_mu = encoder_mu + self.conv_layer(encoder_mu.transpose(1,2)).transpose(1,2)
+                encoder_mu = encoder_mu + self.conv_layer_2(encoder_mu.transpose(1,2)).transpose(1,2)
+                encoder_beta = encoder_beta.clip(0.4,None)
+
+                zs = torch.normal( 0, 1, encoder_mu.shape, device=self.device) / encoder_beta + encoder_mu
+
+                # (B,T,E,1) - (1,1,E,K)
+                lp_prior  = self._diag_normal_logp(zs.unsqueeze(-1), prior_mu, prior_beta)
+                lp_prior = ((lp_prior ).sum(2) - math.log(K) ).logsumexp(-1)
+
+                lp_encode = self._diag_normal_logp( zs, encoder_mu,  encoder_beta).sum(-1)
+                zs =self.convt_layer(zs.tanh().transpose(1,2)).transpose(1,2)
+                zs =self.convt_layer_2(zs.tanh().transpose(1,2)).transpose(1,2)
+                # zs = self.convt_layer(zs.transpose(1,2)).transpose(1,2) + zs
+
+            else:
+                raise NotImplementedError
+
+
+            if CLS_NAME in 'DLM113'.split():
+                zs = self.lin_layer(zs.relu())
+
+            lpc = self.unembed(zs).log_softmax(-1)
+            # lpc = self.unembed(self.std_norm(zs,-1)).log_softmax(-1)
+            lp_decode = torch.gather(lpc,index=target.unsqueeze(-1),dim=-1).squeeze(-1)
+
+            lp_prior_list[:,iw] = (lp_prior*target_notnull).sum(-1)
+            lp_decode_list[:,iw]= (lp_decode*target_notnull).sum(-1)
+            lp_encode_list[:,iw]= (lp_encode*target_notnull).sum(-1)
+            loss_per_loc = -(lp_prior + lp_decode - lp_encode)
+
+        lp_weight_list = (lp_prior_list+lp_decode_list - lp_encode_list).detach()
+        if W==1:
+            pass
+        else:
+            pass
+            # lp_weight_list = lp_weight_list-lp_weight_list.mean(-1,keepdims=True)
+
+        logp_sum_grad = (lp_prior_list + lp_decode_list + lp_encode_list * lp_weight_list).mean(dim=1)
+        logp_sum = (lp_prior_list + lp_decode_list - lp_encode_list).detach().mean(1)
+        ### normalise by average token count, but sum by batchsize
+        # lossVal = lossVal/ (source_notnull.sum() / B)
+        # print('[mean]',target_notnull.sum(1).float().mean())
+        self.debug = 0
+        if self.debug:
+            print(f'e_beta:{encoder_beta.mean():.4f} w_beta:{prior_beta.mean():.4f} '
+            f'e_mu_mse:{encoder_mu.square().mean():.4f} w_mu_mse:{prior_mu.square().mean():.4f} ')
+            print(f'lp_prior:{lp_prior_list.mean():.4f}  lp_decode:{lp_decode_list.mean():.4f} '
+            f'lp_encode:{lp_encode_list.mean():.4f}')
+
+        # import pdb; pdb.set_trace()
+        logp_per_token = logp_sum/ target_notnull.sum(dim=1).clip(1,None)
+        loss = -logp_sum
+        att = torch.zeros((B,T,1),device = self.device)
+        # import pdb; pdb.set_trace()
+        if ret=='forward':
+            return logp_sum.unsqueeze(-1),att
+        elif ret in 'loss'.split():
+            return -logp_sum
+            # return loss_per_loc *
+            # return (loss_per_loc * target_notnull).sum(dim=-1)
+            # return -logp_per_token
+            # sum / target_notnull.sum(dim=1)
+        elif ret=='grad_loss':
+            return -logp_sum_grad
+        elif ret=='loss_per_loc':
+            return loss_per_loc,target_notnull
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
+
+
+
+class DLM130(DLMPrototype):
+    '''
+    HMM copy
+    '''
+    _custom_hidden_to_cats = 1
+    debug = 0
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+
+        G = config.graph_dim +1
+        self.G = G
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        x = nn.Linear(1, 1 ).to(self.device)
+        self.jump_prob   =  nn.Parameter(x.weight[0,0])
+        # .T[None])
+        # self.emission = x
+        # self.S = 31
+        self.W = W = config.window_size
+        # assert W >=1,config.window_size
+
+        self.embed      = nn.Embedding(G, E).to(self.device)
+
+        # x = nn.Linear(1, E ).to(self.device)
+        # self.prior_mu   =  nn.Parameter(x.weight.T[None])
+        #
+        # x = nn.Linear(1, E ).to(self.device)
+        # self.prior_beta   =  nn.Parameter(x.weight.T[None])
+        #
+        # x = nn.Linear(1, E ).to(self.device)
+        # self.encoder_beta   =  nn.Parameter(x.weight.T[None])
+        #
+        # self.rnn      = nn.GRU(input_size = E,hidden_size=E, batch_first= True, num_layers=1)
+        K = config.kernel_size
+        assert K >=1,config
+        # self.unembed = nn.Linear(config.embed_dim, config.graph_dim).to(self.device)
+
+    @staticmethod
+    def _diag_normal_logp(zs,mu_p,beta_p):
+        return (( -0.5*(( zs - mu_p)*beta_p).square() + beta_p.log() - 0.5 * math.log(2*math.pi) ))
+
+    def shift_pad_left(self,target_embed, n=1,c=1):
+        B,_,E = target_embed.shape
+        target_embed_parent = torch.cat([c*torch.ones((B,n,E),device=self.device),target_embed],dim=1)[:,:-n]
+        return target_embed_parent
+
+    def _loss(self,item, ret):
+        CLS_NAME = self.__class__.__name__
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+        # source_embed = self.embed(source)
+        # source_len = item['source_len']
+        # source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        target_embed = self.embed(target)
+
+
+        T = target.size(1)
+        B = target.size(0)
+        E = self.config.embed_dim
+        N = W = self.config.window_size
+        K = self.config.kernel_size
+        target_len = item['target_len']
+        target_notnull = torch.arange(target.size(1),device=self.device)[None,:]<target_len[:,None]
+
+
+        log_pzo_list = torch.ones((B,T,E),device=self.device,dtype=torch.float)
+        log_pz = torch.ones((B,E,1),device=self.device,dtype=torch.float)
+        log_pz = log_pz.log_softmax(1)
+        log_pz_0 = log_pz
+        # bp = self.
+        pb = self.jump_prob.sigmoid()
+        # beta_p = torch.tensor(self.config.beta).sigmoid()
+        ## self.emission (E,G)
+        _emit_p = self.embed.weight.T.log_softmax(-1)
+        self.v = _emit_p.argmax(1)
+        if 0:
+            vvv = []
+            for vv in conf.model.v: vvv.append(conf.dataset.vocab.wordize(min(vv,conf.model.G-1-1)))
+            print(''.join(vvv))
+
+        for it in range(T):
+            # target
+            ## self.emission.T[target[:,it:it+1]] (B,1,E)
+            # log_e = self.emission.T[target[:,it:it+1]].transpsoe(2,1)
+            log_e = _emit_p.T[target[:,it:it+1]].transpose(2,1)
+            log_pzo = (log_pz +log_e)
+            log_pzo_list[:,it:it+1]=log_pzo.transpose(2,1)
+
+            log_pz = torch.cat([
+                (pb.log() + log_pzo.roll(1,dims=(1))),
+                (1-pb).log() + log_pz_0,
+            ],dim=2).logsumexp(2).unsqueeze(-1)
+            print(log_pzo.logsumexp(1).mean())
+            pass
+
+        ### directly calculate logp_sum
+        # log_a
+        # log_t
+        logp_per_loc = log_pzo_list.logsumexp(2)
+        logp_per_loc = logp_per_loc-logp_per_loc.roll(1,dims=(1,))
+        loss_per_loc = -logp_per_loc
+
+        logp_sum = (logp_per_loc*target_notnull).sum(1)
+        # logp_sum = log_pzo.logsumexp(1).squeeze(-1)
+        logp_sum_grad = -logp_sum
+
+        ### normalise by average token count, but sum by batchsize
+        # lossVal = lossVal/ (source_notnull.sum() / B)
+        # print('[mean]',target_notnull.sum(1).float().mean())
+        self.debug = 0
+        if self.debug:
+            print(f'e_beta:{encoder_beta.mean():.4f} w_beta:{prior_beta.mean():.4f} '
+            f'e_mu_mse:{encoder_mu.square().mean():.4f} w_mu_mse:{prior_mu.square().mean():.4f} ')
+            print(f'lp_prior:{lp_prior_list.mean():.4f}  lp_decode:{lp_decode_list.mean():.4f} '
+            f'lp_encode:{lp_encode_list.mean():.4f}')
+
+        # import pdb; pdb.set_trace()
+        logp_per_token = logp_sum/ target_notnull.sum(dim=1).clip(1,None)
+        loss = -logp_sum
+        att = torch.zeros((B,T,1),device = self.device)
+        # import pdb; pdb.set_trace()
+        if ret=='encode':
+            return att
+        if ret=='forward':
+            return logp_sum.unsqueeze(-1),att
+        elif ret in 'loss'.split():
+            return -logp_sum
+            # return loss_per_loc *
+            # return (loss_per_loc * target_notnull).sum(dim=-1)
+            # return -logp_per_token
+            # sum / target_notnull.sum(dim=1)
+        elif ret=='grad_loss':
+            return -logp_sum_grad
+        elif ret=='loss_per_loc':
+            return loss_per_loc,target_notnull
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
+
+# class DLM113(DLMPrototype):
+
+class DLM113(DLM112):
+    # Prototype):
+    '''
+    Conv-GRU with lower channelcount for chars
+    '''
+    _custom_hidden_to_cats = 1
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+
+        G = config.graph_dim +1
+        self.G = G
+        E = config.embed_dim
+        # self.S = 31
+        self.W = W = config.window_size
+        # assert W >=1,config.window_size
+        self.lin_layer = nn.Linear(E, E ).to(self.device)
+
+class DLM114(DLM112):
+    # Prototype):
+    '''
+    Conv-GRU with lower channelcount for chars
+    '''
+    _custom_hidden_to_cats = 1
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+
+        G = config.graph_dim +1
+        self.G = G
+        K = config.kernel_size
+        assert K >=1,config
+        E = config.embed_dim
+        # self.S = 31
+        self.W = W = config.window_size
+        self.K = K = config.kernel_size
+
+        x = nn.Linear(E,K).to(self.device)
+        self.prior_mu   =  nn.Parameter(x.weight.T[None,None])
+
+        x = nn.Linear(E,1 ).to(self.device)
+        self.prior_beta   =  nn.Parameter(x.weight.T[None,None])
+
+        # assert W >=1,config.window_size
+        # self.lin_layer = nn.Linear(E, E ).to(self.device)
+
+class DLM117(DLM112):
+    # Prototype):
+    '''
+    Conv-GRU with lower channelcount for chars
+    '''
+    _custom_hidden_to_cats = 1
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+
+        G = config.graph_dim +1
+        self.G = G
+        K = config.kernel_size
+        assert K >=1,config
+        E = config.embed_dim
+        # self.S = 31
+        self.W = W = config.window_size
+        self.K = K = config.kernel_size
+
+        x = nn.Linear(E,K).to(self.device)
+        self.prior_mu   =  nn.Parameter(x.weight.T[None,None])
+
+        x = nn.Linear(E,1 ).to(self.device)
+        self.prior_beta   =  nn.Parameter(x.weight.T[None,None])
+
+        self.conv_layer = nn.Conv1d(E,E,kernel_size = 5, padding='same')
+        self.convt_layer = nn.Conv1d(E,E,kernel_size = 5, padding='same')
+        # self.convt_layer = nn.ConvTranspose1d(E,E,kernel_size = 5, padding='same')
+
+        # assert W >=1,config.window_size
+        # self.lin_layer = nn.Linear(E, E ).to(self.device)
+class DLM118(DLM117):
+    pass
+class DLM119(DLM117):
+    pass
+class DLM120(DLM117):
+    pass
+class DLM121(DLM117):
+    pass
+class DLM123(DLM117):
+    pass
+class DLM124(DLM117):
+    pass
+class DLM125(DLM117):
+    pass
+class DLM122(DLM117):
+    _custom_hidden_to_cats = 1
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+
+        G = config.graph_dim +1
+        self.G = G
+        K = config.kernel_size
+        assert K >=1,config
+        E = config.embed_dim
+        # self.S = 31
+        self.W = W = config.window_size
+        self.K = K = config.kernel_size
+
+        x = nn.Linear(E,K).to(self.device)
+        self.prior_mu   =  nn.Parameter(x.weight.T[None,None])
+
+        x = nn.Linear(E,1 ).to(self.device)
+        self.prior_beta   =  nn.Parameter(x.weight.T[None,None])
+
+        self.conv_layer = nn.Conv1d(E,E,kernel_size = 5, padding='same')
+        self.conv_layer_2 = nn.Conv1d(E,E,kernel_size = 5, padding='same')
+        self.convt_layer = nn.Conv1d(E,E,kernel_size = 5, padding='same')
+        self.convt_layer_2 = nn.Conv1d(E,E,kernel_size = 5, padding='same')
+        # self.convt_layer = nn.ConvTranspose1d(E,E,kernel_size = 5, padding='same')
+
+        # assert W >=1,config.window_size
+        # self.lin_layer = nn.Linear(E, E ).to(self.device)
+class DLM115(DLM112):
+    # Prototype):
+    '''
+    Conv-GRU with lower channelcount for chars
+    '''
+    _custom_hidden_to_cats = 1
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+
+        G = config.graph_dim +1
+        self.G = G
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        # self.S = 31
+        self.W = W = config.window_size
+        self.K = K = config.kernel_size
+
+        x = nn.Linear(E,K).to(self.device)
+        self.prior_mu   =  nn.Parameter(x.weight.T[None,None])
+
+        x = nn.Linear(E,1 ).to(self.device)
+        self.prior_beta   =  nn.Parameter(x.weight.T[None,None])
+        self.lin_layer = nn.Linear(E, E ).to(self.device)
+
+        # assert W >=1,config.window_size
+
+
+class DLM116(DLM112):
+    # Prototype):
+    '''
+    Conv-GRU with lower channelcount for chars
+    '''
+    _custom_hidden_to_cats = 1
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+
+        G = config.graph_dim +1
+        self.G = G
+        # K = config.kernel_size
+        # assert K >=1,config
+        E = config.embed_dim
+        # self.S = 31
+        self.W = W = config.window_size
+        self.K = K = config.kernel_size
+
+        x = nn.Linear(E,K).to(self.device)
+        self.prior_mu   =  nn.Parameter(x.weight.T[None,None])
+
+        x = nn.Linear(E,1 ).to(self.device)
+        self.prior_beta   =  nn.Parameter(x.weight.T[None,None])
+        self.lin_layer = nn.Linear(E, E ).to(self.device)
+        # T = self
+        T = 100
+        self.project = nn.Linear(E*T,E)
+        self.unproject = nn.Linear(E,E*T)
+        # assert W >=1,config.window_size
+
 class DLM26(DLMPrototype):
     def __init__(self,device,config,_=None):
         super().__init__(device,config)
@@ -3338,7 +6596,6 @@ class DLM26(DLMPrototype):
                 lp = tok*0
             else:
                 # import pdb; pdb.set_trace()
-
                 # logp = self._hidden_to_cats(ypp,ret='full',target=None).log_softmax(-1)
                 # if prompt
                 if 0:

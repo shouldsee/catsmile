@@ -136,6 +136,10 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
     # CKPT = conf.CKPT
     model = conf.model
     dataset = conf.dataset
+    if '--debug' in sys.argv:
+        model.debug=1
+    else:
+        model.debug =0
 
     sys_argv = sys.argv
     k =  '--LOAD_ABS'

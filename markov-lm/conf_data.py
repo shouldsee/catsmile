@@ -28,10 +28,15 @@ if 1:
 
             codes,seq_len = self.get_codes_from_file(fn, self.vocab, max_len, self.SKIP)
             self.codes = codes
+            codes = self.codes.detach().cpu().numpy()
+            # for v in codes:
+            #     print(v)
+            self.texts  = [''.join([self.vocab.i2w[vv] for vv in v]) for v in codes]
             self.seq_len= seq_len
             self.test_count  = codes.__len__()//test_fold
             self.train_count = codes.__len__() - self.test_count
             self.test_fold = test_fold
+            # self.test_offset = test_fold
             self.train()
 
 
@@ -44,6 +49,7 @@ if 1:
                 fa = fa[1:: skip_len]
                 for i,v in enumerate(fa):
                     seql = min(max_len-1, len(v))+1
+                    # print(v.split('i'))
                     v = list(v[:max_len-1])
                     v = ['<bos>'] + v + ['<pad>'] * (max_len - 1 - len(v))
                     # more = set(v) - self.vocab
@@ -57,6 +63,7 @@ if 1:
             codes = torch.tensor(buf,device = self.device,dtype= torch.long)
             seq_len = torch.tensor(seql_list,device=self.device,dtype=torch.long)
             return codes,seq_len
+
         @property
         def graph_dim(self): return self.vocab.__len__()
 
@@ -74,6 +81,12 @@ if 1:
 
         def __getitem__(self,index):
             # cycle = index//self.test_fold
+
+            # if (self.mode=='test'):
+            #     index = self.train_count + index
+            # else:
+            #     index = index
+
             if(self.mode=="test"):
                 index = ( index + 1 )* self.test_fold - 1
                 # index = index + self.test_offset
@@ -85,19 +98,90 @@ if 1:
                 index = i * self.test_fold + mod
                 assert (index + 1) % self.test_fold != 0
 
-            return {'source':0,
-                    'target':self.codes[index],
+            target_codes = self.codes[index]
+            item = {'source':0,
+                    'target_text': self.texts[index],
+                    'target': target_codes,
+                    'target_isblank': target_codes==self.vocab.w2i.get(' ',-1),
+                    # 'target_isblank': target_codes==self.vocab.w2i.get('a',-1),
+                    # 'target_isblank': target_codes==self.vocab.w2i.get('i',-1),
+                    # 'target_isblank': target_codes==self.vocab.w2i.get('b',-1),
+                    # 'target_isblank': target_codes==self.vocab.w2i.get(' ',-1),
+                    # 'meta_token_dict':{' ':self.vocab.w2i.get(' ',-1)},
+                    # 'meta_token_dict':self.vocab,
+                    # {' ':self.vocab.w2i.get(' ',-1)},
                     'source_len':0,
                     'target_len':self.seq_len[index],
                     'has_start_token':1,
                     'is_test':self.mode=='test',
                     'index':index}
 
+            # print(item['target_text'])
+            # print(item['target'])
+            # print(item['target_isblank'])
+            return item
+
         def tgt_wordize(self,v):
             return self.vocab.wordize(v)
 
         def tgt_tokenize(self,v):
             return self.vocab.tokenize(v)
+
+    class SplitCharDataset(CharDataset):
+        # SPLIT = None
+        def __init__(self,device,fn,max_len,test_fold,vocab,split):
+            # self.split = split
+            self.split = 'b'
+            # self.split = ' '
+            super().__init__(device,fn,max_len,test_fold,vocab)
+
+        def get_codes_from_file(self, fn, vocab, max_len, skip_len, ):
+            buf = []
+            seql_list = []
+            char_count = 0
+            tok_count = 0
+            with open(fn, 'r') as f:
+                fa = f.read().splitlines()
+                fa = fa[1:: skip_len]
+                for i,v in enumerate(fa):
+                    seql = min(max_len-1, len(v))+1
+
+                    v = v[:max_len-1]
+
+                    char_count += seql
+
+                    v = (v).split(self.split)
+                    v = sum([[vv,'<split>'] for vv in v],[])
+
+                    v = list(v)
+
+                    seql = len(v)+1 + 1
+                    tok_count+= seql
+                    v = ['<bos>'] + v + ['<pad>'] * (max_len - 1 - len(v))
+
+                    # print(v)
+                    # print(seql)
+
+                    # seql = len(v)*2
+                    # tok_count+= seql
+                    # v = ['<bos>'] +  + ['<pad>'] * (max_len - 1 - len(v))
+
+
+                    # more = set(v) - self.vocab
+                    for vv in v:
+                        if not vv in vocab.i2w:
+                            vocab.add(vv)
+                    if seql<=1:
+                        continue
+                    buf.append([ vocab.w2i[vv] for vv in v])
+                    seql_list.append(seql)
+            codes = torch.tensor(buf,device = self.device,dtype= torch.long)
+            seq_len = torch.tensor(seql_list,device=self.device,dtype=torch.long)
+            print(f'[char_count]{char_count}')
+            print(f'[tok_count]{tok_count}')
+            print(f'[char_per_tok]{char_count/1./tok_count:.2f}')
+            return codes,seq_len
+
     # class FastaDataset(torch.utils.data.Dataset):
     class FastaDataset(CharDataset):
         PROTEIN_VOCAB  = ['<mask>','<pad>','<bos>','<eos>'] + list(string.ascii_uppercase)
@@ -132,7 +216,7 @@ def get_cath_dataset(conf,fix_length, dataset_name, root=None):
     return dataset,dataloader
 
 
-def get_multi30k_dataset_char(conf, fix_length, dataset_name,root=None):
+def get_multi30k_dataset_char(conf, fix_length, dataset_name, split= None, root=None):
     from markov_lm.Dataset.translation_dataset import DIR
     import torchtext
     import random
@@ -141,11 +225,27 @@ def get_multi30k_dataset_char(conf, fix_length, dataset_name,root=None):
         root = DIR
     ret = torchtext.datasets.Multi30k.download(root)
     en_fn = root+'/multi30k/train.en'
-    dataset = CharDataset(conf.device, en_fn, fix_length, 5, None)
+    if split is None:
+        dataset = CharDataset(conf.device, en_fn, fix_length, 5, None)
+    else:
+        dataset = SplitCharDataset(conf.device, en_fn, fix_length, 5, None, split=split)
     dataloader = dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=conf.shuffle)
     return dataset,dataloader
 
-
+# def get_multi30k_dataset_char_and_(conf, fix_length, dataset_name,root=None):
+#     from markov_lm.Dataset.translation_dataset import DIR
+#     import torchtext
+#     import random
+#     random.seed(conf.rnd)
+#     if root is None:
+#         root = DIR
+#     ret = torchtext.datasets.Multi30k.download(root)
+#     en_fn = root+'/multi30k/train.en'
+#     dataset = CharDataset(conf.device, en_fn, fix_length, 5, None)
+#     dataloader = dataloader = torch.utils.data.DataLoader(dataset, batch_size=conf.batch_size, shuffle=conf.shuffle)
+#     return dataset,dataloader
+#
+#
 
 
 def get_multi30k_dataset(conf, fix_length, dataset_name,root=None):
@@ -341,6 +441,10 @@ class ConfigDataset(object):
 
         elif conf.task == 'translate-multi30k-de2en-chardata-l100':
             conf.dataset,conf.dataloader = get_multi30k_dataset_char(conf, 100,conf.task)
+
+        elif conf.task == 'translate-multi30k-de2en-chardata-l100-split':
+            conf.dataset,conf.dataloader = get_multi30k_dataset_char(conf, 100,conf.task,split=' ')
+
 
         elif conf.task == 'translate-multi30k-de2en-chardata-l20':
             conf.dataset,conf.dataloader = get_multi30k_dataset_char(conf, 20,conf.task)
