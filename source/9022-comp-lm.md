@@ -91,6 +91,129 @@ $$\begin{aligned}
 
 RNN的自回归建模从某种程度上是一种逐步的建模,这是通常的神经网络并不能很好地做到的一个点. 但是RNN的parsing是一种比较trivial的parsing. 可以认为,目前DDPM等分段模型,某种程度上也是一种类似RNN的自回归建模. 这两者的共性在于,parsing过程,或者生成中间态的过程都是预设好的/不可训练的.那么从概念上讲,这个中间态最好是能够由模型自行编码生成.
 
+## DLM106:
+
+DLM104加上了ConcatenationToken
+
+## DLM107:
+
+DLM106 with a VAE loss
+
+$$
+q_r(x|z) = 1
+\\ q(z) \text{ from RNN}
+\\ q(z|x) \text{ from parsing}
+$$
+
+## DLM108: DLM107 with GRU segment encoders
+
+DLM107 and DLM108 的实验结果说明Tokenizer倾向于输出一个
+确定的全空或者全1的tokenization,并利用其中一个RNN来进行自回归. 从VAE的角度来讲,生成模型倾向于不使用或者一直使用segmentationToken, 而其ELBO并没有显著好于一个RNN
+
+### Thoughts:
+
+RNN隐式建模了很多玩意儿.实际上RNN做生成任务效果是挺好的,并没有performance的问题.接下来会更多地做拆解RNN的工作,而不把RNN作为一个子模块.
+
+### DLM110:
+
+其实ngram是比RNN更为基础的一个模型.如果用embed-unembed范式去建模一个ngram,就要牵扯到概率的分解形式.最简单的bigram模型需要用到前一邻来为embedding提供梯度. 但是bigram对上下文的丢失,会让模型不知道怎么处理 'bag' 'dag' 'tag' 'tab' 'pad' 'dad' 等等 'xax' 的概率. 这并不能通过在字母间插入复杂的混合隐变量来实现,因为基于markov性bigram建模的方法压根就不允许模型获得更多的信息. 一个比较简单的词模型,需要绕过RNN,实现一个自编码的建模过程. 也就是,要用一个层级式的生成过程, 配合一个解码器, 来模拟词语的建构. 其实词语无非就是很简单的一个词表,但是要模拟出实体/词语的边界,却并不简单. 我们需要一个把空间切块的过程,并且让词语尽量地不要跨越区块. 在区块内,我们使用一个转子来寻找词向量里的下一个投影. 也就是说,我们用几个词向量, 来表征反复出现的连续字符串. 比如我允许模型取10个vmf向量,并且允许它进行几个动作:下一词(且下一字符),同一词下一字符. 模型当然有可能把所有信息都压缩到第一个vmf向量里.所以建模的方式必须鼓励模型去合并更小的信息单元.
+
+但是问题在于,如何确保一个局部的结构能够降低数据的似然? 如果
+vmf向量只是存储第x位是y字符,那么这某种程度上只是一个kmer counter,用kmer的概率来替代1mer的概率.
+
+假定charVector固定,那么每一个词语可以对应到char上面的一条路径,如果这条路径满足马尔科夫性质,那就可以浓缩到一个Attention矩阵里.
+
+### DLM111: CNN模型
+
+最简单粗暴的方法,当然是不用RNN模型,直接搞一个CNN检测器. 这样可以在先验上动一些脑筋.
+
+### DLM112: Simple VAE
+
+我们知道VAE-ELBO具有简单的IS形式. 对于确定性很高的encoder,其编码分布的熵也就越小,损失的ELBO也就越多. 
+
+$$\begin{aligned}
+ E_{q_e(z|x)}[ \nabla_m\log q_e(z|x)] 
+&= \int_z  q_e(z|x) \nabla_m \log q_e(z|x).dz
+\\&= \int_z  \nabla_m  q_e(z|x).dz
+\\&= 0
+\end{aligned}$$
+
+考虑一个trivial的生成模型: 从高斯q(z)里解码出离散token,同时用token嵌入的扩散定义一个编码器. 这将作为研究CNN模型的基础.
+
+
+$$\begin{aligned}
+ELBO &= E_{q_e(z|x)}[\log {q(z)q_r(x|z)\over q_e(z|x)}] 
+\\ &= - D_{KL}(q_e(z|x)||q(z)) + E_{q_e(z|x)}[\log q_r(x|z)]
+\end{aligned}$$
+
+
+
+$$\begin{aligned}
+&\nabla_m ELBO 
+\\&= E_{q_e(z|x)} \nabla_m \left[ \begin{aligned} & \log q_e(z|x) sg( \log { q(z) q_r(x|z) \over q_e(z|x)} - c) 
+\\ &\dots + \log q(z) q_r(x|z)  \end{aligned}\right] 
+\\&= - \nabla_m  D_{KL}(q_e(z|x)||q(z)) 
+\\&\dots+ E_{q_e(z|x)} \nabla_m \left[ \begin{aligned} & \log q_e(z|x) sg( \log { q_r(x|z) } - c) 
+\\ &\dots +  \log q_r(x|z)  \end{aligned}\right] 
+\\ &\text{c is the estimated baseline to reduce variance}
+\end{aligned}$$
+
+注意: DLM112在采样数为1的时候是不work的,可能跟采样估计效率有关
+
+
+$$\begin{aligned}
+\log q_e(z|x) = - 0.5 \beta^2 (x_i-\mu_i)^2 +\log \beta - 0.5 \log (2\pi)
+\end{aligned}$$
+
+结果: 模型倾向于把先验分布到空间的各个地方. 这可能是由高斯先验的性质所确定的. 而随着先验和后验不断地稀释,采样效率越來越低,导致模型的梯度估算的方差越來越大,不再能实现梯度下降.
+
+一个比较简单的办法是,用一个高斯混合的先验,来实现高斯的方差.用了高斯混合以后,虽然ppl降低是快了一些,但是还是会退化成一个均匀分布,所以我手动把标准差差clip在2.5以下. 最近做的实验都是以negative logppl-per-sequence(NLPPS)作为表征,DLM114终于收敛到一个正常的ppl. 只能说高斯先验的方差真的需要控制.
+
+### tasktranslate-multi30k-de2en-chardata-l100
+
+NLPPS: Negative Log-Perplexity Per Sequence 
+
+| model_desc | mutated_pos | epoch | NLPPS_E20  | NLPPS_E30  |  NLPPS_E40  |
+|------------|-------------|-------|---------|---------|---------|
+| DLM100        | -1          | 20 | 76  |   | |
+| DLM123,D3,K30,E32,W5| -1       | 20 | 149 | 142 | 136|
+| DLM123,D3,K30,E32,W1| -1          | 20 | 152 | 147 | 139|
+| DLM123,D5,K30,E32,W5| -1       | 20 | 152 | 145 | 136|
+| DLM124,D5,K30,E32,W1| -1       | 20 | 147 | 144 | 142|
+| DLM121,K30,E32| -1          | 20 | 155 | 150 | 144|
+| DLM121,K30    | -1          | 20 | 245 | 161 | 145|
+| DLM119,K30 | -1          | 20 | 191 | 162 | 156|
+| DLM120,K30 | -1          | 20 | 226 | 170 | 159|
+| DLM118,K30 | -1          | 20 | 286  | 180|162|
+| DLM117,K30 | -1          | 20 | 322  |   | 163|
+| DLM122,K30 | -1          | 20 | 307 | 199 | 167|
+| DLM114,K30 | -1          | 20 | 193  |   | |
+| DLM115,K30 | -1          | 20 | 199  |   | |
+| DLM112     | -1          | 20 | 310  |   | |
+
+看这张表可以发现自回归的RNN模型还是很猛,直接干到了76. 相比之下最简单的GMMVAE在193,加了卷积的VAE能够提到136. 这说明用卷积去捕捉局部结构可能确实是可行的.
+
+### DLM115
+
+让我继续瞪着ELBO看一会...
+
+- q(x|z) 用简单的unembed
+- q_e(z|x) 用embed + noise
+- q(z) 用个bigram看看?
+- bigram其实在这里应该属于RNN的方法,没啥大意思
+
+$$\begin{aligned}
+ELBO &= E_{q_e(z|x)}[\log {q(z)q_r(x|z)\over q_e(z|x)}] 
+\\ &= - D_{KL}(q_e(z|x)||q(z)) + E_{q_e(z|x)}[\log q_r(x|z)]
+\end{aligned}$$
+
+### DLM116:
+
+考虑一个不太一样的noise形式,更加接近demasking的模型. 这个noise以一定概率把当前token替换成一个mask token. 但是其生成模型应当有一个尽量简单的形式,一个办法是考虑从全`|mask|`里生成目标序列.不过这个模型压根不需要encoder,因为生成过程比较简单. 也就是说如果写不出一个生成模型,那么去凑编码器也是很困难的. 通常目前生成模型的隐变量最多也就是语序了,很少有见对NER或者对词汇进行生成式建模的.
+
+
+
+
 ### Refs:
 
 ### [TBC,Transformer为啥这么慢??]
