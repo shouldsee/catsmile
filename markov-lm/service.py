@@ -292,7 +292,8 @@ def plot_latent(model,  source, target, target_len, source_len, buf, dataset, **
     ly = 5
     # ix,iy= 25,25
     ix,iy= 200,128
-    ix,iy= 64,128
+    # ix,iy= 64,128
+    ix,iy= 64,32
     PROMPT_LEN = 10
 
     ax = axs
@@ -433,7 +434,8 @@ def plot_latent(model,  source, target, target_len, source_len, buf, dataset, **
         wordize = dataset.tgt_wordize
         plt.xticks(range(len(xlab)), [ wordize(x) for x in xlab], rotation= 45)
         ax.set_xlim(-1,ix+1)
-        ax.set_ylim(0,loss_per_loc_target[i].mean()*3)
+        ax.set_ylim(0,loss_per_loc_target.mean()*3)
+        # ax.set_ylim(0,loss_per_loc_target[i].mean()*)
         ax.set_ylabel('$\log(ppl-per-token)$')
         ax.set_xlabel('Token')
         ax.set_title(f'''[log_param]{plot_key}\nModel_name={model.config.model_name}\nEpoch:{model.meta['epoch']}, TestLoss:{model.meta["test_losses"][-1]:.4f}''')

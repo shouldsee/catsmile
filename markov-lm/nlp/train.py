@@ -211,7 +211,14 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
     # add_optimizer      = lambda conf,params:torch.optim.SGD( params, lr=conf.learning_rate,)
     #### using Adam with high learning_rate is catastrophic
     # conf._session_name += 'opt-adam-'
-
+    conf.learning_rate = 0.0001
+    # conf.learning_rate = 0.00001
+    # conf.learning_rate = 0.00005
+    # conf.learning_rate = 0.01
+    conf.learning_rate = 0.001
+    # conf.learning_rate = 0.005
+    # conf.learning_rate = 0.01
+    # conf.learning_rate = 0.1
 
     conf.instance = conf.rnd = random_seed
     torch.manual_seed(conf.instance)
@@ -226,12 +233,14 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
     # conf.task = 'translate-mutli30k-de2en-l50'
 
 
+    # conf.batch_size    = 120
     conf.batch_size    = 280
     # conf.batch_size    = 180
     # conf.batch_size    = 100
     # conf.batch_size    = 5
     conf.task = 'translate-multi30k-de2en-l20'
     conf.task = 'translate-multi30k-de2en-chardata-l100'
+    # conf.task = 'translate-multi30k-de2en-chardata-l100-split'
     # conf.task = 'protein-cath-s35-l100'
     # conf.task = 'protein-cath-s35-l20'
     # conf.task = 'translate-ptb-l20'
@@ -366,13 +375,7 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
             # '10'))
         # config.__dict__.update(model_dict)
         conf.model = model = conf.lconf.to_model(conf.device).to(conf.device)
-        # conf.learning_rate = 0.00001
-        conf.learning_rate = 0.0001
-        # conf.learning_rate = 0.00005
-        # conf.learning_rate = 0.001
-        # conf.learning_rate = 0.001
-        # conf.learning_rate = 0.005
-        # conf.learning_rate = 0.01
+
         return model
 
     _add_model(conf)
