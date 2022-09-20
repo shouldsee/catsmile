@@ -380,27 +380,38 @@ def plot_latent(model,  source, target, target_len, source_len, buf, dataset, **
             # if PROMPT_LEN==0:
             #     prompt = None
             # else:
-            prompt = target[:B,0:PROMPT_LEN]
+            prompt = target[:B,0:PROMPT_LEN].repeat((550,1))
             _x = model.sample_token(B,T,prompt=prompt)
             if _x is not None:
                 rand_sampled_output = _x
-                rand_sampled_output = torch.cat( [prompt, -1+(0*rand_sampled_output[:,0:1]), rand_sampled_output[:,PROMPT_LEN:]],dim=1)
                 # rand_sampled_output[PROMPT_LEN:] = -1
                 # rand_sampled_output = model.sample_token(B,T,prompt=None)
                 # target[:B,0:PROMPT_LEN])
-
-
-        sampled_output = target
-        rand_sampled_loss = test_loss
-        if hasattr(model, 'sample_token_from_latent'):
-            # sampled_output = target
-            _x = model.sample_token_from_latent(h1)
-            if _x is not None:
                 sampled_output = _x
                 test_item = item.copy()
                 test_item['target'] = sampled_output
                 test_item['target_len'] = sampled_output[:,0]*T
                 rand_sampled_loss = model._loss(test_item, 'loss')
+
+                idx = rand_sampled_loss.argsort()[:B]
+                print(idx.shape)
+                prompt = prompt[idx]
+                rand_sampled_loss   = rand_sampled_loss[idx]
+                rand_sampled_output = rand_sampled_output[idx]
+                rand_sampled_output = torch.cat( [prompt, -1+(0*rand_sampled_output[:,0:1]), rand_sampled_output[:,PROMPT_LEN:]],dim=1)
+
+        # sampled_output = target
+        # rand_sampled_loss = test_loss
+        if hasattr(model, 'sample_token_from_latent'):
+            # sampled_output = target
+            pass
+            # _x = model.sample_token_from_latent(h1)
+            # if _x is not None:
+            #     sampled_output = _x
+            #     test_item = item.copy()
+            #     test_item['target'] = sampled_output
+            #     test_item['target_len'] = sampled_output[:,0]*T
+            #     rand_sampled_loss = model._loss(test_item, 'loss')
 
     # sampled_output = target
     loss_per_loc_target,target_notnull = model._loss(item,'loss_per_loc')

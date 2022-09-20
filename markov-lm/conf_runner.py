@@ -75,6 +75,26 @@ def conf_parse_all(sys_argv):
     v = _caster(v)
     meta_dict['num_epoch']= v
 
+    k = '--visdom_port'
+    _caster = int
+    if k in sys_argv:
+        v= sys_argv[sys_argv.index(k)+1]
+    else:
+        v = 6006
+    v = _caster(v)
+    meta_dict['visdom_port']= v
+
+    k = '--loglr'
+    _caster = float
+    if k in sys_argv:
+        v= sys_argv[sys_argv.index(k)+1]
+    else:
+        v = -3.
+    v = _caster(v)
+    meta_dict['loglr']= v
+
+
+
 
     model_dict = {}
     for i,k in enumerate(sys_argv):
@@ -105,14 +125,39 @@ def get_model_test_loss(conf):
     dataset.test()
     index = []
     lsl = []
+    item = None
+
+    if isinstance(dataloader,torch.utils.data.DataLoader):
+        'force seq'
+        self = dataloader
+        dataloader._sampler = dataloader.sampler
+        dataloader._batch_sampler = dataloader.batch_sampler
+        sampler   = torch.utils.data.sampler.SequentialSampler(dataloader.dataset)
+        batch_sampler = torch.utils.data.sampler.BatchSampler( sampler, self.batch_size, self.drop_last)
+        super(dataloader.__class__,dataloader).__setattr__('sampler',sampler)
+        super(dataloader.__class__,dataloader).__setattr__('batch_sampler', batch_sampler)
+
+# ?    dataloader.sampler =
+    # import pdb; pdb.set_trace()
+    conf.callback_before_test_all(conf,model,item)
     for tsi,item in enumerate(dataloader):
         item = data_input_transform(item)
+        conf.callback_before_test_step(conf,model,item)
         _loss = loss(item).detach()
         if _loss.shape.__len__()>=2:
             _loss = _loss.mean(item.shape[1:])
         if item['index'] is not None:
             index.append(item['index'].to(_loss.device))
         lsl.append(_loss)
+        conf.callback_after_test_step(conf,model,item)
+    conf.callback_after_test_all(conf,model,item)
+
+    if isinstance(dataloader,torch.utils.data.DataLoader):
+        'recover shuffle'
+        super(dataloader.__class__,dataloader).__setattr__('sampler', dataloader.sampler)
+        super(dataloader.__class__,dataloader).__setattr__('batch_sampler', dataloader.batch_sampler)
+        # super(dataloader.__class__,dataloader).__setattr__('sampler', dataloader._sampler)
+
         # item['losses'])
     lsl   = torch.cat(lsl,dim=0)
     if index:
@@ -166,6 +211,7 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
         test_losses  = checkpoint["test_losses"]
         train_losses = checkpoint["train_losses"]
         epoch        = checkpoint["epoch"]
+        epoch_list   = checkpoint.get('epoch_list',[])
         x            = checkpoint["model"]
         xx = {}
         for k,v in x.items():
@@ -185,11 +231,14 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
     else:
         test_losses = []
         train_losses = []
+        epoch_list = []
         epoch = -1
 
 
     loss_test_mean = 0
     n_mask = 4
+    meta = {}
+    model.meta = meta
     for _epoch in range(conf.num_epoch+1):
         # conf.dataset.op_extract_and_mask(n_mask)
         epoch += 1
@@ -199,35 +248,10 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
         curr_seed = torch.seed()
         conf.callback_epoch_start(epoch)
 
-
         loss_mat = get_model_test_loss(conf)
-        loss_test_mean = loss_mat[:,1].mean()
-
-        ### needs to random extract tokens into sets and sequences
-        if(epoch % SAVE_INTERVAL ==0):
-            # target_filename = conf.get_ckpt_name(os.path.join("Checkpoints",f"{conf._session_name}_{epoch}_{loss_test_mean:.5f}.pkl"))
-            target_filename = os.path.join("Checkpoints",f"{conf._session_name}_{epoch}_{loss_test_mean:.5f}.pkl")
-            meta = {
-                "model"       :conf.model.state_dict(),
-                "optimizer"   :conf.optimizer.state_dict(),
-                "epoch"       :epoch,
-                "train_losses":train_losses,
-                "test_losses" :test_losses,
-                "loss_mat"    :loss_mat,
-                "curr_seed"   :[curr_seed, torch.seed()],
-                "model_config":conf.model.__dict__.get('config',{}),
-                "model_cls"   :conf.model.__class__,
-                'conf_task'   :conf.task,
-            }
-            model.meta = meta
-            torch.save(meta,target_filename)
-            linkFile = __file__+'.curr.ckpt.pkl'
-            # os.unlink(linkFile) if os.path.exists(linkFile) else None
-            # os.link(target_filename,linkFile)
-            shutil.copy2(target_filename,linkFile+'.temp')
-            shutil.move(linkFile+'.temp',linkFile)
-            # loss = cross_entropy(x,y)
-
+        loss_test_mean = loss_mat[:,1].mean().item()
+        test_losses.append(loss_test_mean)
+        epoch_list.append(epoch)
 
         model.train()
         dataset.train()
@@ -244,9 +268,41 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
         conf.callback_end(epoch, tri,item,loss)
 
 
+        meta.update({
+            "epoch"       :epoch,
+            "train_losses":train_losses,
+            "test_losses" :test_losses,
+            "epoch_list" : epoch_list,
+            "loss_mat"    :loss_mat,
+            "curr_seed"   :[curr_seed, torch.seed()],
+            "model_config":conf.model.__dict__.get('config',{}),
+            "model_cls"   :conf.model.__class__,
+            'conf_task'   :conf.task,
+        })
+        ### needs to random extract tokens into sets and sequences
+        if(epoch % SAVE_INTERVAL ==0):
+            # target_filename = conf.get_ckpt_name(os.path.join("Checkpoints",f"{conf._session_name}_{epoch}_{loss_test_mean:.5f}.pkl"))
+            target_filename = os.path.join("Checkpoints",f"{conf._session_name}_{epoch}_{loss_test_mean:.5f}.pkl")
+            # conf.model.target_filename = target_filename
+            meta.update({
+            "model"       :conf.model.state_dict(),
+            "optimizer"   :conf.optimizer.state_dict(),
+            })
+            # model.meta = meta
+            torch.save( meta, target_filename)
+            linkFile = __file__+'.curr.ckpt.pkl'
+            # os.unlink(linkFile) if os.path.exists(linkFile) else None
+            # os.link(target_filename,linkFile)
+            shutil.copy2(target_filename,linkFile+'.temp')
+            shutil.move(linkFile+'.temp',linkFile)
+            conf.callback_checkpoint(conf, conf.model, None)
+            # , target_filename)
+            # loss = cross_entropy(x,y)
 
 
-        loss_train_mean = loss_train_sum/(1+tri)
+
+
+        loss_train_mean = (loss_train_sum/(1+tri))
         # loss_test_mean = loss_test_sum/(1+tsi)
         print(f'Epoch: {epoch}')
         print(f'ModelClassName: {conf._session_name}')
@@ -254,4 +310,3 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
         print(f'Testing Loss: {loss_test_mean}')
 
         train_losses.append(loss_train_mean)
-        test_losses.append(loss_test_mean)

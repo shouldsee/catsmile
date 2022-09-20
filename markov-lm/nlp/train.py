@@ -45,12 +45,7 @@ def main():
     # sess    = Session()
     # initor  = 'conf_init_translate'
     initor = 'conf_init_nlm'
-    conf    = ConfigPrototype(__file__)
-    conf.num_epoch = -1
-    for k,v in meta_dict.items():
-        assert hasattr(conf,k)
-        _t = getattr(conf, k).__class__
-        setattr(conf, k, _t(v))
+    conf    = ConfigPrototype(__file__,**meta_dict)
     conf    = eval(initor)(conf, CUDA,RANDOM_SEED,model_dict = model_dict, shuffle=True)
     model   = conf.model
     dataset = conf.dataset
@@ -71,6 +66,8 @@ def conf_init_translate(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HO
     Abusing attributes here
     [TBC]
     '''
+    if conf.log10_learning_rate is not None:
+        conf.learning_rate = 10**conf.log10_learning_rate
     conf.CUDA          = CUDA
     conf.shuffle       = shuffle
     conf.device        = torch.device('cuda:0' if CUDA else 'cpu')
@@ -155,10 +152,12 @@ def conf_init_translate(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HO
             # model_name = 'Seq2SeqWithNoAttention',
         )
         conf.model = model = conf.lconf.to_model(conf.device).to(conf.device)
-        # conf.learning_rate = 0.00001
-        # conf.learning_rate = 0.0001
-        conf.learning_rate = 0.001
-        # conf.learning_rate = 0.01
+        if getattr(conf.learning_rate,None) is None:
+            # conf.learning_rate = 0.00001
+            # conf.learning_rate = 0.0001
+            # conf.learning_rate = 0.001
+            # conf.learning_rate = 0.01
+            pass
         return model
 
     _add_model(conf)
@@ -211,11 +210,11 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
     # add_optimizer      = lambda conf,params:torch.optim.SGD( params, lr=conf.learning_rate,)
     #### using Adam with high learning_rate is catastrophic
     # conf._session_name += 'opt-adam-'
-    conf.learning_rate = 0.0001
+    # conf.learning_rate = 0.0001
     # conf.learning_rate = 0.00001
     # conf.learning_rate = 0.00005
     # conf.learning_rate = 0.01
-    conf.learning_rate = 0.001
+    # conf.learning_rate = 0.001
     # conf.learning_rate = 0.005
     # conf.learning_rate = 0.01
     # conf.learning_rate = 0.1
@@ -234,7 +233,7 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
 
 
     # conf.batch_size    = 120
-    conf.batch_size    = 280
+    conf.batch_size    = 150
     # conf.batch_size    = 180
     # conf.batch_size    = 100
     # conf.batch_size    = 5
@@ -299,69 +298,6 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
             # kernel_size = 400,
 
 
-            # window_size= 4,
-            # model_name = 'DLM32',
-            # kernel_size = 400,
-
-            # window_size= 4,
-            # # model_name = 'DLM33',
-            # # model_name = 'DLM34',
-            # model_name = 'DLM35',
-            # kernel_size = 400,
-
-
-            # window_size= 4,
-            # model_name = 'DLM29',
-            # # kernel_size = 400,
-            # kernel_size = 800,
-
-
-            # model_name = 'DLM40',
-            # # model_name = 'DLM41',
-            # kernel_size = 400,
-            # window_size= 16,
-            # # kernel_size = 16,
-            # depth = 6,
-
-            # model_name = 'DLM28',
-            # kernel_size = 10,
-
-            # kernel_size = 128,
-            # kernel_size = 128,
-
-
-
-            # embed_dim = 128,
-            # model_name = 'DLM19',
-            # kernel_size = 256,
-
-            # kernel_size = 64,
-
-            # model_name = 'DLM16',
-
-            # model_name = 'DLM17',
-            # # kernel_size = 3,
-            # kernel_size = 100,
-
-            # model_name = 'DLM18',
-            # kernel_size = 5,
-            # kernel_size = 200,
-
-
-            # model_name = 'DLM13',
-            # kernel_size = 3,
-            # kernel_size = 20,
-            # kernel_size = 128,
-
-            # model_name = 'DLM14',
-            # kernel_size = 80,
-
-            # embed_dim=128,
-            # model_name = 'DLM4',
-
-            # model_name = 'DLM11',
-            # model_name = 'DLM12',
-            # model_name = 'DLM23',
 
             n_step = conf.dataset.data_dim,
             # model_name = 'Seq2SeqWithNoAttention',
