@@ -1,4 +1,5 @@
 #! https://zhuanlan.zhihu.com/p/555931754
+
 # 9022-复合性语言模型 Compositional Language Model
 
 [CATSMILE-9022](http://catsmile.info/9022-comp-lm.html)
@@ -14,6 +15,7 @@
 - 相关篇目:
     - [CATSMILE-9020](./9020-language-model) 
 - CHANGLOG:
+    - 20220920 加入DLM142相关的逆扩散模型
     - 20220820 INIT
 
 
@@ -158,12 +160,26 @@ $$\begin{aligned}
 \\ &\text{c is the estimated baseline to reduce variance}
 \end{aligned}$$
 
-注意: DLM112在采样数为1的时候是不work的,可能跟采样估计效率有关
-
-
 $$\begin{aligned}
 \log q_e(z|x) = - 0.5 \beta^2 (x_i-\mu_i)^2 +\log \beta - 0.5 \log (2\pi)
 \end{aligned}$$
+
+- 注意: 
+    - DLM112在采样数为1的时候是不work的,可能跟采样估计效率有关
+    - DLM112 VAE会倾向于弥散的无穷大sigma,只有clip了sigma才能收敛/避免爆炸
+    - 给定编码器的情况下，是否可以考虑在q(z)里面嵌入一个VAE?
+
+$$\begin{aligned}
+\log p(x) & \geq  E_{q_e(z|x)}[\log {q(z)q_r(x|z)\over q_e(z|x)}] 
+\\ 
+&= E_{q_e(z|x)}[\log q(z) + \log q_r(x|z) - \log q_e(z|x)] 
+\\ &= E_{q_e(z|x)}[\log E_{q(z1|z)} [q(z|z1) q(z1)/q(z1|z)] + \log q_r(x|z) - \log q_e(z|x)] 
+\\ &\geq E_{q_e(z|x)}[ E_{q(z1|z)} [ \log q(z|z1) q(z1)/q(z1|z)] + \log q_r(x|z) - \log q_e(z|x)] 
+
+\end{aligned}
+$$
+
+
 
 结果: 模型倾向于把先验分布到空间的各个地方. 这可能是由高斯先验的性质所确定的. 而随着先验和后验不断地稀释,采样效率越來越低,导致模型的梯度估算的方差越來越大,不再能实现梯度下降.
 
@@ -178,6 +194,7 @@ NLPPS: Negative Log-Perplexity Per Sequence
 | DLM100        | -1          | 20 | 76  |   | |
 | DLM123,D3,K30,E32,W5| -1       | 20 | 149 | 142 | 136|
 | DLM123,D3,K30,E32,W1| -1          | 20 | 152 | 147 | 139|
+| DLM128,D3,K30,E32,W1,B4| -1          | 20 |   |  | 140,E100-120|
 | DLM123,D5,K30,E32,W5| -1       | 20 | 152 | 145 | 136|
 | DLM124,D5,K30,E32,W1| -1       | 20 | 147 | 144 | 142|
 | DLM121,K30,E32| -1          | 20 | 155 | 150 | 144|
@@ -207,12 +224,128 @@ ELBO &= E_{q_e(z|x)}[\log {q(z)q_r(x|z)\over q_e(z|x)}]
 \\ &= - D_{KL}(q_e(z|x)||q(z)) + E_{q_e(z|x)}[\log q_r(x|z)]
 \end{aligned}$$
 
+
+
 ### DLM116:
 
 考虑一个不太一样的noise形式,更加接近demasking的模型. 这个noise以一定概率把当前token替换成一个mask token. 但是其生成模型应当有一个尽量简单的形式,一个办法是考虑从全`|mask|`里生成目标序列.不过这个模型压根不需要encoder,因为生成过程比较简单. 也就是说如果写不出一个生成模型,那么去凑编码器也是很困难的. 通常目前生成模型的隐变量最多也就是语序了,很少有见对NER或者对词汇进行生成式建模的.
 
+### DLM123: GMMVAE with convolution layers
+
+- prior: per-location gaussian mixture
+- encoder: conv neural net
+- decoder: conv neural net with tanh
+- comment: 模型似乎优先学到了词语间的停顿.在句首也有奇怪的pattern
+- E32,D3
+
+![](./9022-p1-DLM123-E50-code.png)
+![](./9022-p2-DLM123-E50-loss.png)
+
+```
+log(pplpt):105.968505859375
+
+rand_log(pplpt):105.968505859375
+
+[TARGET]:|bos|A little girl climbing into a wooden playhouse.
+```
+
+### Thoughts:
+
+以上模型的高斯分布的方差都被clip了才能收敛，这可能侧面说明高斯后验不能很好地捕捉到后验应有的差异值，或者说没法可靠地找出一个适合解码的表征，完全受到最大熵导引，而被迫训练出极大的方差。联想到混合模型是一个表征差异的好方法，我们考虑把后验也变成混合模型的形式。
+
+### Thoughts:
+
+                The gaussian posterior assumption may be not that useful
+                explore sampling by descent instead 
+
+                There is no guarantee that the encoder would return a good estimate of posterior
+                just because it is a neural network.
+
+                Instead, we can try harvesting gradient to find good encoding representation.
+
+                in fact, we can expand encoder with gaussian to make sure the importance samplng holds
+                
 
 
+### DLM128:
+
+允许不同的层使用不同的参数。观察：embed_dim>=44的时候会需要降低学习率，loglr-3.0的情况只能用比较小的embed_dim，目前不太能确定原因。有可能又是高斯分布的方差炸了。NLLPS能达到114,比RNN的76还是差很多。
+
+
+
+```
+markov_lm/gmm/Checkpoints/-S29-tasktranslate-multi30k-de2en-chardata-l100-shuffle1-graph-dim82-model-nameDLM128-window-size1-loss-name0,4,5,7-grad-loss-nameKLD-depth3-beta0.04-n-step100-kernel-size30-embed-dim44-p-null0.0001-submodel-name-loglr-3.0_100_113.89570.pkl
+```
+
+![](./9022-p3-DLM128-E100-LAT.png)
+
+![](./9022-p4-DLM128-E100-PPL.png)
+
+
+在学习一开始，对空格的感知并不显著。随着模型收敛，更多序列性的二维变量浮现出来，隐变量的模也越來越小，看起来跟先验分布有一定的关系
+
+![E10](./9022-p5-DLM128-E10-LATALL.png)
+
+![E20](./9022-p6-DLM128-E20-LATALL.png)
+
+![E30](./9022-p7-DLM128-E30-LATALL.png)
+
+![E100](./9022-p8-DLM128-E100-LATALL.png)
+
+
+#### 采样: Gibberish
+
+```
+log(pplpt):131.53076171875
+
+rand_log(pplpt):200.40673828125
+
+[TARGET]:|bos|Several men in hard hats are operating a giant pulley system.
+
+[RANDOM]:|bos|A man is |p| fuctewlens husng hts bhihk iiptle in a s sie mare`(i t n tc taw o the mavnng in whple o
+
+
+log(pplpt):81.6474609375
+
+rand_log(pplpt):213.255859375
+
+[TARGET]:|bos|A little girl climbing into a wooden playhouse.
+
+[RECONS]:G Ande somesiirikes w n Fhrdboolarer swwond unriliowur of wnge 4 a sidcpucnie oulsocorilaw of iiir
+
+[RANDOM]:|bos|Two men a|p|iis 4 marsirocenccdrns n an srprrirnmen and an wy ritl brown ararert cuntaloa, a ne pors.
+
+log(pplpt):130.81298828125
+
+rand_log(pplpt):190.90234375
+
+[TARGET]:|bos|Several men in hard hats are operating a giant pulley system.
+
+[RECONS]:Ilcing itrureci-hent rardat tined bite civy sirhbel oucksrounduihtganoary shonarrer (onbragiobnort a
+
+[RANDOM]:|bos|A little |p|ging ceaceghacing placsew hot (srtetisg s s cidags slaltng a cowenh, on hit 1a caletooalt.
+```
+
+- [TBC,增加采样函数]
+- [TBC,增加visualiser理解模型对于超参数敏感性]
+- [TBC,更换到有限体积(unitInterval)上的隐变量空间]
+
+
+
+- 目前想要得知VAE的参数随训练的变化
+    - 耦合到梯度训练过程中。这需要把训练抽象成带visdom和不带visdom的
+    - 或者新开接口，单独对ckpt进行可视化
+- 可视化流程？
+- 使用visdom可视化的结论:训练VAE的时候，由于KL项或者说最大熵项，很容易得到一个坍塌的后验分布，也就是说无论样本是啥，后验分布都是同一个高方差的类似先验的分布，也就是学不到有信息的隐变量，具体原因在[CATSMILE-9023](./9023-notes-ar-ae)里加以讨论了
+
+### DLM140,DLM141,DLM142
+
+由于前述VAE后验坍塌的问题，我们自然地寻求一个避免的办法。一个比较简单的办法就是直接把后验设定成noise-based posterior，这个时候隐变量分布已经不能算是（后验）了，但是在形式上ELBO仍然可以成立。
+
+- DLM140: RNN based reverse diffusion
+- DLM141: CNN-based reverse diffusion
+- DLM142: CNN-based reverse diffusion with tanh.
+   - 经过测试，DLM142在loglr=-4时可以加深到11层，取得比较好的ELBO。
 
 ### Refs:
 
