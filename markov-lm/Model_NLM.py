@@ -7547,7 +7547,8 @@ class DLM142(DLM140):
         D = self.config.depth
         self.D = D
         self.conv_layer_list = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)])
-
+        if hasattr(self,'rnn_dec'): del self.rnn_dec
+        if hasattr(self,'rnn_enc'): del self.rnn_enc
         # self.conv_layer = nn.Conv1d(E,E,kernel_size = 5, padding='same')
         # self.conv_layer_2 = nn.Conv1d(E,E,kernel_size = 5, padding='same')
         # self.convt_layer = nn.Conv1d(E,E,kernel_size = 5, padding='same')
@@ -7565,12 +7566,16 @@ class DLM142(DLM140):
         zs = t2_embed
         zs = zs.transpose(1,2)
 
-        # for layer in [self.conv_layer, self.conv_layer_2, self.convt_layer, self.convt_layer_2]:
-        for layer in self.conv_layer_list:
-            # for k in range(3):
+        for k in range(2):
+            for layer in self.conv_layer_list:
                 # zs = zs + layer(zs. relu())
-            zs = 0.5*zs + 0.5* layer(zs).tanh()
-                #.relu()
+                '''
+                Important to stabilise the numbers over deep layers
+                '''
+                # zs = 0.5*zs + 0.5* layer(zs).tanh()
+                zs = (zs + layer(zs)).tanh()
+                # zs = (zs + layer(zs)).clip(-1, 1)
+                    #.relu()
 
         zs = zs.transpose(1,2)
         # zs = zs.flip([2,])
