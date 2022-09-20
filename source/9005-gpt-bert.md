@@ -42,3 +42,8 @@ mathjax: true
 
 - 形式:
 - MLM Masked Language Model
+
+
+### Autoregressor and Autoencoder both related to denoising models
+
+BART is a good example of both
