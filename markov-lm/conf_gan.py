@@ -9,7 +9,19 @@ import math
 class ConfigPrototype(object):
     def __init__(self,fn,is_sorted=False,
     field_width = [20,20] + [5]*30,
-    section_ender = None):
+    section_ender = None,
+    visdom_port =0,
+    loglr = -2.,
+    **meta_dict):
+        self.visdom = None
+        visdom_port = int(visdom_port)
+        vis = None
+        if visdom_port > 0:
+            import visdom
+            vis = visdom.Visdom(port=visdom_port)
+        self.vis = vis
+        # if visdom_port is not None
+        self.visdom_port = visdom_port
         self.rnd = None
         self.is_sorted = is_sorted
         self._session_name = None
@@ -24,7 +36,20 @@ class ConfigPrototype(object):
             section_ender = '-'*15*len(field_width)
         self.section_ender = section_ender
             # sele.ct
+
+        self.loglr = loglr
+        conf = self
+        conf.num_epoch = -1
+        for k,v in meta_dict.items():
+            assert hasattr(conf,k)
+            _t = getattr(conf, k).__class__
+            setattr(conf, k, _t(v))
+        conf.learning_rate = 10**conf.log10_learning_rate
+
         return
+    @property
+    def log10_learning_rate(self):
+        return self.loglr
 
     def get_cache_name(conf):
         '''
@@ -91,6 +116,35 @@ class ConfigPrototype(object):
                 if k not in s:
                     s[k] = [id(p),list(getattr(p,'shape',[1]))]
                 s[k].append( (1000*v.get('square_avg',torch.tensor(0.)).mean().item()))
+
+
+    @staticmethod
+    def callback_prototype(conf,model,item):
+        return
+
+    def callback_checkpoint(self,conf,model,item):
+        if hasattr(self.model,'callback_checkpoint'):
+            return self.model.callback_checkpoint(conf, model, item)
+        else:
+            pass
+
+    @staticmethod
+    def callback_before_test_step(conf,model,item):
+        f = getattr(model,'callback_before_test_step', conf.callback_prototype)
+        return f(conf, model, item)
+    @staticmethod
+    def callback_after_test_step(conf,model,item):
+        f = getattr(model,'callback_after_test_step', conf.callback_prototype)
+        return f(conf, model, item)
+    @staticmethod
+    def callback_before_test_all(conf,model,item):
+        f = getattr(model,'callback_before_test_all', conf.callback_prototype)
+        return f(conf, model, item)
+    @staticmethod
+    def callback_after_test_all(conf,model,item):
+        f = getattr(model,'callback_after_test_all', conf.callback_prototype)
+        return f(conf, model, item)
+
 
     def callback_start(self,epoch,a,b):
         pass
@@ -169,7 +223,7 @@ class ConfigPrototype(object):
 
 
 @dataclass
-class GANConfigPrototype(ConfigPrototype):
+class _Obsolete_GANConfigPrototype(ConfigPrototype):
     '''
     ### dataset yields real data
     ### model_g transforms N(0,I) into embedded sentences
