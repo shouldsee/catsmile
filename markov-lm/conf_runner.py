@@ -94,6 +94,14 @@ def conf_parse_all(sys_argv):
     meta_dict['loglr']= v
 
 
+    k = '--batch_size'
+    _caster = int
+    if k in sys_argv:
+        v= sys_argv[sys_argv.index(k)+1]
+    else:
+        v = 200
+    v = _caster(v)
+    meta_dict['batch_size']= v
 
 
     model_dict = {}

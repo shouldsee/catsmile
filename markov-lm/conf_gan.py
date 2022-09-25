@@ -40,6 +40,7 @@ class ConfigPrototype(object):
         self.loglr = loglr
         conf = self
         conf.num_epoch = -1
+        conf.batch_size = 0
         for k,v in meta_dict.items():
             assert hasattr(conf,k)
             _t = getattr(conf, k).__class__

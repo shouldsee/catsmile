@@ -37,11 +37,12 @@ import math
 from markov_lm.conf_gan import ConfigPrototype
 from markov_lm.conf_data import ConfigDatasetInstance as dconf
 from markov_lm.conf_runner import conf_main_loop,conf_parse_all
+import toml
 
 
-def main():
+def argv_to_conf(cli_argv):
     (CUDA, CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL,RANDOM_SEED,
-        model_dict,meta_dict) = conf_parse_all(sys.argv)
+        model_dict,meta_dict) = conf_parse_all(cli_argv)
     # sess    = Session()
     # initor  = 'conf_init_translate'
     initor = 'conf_init_nlm'
@@ -49,7 +50,46 @@ def main():
     conf    = eval(initor)(conf, CUDA,RANDOM_SEED,model_dict = model_dict, shuffle=True)
     model   = conf.model
     dataset = conf.dataset
-    conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL)
+    return conf,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL
+
+
+def main():
+    if '--compare' in sys.argv:
+        '''
+        this function needs to specify two models.
+        which means we need hierarchical structures,
+        with each structure corresponds to a model.
+
+        specifying hierarhical structures on CLI is a bad idea.
+        here we uses toml to better represent these structs
+        '''
+
+        '''
+        -S29-tasktranslate-multi30k-de2en-chardata-l100-shuffle1-graph-dim82-model-nameDLM142-window-size1-loss-name0,4,5,7-grad-loss-nameKLD-depth12-beta0.0-n-step100-kernel-size3-embed-dim60-p-null0.05-submodel-name-loglr-4.0
+        '''
+        pcli_argv = [
+        '--model.embed_dim', '60',
+        '--model.model_name', 'DLM142',
+        '--model.kernel_size', '3',
+        '--model.window_size', '1', '--model.depth', '12', '--loglr', '-4', '--model.p_null', '0.05',
+        '--batch_size','150']
+        # confargv_to_conf(pcli_argv)
+        conf,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL = argv_to_conf(pcli_argv)
+        conf_main_loop(conf, CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL)
+        # sys.argv)
+        # (CUDA, CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL,RANDOM_SEED,
+        #     model_dict,meta_dict) = conf_parse_all(pcli_argv)
+        # initor  = conf_init_nlm
+        # conf    = ConfigPrototype(__file__,**meta_dict)
+        # conf    = initor(conf, CUDA,RANDOM_SEED,model_dict = model_dict, shuffle=True)
+        # model   = conf.model
+        # dataset = conf.dataset
+        #
+
+        pass
+    else:
+        conf,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL = argv_to_conf(sys.argv)
+        conf_main_loop(conf, CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL)
 
 
 def conf_init_translate(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
@@ -233,7 +273,8 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
 
 
     # conf.batch_size    = 120
-    conf.batch_size    = 150
+    # conf.batch_size    = 150
+    # conf.batch_size    = 25
     # conf.batch_size    = 180
     # conf.batch_size    = 100
     # conf.batch_size    = 5
