@@ -37,11 +37,12 @@ import math
 from markov_lm.conf_gan import ConfigPrototype
 from markov_lm.conf_data import ConfigDatasetInstance as dconf
 from markov_lm.conf_runner import conf_main_loop,conf_parse_all
+import toml
 
 
-def main():
+def argv_to_conf(cli_argv):
     (CUDA, CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL,RANDOM_SEED,
-        model_dict,meta_dict) = conf_parse_all(sys.argv)
+        model_dict,meta_dict) = conf_parse_all(cli_argv)
     # sess    = Session()
     # initor  = 'conf_init_translate'
     initor = 'conf_init_nlm'
@@ -49,7 +50,144 @@ def main():
     conf    = eval(initor)(conf, CUDA,RANDOM_SEED,model_dict = model_dict, shuffle=True)
     model   = conf.model
     dataset = conf.dataset
-    conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL)
+    for k in 'CKPT STRICT_LOAD BLACKLIST SAVE_INTERVAL'.split():
+        setattr(conf,k,eval(k))
+
+    return conf
+    # ,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL
+
+
+def main():
+    if '--compare' in sys.argv:
+        '''
+        this function needs to specify two models.
+        which means we need hierarchical structures,
+        with each structure corresponds to a model.
+
+        specifying hierarhical structures on CLI is a bad idea.
+        here we uses toml to better represent these structs
+        '''
+
+        '''
+        js console hacker
+
+        app._reactRootContainer._internalRoot.current.child.stateNode.sendSocketMessage({event_type:'test'})
+        thiss = app._reactRootContainer._internalRoot.current.child.stateNode;
+        '''
+
+
+        import visdom
+        vis = visdom.Visdom(port=6006)
+        '''
+        在button的onclick方法里注入socket通信方法
+
+        {"cmd":"forward_to_vis","data":{"target":"box1","eid":"testdev","event_type":"Click"}}
+        '''
+
+
+        win = 'box1'
+        env = 'testdev'
+
+        injected_js = '''
+        const data = new FormData(this.parentElement);
+        const dataValue = Object.fromEntries(data.entries());
+        const msg = {"cmd":"forward_to_vis","data":{"target":"box1","eid":"testdev","event_type":"SubmitForm", data: dataValue}}
+
+        app._reactRootContainer._internalRoot.current.child.stateNode.sendSocketMessage(msg);
+        console.log('injected')
+        '''
+        injected_js = injected_js.replace('\"','\'')
+        injected_js = ';'.join(injected_js.splitlines())
+
+        vis.text(
+        f'''
+        <form action="javascript:void(0);">
+        <input name='f1' type="text" value='init'></input>
+        <input name='f2' type="textarea" value='f2'></input>
+        <button onclick="javascript:{injected_js}">submit</button>
+        </form>
+        '''
+        ,env=env,win=win)
+        assert 0
+
+        pcli_argv_1 = [
+            '--model.embed_dim', '60',
+            '--model.model_name', 'DLM142',
+            '--model.kernel_size', '3',
+            '--model.window_size', '1',
+            '--model.depth', '12',
+            '--loglr', '-4',
+            '--model.p_null', '0.05',
+            # '--batch_size','150',
+            '--LOAD','100_'
+        ]
+        pcli_argv_2 = [
+            '--model.embed_dim', '60',
+            '--model.model_name', 'DLM142',
+            '--model.kernel_size', '3',
+            '--model.window_size', '1',
+            '--model.depth', '12',
+            '--loglr', '-4',
+            '--model.p_null', '0.05',
+            # '--batch_size','150',
+            '--LOAD','20_'
+        ]
+        env = 'compare/0002'
+        # confargv_to_conf(pcli_argv)
+        # conf1,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL = argv_to_conf(pcli_argv_1)
+        # conf2,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL =
+        conf1 = conf_main_loop(argv_to_conf(pcli_argv_1),'load')
+        conf2 = conf_main_loop(argv_to_conf(pcli_argv_2),'load')
+        # ; conf_main_loop(conf1,ret='load')
+        # conf2 = argv_to_conf(pcli_argv_2)
+        dataset = conf1.dataset
+        dataloader = conf1.dataloader
+        vis = conf1.vis
+        dataset.test()
+        item = next(iter(dataloader))
+        loss1,loss2 = map((lambda x:x.model.loss(item)),[conf1,conf2])
+
+        from markov_lm.Model_NLM import U
+        key = 'test_loss_scatter'
+        mat = U.N(torch.stack([loss1,loss2],dim=-1))
+        x,y = mat.T
+        # mat = U.N(torch.stack([loss1,loss2],dim=-1))
+        MAX = int(mat.max())
+        MIN = 0
+        vis.scatter( mat, env=env, win = key,opts=dict(title=key,xtickmin=MIN,xtickmax=MAX, ytickmin=MIN,ytickmax=MAX,markersize=5,textlabels= list(range(len(mat)))))
+        # vis.scatter( mat, env=env, win = key,opts=dict(title=key))
+        # key = hist1
+
+        key ='test_loss_boxplot'
+        vis.boxplot( mat, env=env, win = key,opts=dict(title=key))
+        # ,xtickmin=MIN,xtickmax=MAX, ytickmin=MIN,ytickmax=MAX))
+
+        key ='test_loss_diff_histogram'
+        vis.histogram( mat.T[1] - mat.T[0], env=env, win = key,opts=dict(title=key))
+
+
+        target = item['target']
+        xdiff = loss2 - loss1
+        xsel = target[ xdiff < -7]
+        import pandas as pd
+        x = np.vectorize(dataset.tgt_wordize)(U.N(xsel))
+        # x = [''.join(xx) for xx in x]
+        df = pd.DataFrame( x )
+        key = 'very Negative xdiff'
+        vis.text(df.to_html(), win=key,env=env)
+        # loss2 + margin < loss1
+        key ='Evaluation Dialogue'
+        html_buffer = ''''<input></input>'''
+        vis.text(html_buffer,win=key,env=env)
+
+        # loss = conf1.model.loss(item)
+        import pdb; pdb.set_trace()
+        pass
+    else:
+        # conf,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL =
+        conf = argv_to_conf(sys.argv)
+        conf_main_loop(conf)
+        # , CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL)
 
 
 def conf_init_translate(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
@@ -233,7 +371,8 @@ def conf_init_nlm(conf, CUDA,random_seed,shuffle,model_dict,ADD_MONITOR_HOOK=1):
 
 
     # conf.batch_size    = 120
-    conf.batch_size    = 150
+    # conf.batch_size    = 150
+    # conf.batch_size    = 25
     # conf.batch_size    = 180
     # conf.batch_size    = 100
     # conf.batch_size    = 5

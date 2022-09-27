@@ -6829,7 +6829,7 @@ class DLM131(DLM128):
                 encoder_mu = self.rnn_enc( self.shift_pad_left(target_embed,1), h0)[0]
                 sampled_zs = encoder_mu
 
-            elif CLS_NAME in 'DLM140 DLM141 DLM142'.split():
+            elif CLS_NAME in 'DLM140 DLM141 DLM142 DLM143 DLM144'.split():
                 encoder_mu= target_embed
                 sampled_zs = encoder_mu
             else:
@@ -7316,7 +7316,7 @@ class DLM137(DLM136):
 
 
 
-class DLM140(DLM131):
+class DLM140(DLM128):
     '''
     recover states from noise
     '''
@@ -7388,6 +7388,16 @@ RandomSample:
             ''',
             env=env,win=key + '_text')
         # key = 'debug'
+    def sample(self, B,T, item=None):
+
+        xs = torch.randint(self.G,[B,T], device=self.device)
+        for k in range(self.W*4):
+            ys,logp = self.decode(self.embed(xs))
+            lp, xs = self.sample_logp(logp, dim=-1,return_logp=True)
+            # import pdb; pdb.set_trace()
+        # return item['target']
+        return xs
+
 
     def _get_loss(self, zs, encoder_mu,target,target_notnull):
         '''
@@ -7447,25 +7457,68 @@ RandomSample:
 
         encoder_mu_0 = self.embed(target)
         encoder_mu   = t2_embed.reshape((B,W,T,E))[:,0]
-        # _embed
-        # .unsqueeze(-1)
 
         recovered = zs.reshape((B,W,T,E))[:,0]
         sampled_zs =  t2_embed.reshape((B,W,T,E))[:,0] -  self.embed(t1).reshape((B,W,T,E))[:,0]
-        # sampled_zs = sampled_zs * 0
-        # encoder_mu =  t2_embed.reshape((B,W,T,E))[:,0] -  self.embed(t1).reshape((B,W,T,E))[:,0]
-        # logp_sum_grad = lps.sum(-1)
         return locals()
 
-    def sample(self, B,T, item=None):
 
-        xs = torch.randint(self.G,[B,T], device=self.device)
-        for k in range(self.W*4):
-            ys,logp = self.decode(self.embed(xs))
-            lp, xs = self.sample_logp(logp, dim=-1,return_logp=True)
-            # import pdb; pdb.set_trace()
-        # return item['target']
-        return xs
+    def _loss(self,item, ret):
+        CLS_NAME = self.__class__.__name__
+        source = item['source'] ### token sequence
+        target = item['target'] ### token seq
+        # source_embed = self.embed(source)
+        # source_len = item['source_len']
+        # source_notnull = torch.arange(source.size(1),device=self.device)[None,:]<source_len[:,None]
+        target_embed = self.embed(target)
+
+        T = target.size(1)
+        B = target.size(0)
+        E = self.config.embed_dim
+        N = W = self.config.window_size
+        K = self.config.kernel_size
+        target_len = item['target_len']
+        xT  =  torch.arange(target.size(1),device=self.device)[None,:]
+        target_notnull = (xT<target_len[:,None]) & (xT>=2)
+
+        if (item['has_start_token'].__class__==int
+            and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
+            target_notnull[:,0] = False
+
+        if 1:
+            '''
+            Legacy variables for plotting in debug locals()
+            '''
+            D             = self.config.depth
+            encoder_mu    = target_embed
+            encoder_mu_0  = encoder_mu
+            sampled_zs    = encoder_mu
+
+
+        xd = self._get_loss(sampled_zs, encoder_mu, target,target_notnull)
+        if ret=='debug':
+            sampled_zs = xd['sampled_zs']
+            locals().update(xd)
+            return locals()
+
+
+        att = torch.zeros((B,T,1),device = self.device)
+        ### normalise by average token count, but sum by batchsize
+        # lossVal = lossVal/ (source_notnull.sum() / B)
+        self.debug = 0
+        if self.debug:
+            print(f'''{xd['lp_prior'].mean().item():.3f}, {xd['lp_decode'].mean().item():.3f}, {xd['lp_encode'].mean().item():.3f}''')
+
+        if ret=='forward':
+            return xd['logp_sum'].unsqueeze(-1),att
+        elif ret in 'loss'.split():
+            return -xd['logp_sum']
+        elif ret=='grad_loss':
+            return -xd['logp_sum_grad']
+        elif ret=='loss_per_loc':
+            return xd['loss_per_loc'],target_notnull
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
 
         # return None
 
@@ -7547,11 +7600,8 @@ class DLM142(DLM140):
         D = self.config.depth
         self.D = D
         self.conv_layer_list = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)])
-
-        # self.conv_layer = nn.Conv1d(E,E,kernel_size = 5, padding='same')
-        # self.conv_layer_2 = nn.Conv1d(E,E,kernel_size = 5, padding='same')
-        # self.convt_layer = nn.Conv1d(E,E,kernel_size = 5, padding='same')
-        # self.convt_layer_2 = nn.Conv1d(E,E,kernel_size = 5, padding='same')
+        if hasattr(self,'rnn_dec'): del self.rnn_dec
+        if hasattr(self,'rnn_enc'): del self.rnn_enc
 
         x = nn.Linear(E,2).to(self.device)
         self.is_kept   =  x
@@ -7565,12 +7615,15 @@ class DLM142(DLM140):
         zs = t2_embed
         zs = zs.transpose(1,2)
 
-        # for layer in [self.conv_layer, self.conv_layer_2, self.convt_layer, self.convt_layer_2]:
+        # for k in range(2):
         for layer in self.conv_layer_list:
-            # for k in range(3):
-                # zs = zs + layer(zs. relu())
-            zs = 0.5*zs + 0.5* layer(zs).tanh()
-                #.relu()
+            # zs = zs + layer(zs. relu())
+            '''
+            Important to stabilise the numbers over deep layers
+            '''
+            # zs = 0.5*zs + 0.5* layer(zs).tanh()
+            zs = (zs + layer(zs)).tanh()
+            # zs = (zs + layer(zs)).clip(-1, 1)
 
         zs = zs.transpose(1,2)
         # zs = zs.flip([2,])
@@ -7580,12 +7633,392 @@ class DLM142(DLM140):
 
         logp_repl = self.unembed(zs).log_softmax(-1)
 
-        logp_kept = self.unembed(t2_embed).log_softmax(-1)
-        x = torch.stack([logp_repl,logp_kept],dim=2)
-        logp = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
+        self.USE_RESIDUAL=1
+        if self.USE_RESIDUAL:
+            logp_kept = self.unembed(t2_embed).log_softmax(-1)
+            x = torch.stack([logp_repl,logp_kept],dim=2)
+            logp = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
+        else:
+            logp = logp_repl
+        return zs,logp
+
+import  markov_lm.external.clm_transformer_model
+class DLM147(DLM140):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+
+        self.submodel = markov_lm.external.clm_transformer_model.NextCharTransformer(
+            vocab_size = self.config.graph_dim + 1,
+            n_layers = self.config.depth,
+            hidden_size = self.config.embed_dim,
+            inner_linear = self.config.embed_dim,
+            n_heads = 4,
+            dropout = 0.55,
+            tied = False,
+            max_sequence_len = 100,
+            intermediate_layer_predictions = False,
+            # intermediate_layer_predictions = True,
+        )
+
+        E = self.config.embed_dim
+        D = self.config.depth
+        self.D = D
+        # self.conv_layer_list = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)])
+        # if hasattr(self,'rnn_dec'): del self.rnn_dec
+        # if hasattr(self,'rnn_enc'): del self.rnn_enc
+
+        x = nn.Linear(E,2).to(self.device)
+        self.is_kept   =  x
+        # nn.Parameter(x.weight.T[None,None])
+        return
+
+    def decode(self, t2_embed):
+        D = self.config.depth
+        (BW, T, E)= t2_embed.shape
+        h0 = torch.ones((D,BW,E),device=self.device)
+        zs = t2_embed
+        mask = torch.ones((BW,T,T),device=self.device)
+        # import pdb; pdb.set_trace()
+        # mask =
+        zs, intermediate_predictions = self.submodel.encoder(t2_embed, mask)
+
+
+
+        is_kept_lp = self.is_kept(zs).log_softmax(-1)
+
+        logp_repl = self.unembed(zs).log_softmax(-1)
+
+        self.USE_RESIDUAL=1
+        if self.USE_RESIDUAL:
+            logp_kept = self.unembed(t2_embed).log_softmax(-1)
+            x = torch.stack([logp_repl,logp_kept],dim=2)
+            logp = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
+        else:
+            logp = logp_repl
+        return zs,logp
+
+
+    pass
+
+class DLM143(DLM140):
+    '''
+    recover states from noise
+    '''
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        E = self.config.embed_dim
+        D = self.config.depth
+        self.D = D
+        self.conv_layer_list = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)])
+        if hasattr(self,'rnn_dec'): del self.rnn_dec
+        if hasattr(self,'rnn_enc'): del self.rnn_enc
+
+        x = nn.Linear(E,10).to(self.device)
+        self.is_kept   =  x
+        # nn.Parameter(x.weight.T[None,None])
+        return
+
+    def decode(self, t2_embed):
+        D = self.config.depth
+        (BW, T, E)= t2_embed.shape
+        h0 = torch.ones((D,BW,E),device=self.device)
+        zs = t2_embed
+        zs = zs.transpose(1,2)
+
+        # for k in range(2):
+        for layer in self.conv_layer_list:
+            # zs = zs + layer(zs. relu())
+            '''
+            Important to stabilise the numbers over deep layers
+            '''
+            # zs = 0.5*zs + 0.5* layer(zs).tanh()
+            # zs = (zs + layer(zs)).tanh()
+            zs = (layer(zs)).tanh()
+            # zs = (zs + layer(zs)).clip(-1, 1)
+
+        zs = zs.transpose(1,2)
+        # zs = zs.flip([2,])
+
+
+        is_kept_lp = self.is_kept(zs).log_softmax(-1).reshape((BW,-1,5,2)).logsumexp(2)
+
+        logp_repl = self.unembed(zs).log_softmax(-1)
+
+        self.USE_RESIDUAL=1
+        if self.USE_RESIDUAL:
+            logp_kept = self.unembed(t2_embed).log_softmax(-1)
+            x = torch.stack([logp_repl,logp_kept],dim=2)
+            logp = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
+        else:
+            logp = logp_repl
 
         return zs,logp
 
+
+class CustomTransformer(nn.Module):
+    def __init__(self, E, K):
+        # E = config.embed_dim
+        super().__init__()
+
+        self.w_k = nn.ModuleList([nn.Linear( E, E) for _ in range(K)])
+        self.w_v = nn.ModuleList([nn.Linear( E, E) for _ in range(K)])
+        self.K = K
+
+    def forward(self, x):
+        B,T,E = x.shape
+        xy = 0
+        for k,w_k in enumerate(self.w_k):
+        # K = self.K
+        # xx  = (self.w_k(x)).reshape((B,T,K,E)) @ x.transpose(-1,-2)
+            xx  = (self.w_k[k](x)) @ x.transpose(-1,-2)
+            att = xx.softmax(-1)
+            xy  = xy + att @ (self.w_v[k](x) )
+        return xy
+
+
+
+
+class DLM144(DLM140):
+    '''
+    recover states from noise
+    '''
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        E = self.config.embed_dim
+        D = self.config.depth
+        self.D = D
+        # self.
+        KT = 2
+        # self.conv_layer_list = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)])
+        self.conv_layer_list = nn.ModuleList([CustomTransformer(E,KT) for _ in range(D)])
+        if hasattr(self,'rnn_dec'): del self.rnn_dec
+        if hasattr(self,'rnn_enc'): del self.rnn_enc
+
+        x = nn.Linear(E,10).to(self.device)
+        self.is_kept   =  x
+        # nn.Parameter(x.weight.T[None,None])
+        return
+
+    def decode(self, t2_embed):
+        D = self.config.depth
+        (BW, T, E)= t2_embed.shape
+        h0 = torch.ones((D,BW,E),device=self.device)
+        zs = t2_embed
+        # zs = zs.transpose(1,2)
+
+        # for k in range(2):
+        for layer in self.conv_layer_list:
+            # zs = zs + layer(zs. relu())
+            '''
+            Important to stabilise the numbers over deep layers
+            '''
+            # zs = 0.5*zs + 0.5* layer(zs).tanh()
+            zs = (zs + layer(zs)).tanh()
+            # zs = (layer(zs)).tanh()
+            # zs = (zs + layer(zs)).clip(-1, 1)
+
+        # zs = zs.transpose(1,2)
+        # zs = zs.flip([2,])
+
+        is_kept_lp = self.is_kept(zs).log_softmax(-1).reshape((BW,-1,5,2)).logsumexp(2)
+
+        logp_repl = self.unembed(zs).log_softmax(-1)
+
+        self.USE_RESIDUAL=1
+        if self.USE_RESIDUAL:
+            logp_kept = self.unembed(t2_embed).log_softmax(-1)
+            x = torch.stack([logp_repl,logp_kept],dim=2)
+            logp = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
+        else:
+            logp = logp_repl
+
+        return zs,logp
+
+
+
+class DLM145(DLM140):
+    '''
+    recover states from noise
+    '''
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        E = self.config.embed_dim
+        D = self.config.depth
+        self.D = D
+        self.conv_layer_list = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)])
+        if hasattr(self,'rnn_dec'): del self.rnn_dec
+        if hasattr(self,'rnn_enc'): del self.rnn_enc
+
+        x = nn.Linear(E,2).to(self.device)
+        self.is_kept   =  x
+        # nn.Parameter(x.weight.T[None,None])
+        return
+
+    def decode(self, t2_embed):
+        D = self.config.depth
+        (BW, T, E)= t2_embed.shape
+        h0 = torch.ones((D,BW,E),device=self.device)
+        zs = t2_embed
+        zs = zs.transpose(1,2)
+
+        # for k in range(2):
+        for layer in self.conv_layer_list:
+            # zs = zs + layer(zs. relu())
+            '''
+            Important to stabilise the numbers over deep layers
+            '''
+            # zs = 0.5*zs + 0.5* layer(zs).tanh()
+            zs = (zs + layer(zs)).tanh()
+            # zs = (zs + layer(zs)).clip(-1, 1)
+
+        zs = zs.transpose(1,2)
+        # zs = zs.flip([2,])
+
+
+        is_kept_lp = self.is_kept(zs).log_softmax(-1)
+
+        logp_repl = self.unembed(zs).log_softmax(-1)
+
+        self.USE_RESIDUAL=1
+        if self.USE_RESIDUAL:
+            logp_kept = self.unembed(t2_embed).log_softmax(-1)
+            x = torch.stack([logp_repl,logp_kept],dim=2)
+            logp = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
+        else:
+            logp = logp_repl
+        return zs,logp
+
+
+    def _get_loss(self, zs, encoder_mu,target,target_notnull):
+        '''
+        encoder_mu:      is the noise-free param
+        zs:              is the sampled latent
+        target:          the wanted decoding result
+        target_notnull:  mask to ignore unspecified
+
+        describ:
+            use a fixed noise to perturb target recursively.
+
+        因为替换一次和替换两次是没有区别的，所以对于多次采样可以利用这种等价性。
+        每次固定只perturb k个位置，这个其实不是很poisson，或者不是条件独立的。
+        如果poisson一点，那其实每个位置被corrupt的概率均等，采样起来比较方便。
+        '''
+
+        W = self.W
+        K = self.K
+
+        p_null = self.config.p_null
+        B,T = target.shape
+        D = self.config.depth
+
+        t1_mask     = torch.rand( [B,W+1,T], device=self.device)
+        t1_mask     = (  t1_mask < (p_null * target_notnull.unsqueeze(1)) )
+        t2_mask     = t1_mask[:,1:]
+        t1_mask     = t1_mask[:,:-1]
+        t1_mask[:,0] = 0
+
+        t1_mask_cum = t1_mask.cumsum(dim=1) > 0
+
+        t1_rint     = torch.randint(self.G,[B,W,T], device=self.device)
+        t2_rint     = torch.randint(self.G,[B,W,T], device=self.device)
+        t1 = target.unsqueeze(1) * ~t1_mask_cum + t1_rint * t1_mask_cum
+        t2 = t1 * ~t2_mask + t2_rint* t2_mask
+        # print(t2_mask.sum(2).float().mean().item())
+        E = self.embed_dim
+
+        t2 = t2.reshape((B*W,T))
+        t1 = t1.reshape((B*W,T))
+
+        t2_embed = self.embed(t2)
+
+        zs,logp  = self.decode(t2_embed)
+
+        self.PREDICT_SOURCE=0
+        if self.PREDICT_SOURCE:
+            t1 = target.unsqueeze(1).repeat((1,W,1)).reshape((B*W,T))
+        else:
+            pass
+
+        lps = torch.gather(logp,index=t1.unsqueeze(-1),dim=-1).squeeze(-1)
+        lps = lps.reshape((B,W,T))
+        logp_sum_byt = (lps*target_notnull.unsqueeze(1)).sum(-1)
+        wt = torch.linspace(5,0,W,device=self.device)[None,:,]
+        logp_sum     = logp_sum_byt.mean(-1)
+        logp_sum_grad = (logp_sum_byt * wt.softmax(-1)).sum(-1)
+
+        encoder_mu_0 = self.embed(target)
+        encoder_mu   = t2_embed.reshape((B,W,T,E))[:,0]
+
+        recovered = zs.reshape((B,W,T,E))[:,0]
+        sampled_zs =  t2_embed.reshape((B,W,T,E))[:,0] -  self.embed(t1).reshape((B,W,T,E))[:,0]
+        return locals()
+
+
+
+class DLM146(DLM140):
+    '''
+    recover states from noise
+    '''
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        E = self.config.embed_dim
+        D = self.config.depth
+        self.D = D
+        self.conv_layer_list_1 = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D//2)])
+        self.conv_layer_list_2 = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D//2)])
+        self.conv_layer_list_3 = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D//2)])
+        if hasattr(self,'rnn_dec'): del self.rnn_dec
+        if hasattr(self,'rnn_enc'): del self.rnn_enc
+
+        x = nn.Linear(E,2).to(self.device)
+        self.is_kept   =  x
+        # nn.Parameter(x.weight.T[None,None])
+        return
+
+    def decode(self, t2_embed):
+        D = self.config.depth
+        (BW, T, E)= t2_embed.shape
+        h0 = torch.ones((D,BW,E),device=self.device)
+        zs = t2_embed
+        zs = zs.transpose(1,2)
+
+        # for k in range(2):
+        for layer in self.conv_layer_list_1:
+            # zs = zs + layer(zs. relu())
+            '''
+            Important to stabilise the numbers over deep layers
+            '''
+            # zs = 0.5*zs + 0.5* layer(zs).tanh()
+            zs = (zs + layer(zs)).tanh()
+        zs_inter = zs
+
+        zs = zs_inter
+        for layer in self.conv_layer_list_2:
+            zs = (zs + layer(zs)).tanh()
+        zs = zs.transpose(1,2)
+        is_kept_lp = self.is_kept(zs).log_softmax(-1)
+
+        # zs = zs.flip([2,])
+
+
+        zs = zs_inter
+        for layer in self.conv_layer_list_3:
+            zs = (zs + layer(zs)).tanh()
+        zs = zs.transpose(1,2)
+        logp_repl = self.unembed(zs).log_softmax(-1)
+
+        self.USE_RESIDUAL=1
+        if self.USE_RESIDUAL:
+            logp_kept = self.unembed(t2_embed).log_softmax(-1)
+            x = torch.stack([logp_repl,logp_kept],dim=2)
+            logp = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
+        else:
+            logp = logp_repl
+        return zs,logp
 
 
 
