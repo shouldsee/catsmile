@@ -181,11 +181,20 @@ def get_model_test_loss(conf):
 
     return v
         # loss_test_sum +=  float(loss.item())
+'''
+BREAKING CHANGE conf_main_loop
+'''
+# def conf_main_loop(conf,  CKPT,  STRICT_LOAD,  BLACKLIST,  SAVE_INTERVAL,ret='train'):
+def conf_main_loop(conf, ret='train'):
 
-def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
     '''
     A shared main loop for gradient descent
     '''
+    CKPT = conf.CKPT
+    STRICT_LOAD = conf.STRICT_LOAD
+    BLACKLIST=conf.BLACKLIST
+    SAVE_INTERVAL = conf.SAVE_INTERVAL
+    # ,  SAVE_INTERVAL,
     # CKPT = conf.CKPT
     model = conf.model
     dataset = conf.dataset
@@ -241,6 +250,8 @@ def conf_main_loop(conf,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL):
         train_losses = []
         epoch_list = []
         epoch = -1
+    if ret=='load':
+        return conf
 
 
     loss_test_mean = 0

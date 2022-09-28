@@ -13,3 +13,8 @@ __pycache__/
 # C extensions
 *.so
 nohup.out
+
+services/*log*
+services/visdom_data/
+services/bin
+*.pid
