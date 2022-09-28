@@ -2,25 +2,14 @@ from io import BytesIO
 import base64
 import requests
 import os
+import shutil
 # from tqdm import tdqm
 from tqdm import tqdm
-import shutil
+# import toml
 
 
 
-'''
-Object level methods
-'''
-def register_object_method(self):
-    '''
-    将某个动态方法挂载到一个object上
-    '''
-    def decorator(method):
-        def wrapper(*args, **kwargs):
-            return method(self,*args, **kwargs)
-        setattr(self, method.__name__, wrapper)
-        return wrapper
-    return decorator
+from markov_lm.util_base import register_object_method
 
 class my_cls():
     def __init__(self,i ):
@@ -117,6 +106,7 @@ def get_url(url,fname):
 		# shutil.move(fname+'.temp', fname)
 
 get_url_lazy = lazy_if_file_exists(get_url, 1)
+from markov_lm.util_base import dict_to_argv,toml_to_argv
 
 if __name__ == '__main__':
 	fname = 'guppy-0.1.10.tar.gz'
