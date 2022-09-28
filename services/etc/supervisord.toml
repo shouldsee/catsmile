@@ -1,0 +1,135 @@
+[unix_http_server]
+#file=127.0.0.1:19002
+file=/tmp/supervisord.sock
+#chmod=not support
+#chown=not support
+username=test1
+password=thepassword
+#password={SHA}82ab876d1387bfafe46cc1c8a2ef074eae50cb1d
+
+[inet_http_server]
+port=127.0.0.1:19001
+username=test1
+password=thepassword
+
+[supervisord]
+logfile=%(here)s/../supervisord.log
+logfileMaxbytes=50MB
+logfileBackups=10
+loglevel=info
+pidfile=%(here)s/../supervisord.pid
+#umask=not support
+#nodaemon=not support
+#minfds=not support
+#minprocs=not support
+#nocleanup=not support
+#childlogdir=not support
+#user=not support
+#directory=not support
+#strip_ansi=not support
+#environment=not support
+identifier=supervisor
+
+# [program:nginx]
+# command=%(here)s/../bin/frps -c etc/frps.ini
+# directory=%(here)s/../
+# redirect_stderr=true
+# stdout_logfile=%(here)s/../%(program_name)s.stdout.log
+# stdout_logfile_maxbytes=50MB
+# stdout_logfile_backups=10
+# stdout_capture_maxbytes=0
+# stdout_events_enabled=true
+
+#
+# [program:frps]
+# command=%(here)s/../bin/frps -c etc/frps.ini
+# directory=%(here)s/../
+# redirect_stderr=true
+# stdout_logfile=%(here)s/../%(program_name)s.stdout.log
+# stdout_logfile_maxbytes=50MB
+# stdout_logfile_backups=10
+# stdout_capture_maxbytes=0
+# stdout_events_enabled=true
+#
+#
+# [program:frpc]
+# command=%(here)s/../bin/frpc -c etc/frpc.ini
+# directory=%(here)s/../
+# redirect_stderr=true
+# stdout_logfile=%(here)s/../%(program_name)s.stdout.log
+# stdout_logfile_maxbytes=50MB
+# stdout_logfile_backups=10
+# stdout_capture_maxbytes=0
+# stdout_events_enabled=true
+
+[program:cesi]
+command=python3 %(here)s/../bin/cesi/cesi/run.py --url_prefix /cesi --port 5000 --host 127.0.0.1 -c etc/cesi.conf.toml --debug
+directory=%(here)s/../
+redirect_stderr=true
+stdout_logfile=%(here)s/../%(program_name)s.stdout.log
+stdout_logfile_maxbytes=50MB
+stdout_logfile_backups=10
+stdout_capture_maxbytes=0
+stdout_events_enabled=true
+
+
+
+
+[program:visdom]
+command=%(here)s/../bin/visdom -env_path visdom_data -cache_type JPWA -port 6007
+directory=%(here)s/../
+redirect_stderr=true
+stdout_logfile=%(here)s/../%(program_name)s.stdout.log
+stdout_logfile_maxbytes=50MB
+stdout_logfile_backups=10
+stdout_capture_maxbytes=0
+stdout_events_enabled=true
+#stderr_logfile=%(here)s/../%(program_name)s.stderr.log
+#stderr_logfile_maxbytes=50MB
+#stderr_logfile_backups=10
+#stderr_capture_maxbytes=0
+#stderr_events_enabled=false
+
+[program:sleep]
+command=bash -c "sleep 3650d"
+
+[program:sleep]
+process_name=%(program_name)s
+numprocs=1
+#numprocs_start=not support
+autostart=true
+startsecs=3
+startretries=3
+autorestart=true
+exitcodes=0,2
+stopsignal=TERM
+stopwaitsecs=10
+stopasgroup=true
+killasgroup=true
+user=root
+redirect_stderr=false
+stdout_logfile=AUTO
+stdout_logfile_maxbytes=50MB
+stdout_logfile_backups=10
+stdout_capture_maxbytes=0
+stdout_events_enabled=true
+stderr_logfile=AUTO
+stderr_logfile_maxbytes=50MB
+stderr_logfile_backups=10
+stderr_capture_maxbytes=0
+stderr_events_enabled=false
+environment=KEY="val",KEY2="val2"
+directory=/tmp
+#umask=not support
+serverurl=AUTO
+
+[include]
+files=/an/absolute/filename.conf /an/absolute/*.conf foo.conf config??.conf
+
+
+
+[supervisorctl]
+serverurl = unix:///tmp/supervisor.sock
+username = chris
+password = 123
+#prompt = not support
