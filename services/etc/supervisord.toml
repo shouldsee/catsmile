@@ -30,6 +30,26 @@ pidfile=%(here)s/../supervisord.pid
 #environment=not support
 identifier=supervisor
 
+
+#
+# [program:nginx]
+# command=/usr/sbin/nginx -g "daemon off;"
+# autostart=true
+# autorestart=true
+# startretries=10
+# numprocs=1
+# startsecs=3
+# process_name=%(program_name)s_%(process_num)02d
+# #stderr_logfile=$(here)s/var/log/supervisor/%(program_name)s_stderr.log
+# #stderr_logfile_maxbytes=10MB
+# redirect_stderr=true
+# stdout_logfile=%(here)s/../%(program_name)s.stdout.log
+# stdout_logfile_maxbytes=50MB
+# stdout_logfile_backups=10
+# stdout_capture_maxbytes=0
+# stdout_events_enabled=true
+
+
 # [program:nginx]
 # command=%(here)s/../bin/frps -c etc/frps.ini
 # directory=%(here)s/../
@@ -41,26 +61,26 @@ identifier=supervisor
 # stdout_events_enabled=true
 
 #
-# [program:frps]
-# command=%(here)s/../bin/frps -c etc/frps.ini
-# directory=%(here)s/../
-# redirect_stderr=true
-# stdout_logfile=%(here)s/../%(program_name)s.stdout.log
-# stdout_logfile_maxbytes=50MB
-# stdout_logfile_backups=10
-# stdout_capture_maxbytes=0
-# stdout_events_enabled=true
-#
-#
-# [program:frpc]
-# command=%(here)s/../bin/frpc -c etc/frpc.ini
-# directory=%(here)s/../
-# redirect_stderr=true
-# stdout_logfile=%(here)s/../%(program_name)s.stdout.log
-# stdout_logfile_maxbytes=50MB
-# stdout_logfile_backups=10
-# stdout_capture_maxbytes=0
-# stdout_events_enabled=true
+[program:frps]
+command=%(here)s/../bin/frps -c etc/frps.ini
+directory=%(here)s/../
+redirect_stderr=true
+stdout_logfile=%(here)s/../%(program_name)s.stdout.log
+stdout_logfile_maxbytes=50MB
+stdout_logfile_backups=10
+stdout_capture_maxbytes=0
+stdout_events_enabled=true
+
+
+[program:frpc]
+command=%(here)s/../bin/frpc -c etc/frpc.ini
+directory=%(here)s/../
+redirect_stderr=true
+stdout_logfile=%(here)s/../%(program_name)s.stdout.log
+stdout_logfile_maxbytes=50MB
+stdout_logfile_backups=10
+stdout_capture_maxbytes=0
+stdout_events_enabled=true
 
 [program:cesi]
 command=python3 %(here)s/../bin/cesi/cesi/run.py --url_prefix /cesi --port 5000 --host 127.0.0.1 -c etc/cesi.conf.toml --debug
@@ -75,8 +95,9 @@ stdout_events_enabled=true
 
 
 
+
 [program:visdom]
-command=%(here)s/../bin/visdom -env_path visdom_data -cache_type JPWA -port 6007
+command=python3 bin/visdom -env_path visdom_data -cache_type JPWA -port 9002 -base_url /visdom
 directory=%(here)s/../
 redirect_stderr=true
 stdout_logfile=%(here)s/../%(program_name)s.stdout.log
@@ -89,6 +110,7 @@ stdout_events_enabled=true
 #stderr_logfile_backups=10
 #stderr_capture_maxbytes=0
 #stderr_events_enabled=false
+
 
 [program:sleep]
 command=bash -c "sleep 3650d"
