@@ -40,6 +40,8 @@ from markov_lm.conf_runner import conf_main_loop,conf_parse_all
 import toml
 from datetime import datetime
 
+from markov_lm.core_models import InterfaceCompare
+
 
 def argv_to_conf(cli_argv):
     (CUDA, CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL,RANDOM_SEED,
@@ -59,8 +61,9 @@ def argv_to_conf(cli_argv):
 
 import json
 
+
 def main():
-    if '--compare' in sys.argv:
+    if '--server' in sys.argv:
         '''
         this function needs to specify two models.
         which means we need hierarchical structures,
@@ -68,293 +71,20 @@ def main():
 
         specifying hierarhical structures on CLI is a bad idea.
         here we uses toml to better represent these structs
+
+        this is a daemon socket server listening for socket msg
+        and execute callbacks registered with Visdom.register_event_handler
         '''
 
-        '''
-        js console hacker
-
-        app._reactRootContainer._internalRoot.current.child.stateNode.sendSocketMessage({event_type:'test'})
-        thiss = app._reactRootContainer._internalRoot.current.child.stateNode;
-        '''
-
-
+        meta_dict = conf_parse_all(sys.argv[:])[-1]
         import visdom
-        vis = visdom.Visdom(port=6006)
-        '''
-        在button的onclick方法里注入socket通信方法
+        vis = visdom.Visdom(**meta_dict['visdom'])#port=9002,base_url='/visdom')
 
-        {"cmd":"forward_to_vis","data":{"target":"box1","eid":"testdev","event_type":"Click"}}
-        '''
-
-
-        win = 'box1'
-        env = 'testdev'
-
-        callback_target= f'{env}/{win}'
-
-        injected_js = '''
-        const data = new FormData(this.parentElement);
-        const dataValue = Object.fromEntries(data.entries());
-        const msg = {"cmd":"forward_to_vis","data":{"target":"%s","eid":"testdev","event_type":"SubmitForm", event_data: dataValue}}
-        console.log(msg);
-
-        app._reactRootContainer._internalRoot.current.child.stateNode.sendSocketMessage(msg);
-        console.log('injected')
-        '''%callback_target
-
-
-        injected_js = injected_js.replace('\"','\'')
-        injected_js = ';'.join(injected_js.splitlines())
-
-        default_model1 = '''
-        loglr = -4
-        LOAD = "100_"
-
-        [model]
-        embed_dim=60
-        model_name = "DLM142"
-        kernel_size = 3
-        window_size = 1
-        depth = 12
-        p_null = 0.05
-        '''
-
-        from markov_lm.util_base import toml_to_argv, dict_to_argv
-
-        # x1 = dict_to_argv(toml.loads(default_model1))
-        x1 = toml_to_argv(default_model1)
-        style_of_input_box = "border:2px solid black; width:250px;height:150px;"
-        def add_textarea(k,default, style = style_of_input_box):
-            return f'''
-            <label>{k}</label>
-            <br/>
-            <textarea name="{k}" style="{style}">{default}</textarea>
-            '''
-
-        k  = 'target_env'
-        vd = 'compare0003'
-        style = 'border:2px solid black;'
-
-        v = f'<input type="text" name="{k}" value="{vd}" style="{style}"></input>'
-        v += add_textarea('model_session_config_1', default_model1)
-        v += '<br/>'
-        v += add_textarea('model_session_config_2', default_model1)
-        v += '<br/>'
-
-        xx1 = toml.loads(default_model1)
-
-        k = 'EventDataType'
-        vd = 'MarkovComapreEventData'
-
-        vis.text(
-        f'''
-        <form action="javascript:void(0);">
-        <input type='hidden' name="{k}" value="{vd}" />
-        <button onclick="javascript:{injected_js}">submit</button>
-        <br/>
-        {v}
-        </form>
-        '''
-        ,env=env,win=win)
-
-
-        from markov_lm.util_base import dset
-        from datetime import datetime
-        from typing import List, Optional
-        from pydantic import BaseModel,validator
-        class PaneData(BaseModel):
-            command: str
-            content: str
-            title: str
-            id:str
-            type:str
-            i: int
-            contentID: str
-            #height: Optional[int]=None
-
-        import logging
-        from typing import Literal, Union
-        class EventData(BaseModel):
-            EventDataType : Literal['EventData']
-        class KeyPress(BaseModel):
-            pass
-
-
-        class MarkovComapreEventData(BaseModel):
-            EventDataType: Literal['MarkovComapreEventData']
-            model_session_config_1: dict
-            model_session_config_2: dict
-            target_env: str
-
-            @validator("model_session_config_1","model_session_config_2",pre=True)
-            def parse_toml(cls,v):
-                return toml.loads(v)
-
-            _example = r'''
-            {"target": "testdev/box1",
-             "eid": "testdev",
-             "event_type": "SubmitForm",
-             "event_data":
-             {"EventDataType": "MarkovComapreEventData",
-             "target_env": "compare0003",
-             "model_session_config_1": "        loglr = -4\n        LOAD = \"100_\"\n\n        [model]\n        embed_dim=60\n        model_name = \"DLM142\"\n        kernel_size = 3\n        window_size = 1\n        depth = 12\n        p_null = 0.05\n        ",
-             "model_session_config_2": "        loglr = -4\n        LOAD = \"100_\"\n\n        [model]\n        embed_dim=60\n        model_name = \"DLM142\"\n        kernel_size = 3\n        window_size = 1\n        depth = 12\n        p_null = 0.05\n        "}
-             }
-            '''
-            def on_recv(self):
-                logging.debug(f'[before_on_recv]{self}')
-                self._on_recv()
-                logging.debug(f'[after_on_recv]{self}')
-            def _on_recv(self, ):
-                # pcli_argv_1 =
-                env = self.target_env
-                from markov_lm.Model_NLM import U
-                from markov_lm.util_base import toml_to_argv, dict_to_argv
-                import pandas as pd
-
-                conf1 = conf_main_loop(argv_to_conf(dict_to_argv(self.model_session_config_1)),'load')
-                conf2 = conf_main_loop(argv_to_conf(dict_to_argv(self.model_session_config_2)),'load')
-
-                dataset = conf1.dataset
-                dataloader = conf1.dataloader
-                vis = conf1.vis
-                dataset.test()
-                item = next(iter(dataloader))
-                loss1,loss2 = map((lambda x:x.model.loss(item)),[conf1,conf2])
-
-                key = 'test_loss_scatter'
-                mat = U.N(torch.stack([loss1,loss2],dim=-1))
-                x,y = mat.T
-                MAX = int(mat.max())
-                MIN = 0
-                vis.scatter( mat, env=env, win = key,opts=dict(title=key,xtickmin=MIN,xtickmax=MAX, ytickmin=MIN,ytickmax=MAX,markersize=5,textlabels= list(range(len(mat)))))
-                # vis.scatter( mat, env=env, win = key,opts=dict(title=key))
-                # key = hist1
-
-                key ='test_loss_boxplot'
-                vis.boxplot( mat, env=env, win = key,opts=dict(title=key))
-                # ,xtickmin=MIN,xtickmax=MAX, ytickmin=MIN,ytickmax=MAX))
-
-                key ='test_loss_diff_histogram'
-                vis.histogram( mat.T[1] - mat.T[0], env=env, win = key,opts=dict(title=key))
-
-
-                target = item['target']
-                xdiff = loss2 - loss1
-                xsel = target[ xdiff < -7]
-
-                x = np.vectorize(dataset.tgt_wordize)(U.N(xsel))
-                # x = [''.join(xx) for xx in x]
-                df = pd.DataFrame( x )
-                key = 'very Negative xdiff'
-                vis.text(df.to_html(), win=key,env=env)
-                # loss2 + margin < loss1
-                key ='Evaluation Dialogue'
-                html_buffer = ''''<input></input>'''
-                vis.text(html_buffer,win=key,env=env)
-
-
-
-        cls = MarkovComapreEventData
-        cls._example_value =  cls(**json.loads(cls._example)['event_data'])
-
-        from typing import Union
-        from pydantic import Field
-
-        class VisdomCallbackMessage(BaseModel):
-            eid: str
-            event_type: str
-            target: str
-            pane_data: Optional[PaneData]  ### intermediaste
-            event_data: Union[EventData, MarkovComapreEventData] = Field(default={},discriminator='EventDataType')
-
-        def _callback(event,env = env, win='reply_win', vis=vis):
-            '''
-            event = {'eid': 'text_callbacks',
-             'event_type': 'KeyPress',
-             'key': 'd',
-             'key_code': 68,
-             'pane_data': {'command': 'window',
-                           'content': 'This is a write demo notepad. Type below. Delete '
-                                      'clears text:<br>a',
-                           'contentID': '43af9d32-5185-4167-8ef2-52b34b3c84e2',
-                           'height': None,
-                           'i': 1,
-                           'id': 'window_3b1fede0134b74',
-                           'inflate': True,
-                           'title': '',
-                           'type': 'text',
-                           'width': None},
-             'target': 'window_3b1fede0134b74'}
-
-            '''
-            # if event['event_type'] =='SubmitForm':
-            msg = VisdomCallbackMessage(**event)
-            if isinstance( msg.event_data, MarkovComapreEventData):
-                # import pdb; pdb.set_trace()
-                msg.event_data.on_recv()
-                vis.text(f'[{datetime.now().isoformat()}] Callback received <br/><textarea>{(msg.event_data.json())}</textarea>', win=win, env=env)
-            else:
-                print(msg)
-
-            # BaseMessage()
-        vis.register_event_handler(_callback, callback_target)
-
-
-        ExampleBaseMessage = {'eid': 'text_callbacks',
-         'event_type': 'KeyPress',
-         'key': 'd',
-         'key_code': 68,
-         'pane_data': {'command': 'window',
-                       'content': 'This is a write demo notepad. Type below. Delete '
-                                  'clears text:<br>a',
-                       'contentID': '43af9d32-5185-4167-8ef2-52b34b3c84e2',
-                       'height': None,
-                       'i': 1,
-                       'id': 'window_3b1fede0134b74',
-                       'inflate': True,
-                       'title': '',
-                       'type': 'text',
-                       'width': None},
-         'target': 'window_3b1fede0134b74'}
-
-        xx = VisdomCallbackMessage(**ExampleBaseMessage)
-        from pprint import pprint
-        pprint(xx)
-        import pdb; pdb.set_trace()
+        _ = InterfaceCompare.bind_visdom(vis)
 
         input('Wating for callback')
         sys.exit(0)
-        assert 0
 
-        pcli_argv_1 = [
-            '--model.embed_dim', '60',
-            '--model.model_name', 'DLM142',
-            '--model.kernel_size', '3',
-            '--model.window_size', '1',
-            '--model.depth', '12',
-            '--loglr', '-4',
-            '--model.p_null', '0.05',
-            # '--batch_size','150',
-            '--LOAD','100_'
-        ]
-        pcli_argv_2 = [
-            '--model.embed_dim', '60',
-            '--model.model_name', 'DLM142',
-            '--model.kernel_size', '3',
-            '--model.window_size', '1',
-            '--model.depth', '12',
-            '--loglr', '-4',
-            '--model.p_null', '0.05',
-            # '--batch_size','150',
-            '--LOAD','20_'
-        ]
-        env = 'compare/0002'
-        # confargv_to_conf(pcli_argv)
-        # conf1,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL = argv_to_conf(pcli_argv_1)
-        # conf2,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL =
-
-        pass
     else:
         # conf,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL =
         conf = argv_to_conf(sys.argv)
