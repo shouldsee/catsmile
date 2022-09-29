@@ -55,18 +55,19 @@ identifier=supervisor
 # stdout_capture_maxbytes=0
 # stdout_events_enabled=true
 
+[program:markov]
+command=python3 %(here)s/../../markov_lm/nlp/train.py --server --visdom.port 9002 --visdom.base_url /visdom
+directory=%(here)s/../../markov_lm/nlp/
+redirect_stderr=true
+stdout_logfile=%(here)s/../%(program_name)s.stdout.log
+stdout_logfile_maxbytes=50MB
+stdout_logfile_backups=10
+stdout_capture_maxbytes=0
+stdout_events_enabled=true
 
-# [program:nginx]
-# command=%(here)s/../bin/frps -c etc/frps.ini
-# directory=%(here)s/../
-# redirect_stderr=true
-# stdout_logfile=%(here)s/../%(program_name)s.stdout.log
-# stdout_logfile_maxbytes=50MB
-# stdout_logfile_backups=10
-# stdout_capture_maxbytes=0
-# stdout_events_enabled=true
 
-#
+
+
 [program:frps]
 command=%(here)s/../bin/frps -c etc/frps.ini
 directory=%(here)s/../
