@@ -12,6 +12,12 @@ port=127.0.0.1:19001
 username=test1
 password=thepassword
 
+; the below section must remain in the config file for RPC
+; (supervisorctl/web interface) to work, additional interfaces may be
+; added by defining them in separate rpcinterface: sections
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
 [supervisord]
 logfile=%(here)s/../supervisord.log
 logfileMaxbytes=50MB
