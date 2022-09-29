@@ -75,14 +75,14 @@ def conf_parse_all(sys_argv):
     v = _caster(v)
     meta_dict['num_epoch']= v
 
-    k = '--visdom_port'
-    _caster = int
-    if k in sys_argv:
-        v= sys_argv[sys_argv.index(k)+1]
-    else:
-        v = 6006
-    v = _caster(v)
-    meta_dict['visdom_port']= v
+    # k = '--visdom_port'
+    # _caster = int
+    # if k in sys_argv:
+    #     v= sys_argv[sys_argv.index(k)+1]
+    # else:
+    #     v = 6006
+    # v = _caster(v)
+    # meta_dict['visdom_port']= v
 
     k = '--loglr'
     _caster = float
@@ -113,6 +113,21 @@ def conf_parse_all(sys_argv):
             # k[len('--model'):]
             v = sys_argv[i+1]
             model_dict[kk] = v
+    visdom_dict = meta_dict['visdom'] ={}
+    if '--visdom.port' not in sys_argv:
+        sys_argv+=['--visdom.port','9002']
+    if '--visdom.base_url' not in sys_argv:
+        sys_argv+=['--visdom.base_url','/visdom']
+
+    for i,k in enumerate(sys_argv):
+        if k.startswith('--visdom.'):
+            # kk = k[len('--model'):]
+            assert '.' in k, k
+            kk = k.split('.',1)[1]
+            # k[len('--model'):]
+            v = sys_argv[i+1]
+            visdom_dict[kk] = v
+
 
     return CUDA,CKPT,STRICT_LOAD,BLACKLIST,SAVE_INTERVAL,SEED,model_dict,meta_dict
 

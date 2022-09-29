@@ -28,6 +28,34 @@ def register_object_method(self):
         return wrapper
     return decorator
 
+if 1:
+    '''
+    # js console hacker
+    在button的onclick方法里注入socket通信方法
+    // rapp means (ReactAPP)
+    '''
+
+    rapp = 'app._reactRootContainer._internalRoot.current.child.stateNode'
+    js_head = 'rapp = app._reactRootContainer._internalRoot.current.child.stateNode; '
+
+
+    def js_inject_prep(injected_js):
+        injected_js = injected_js.replace('\"','\'')
+        injected_js = ';'.join(injected_js.splitlines())
+        return injected_js
+
+    def vis_html_jump_button(_target_env, text=None,js_head=js_head):
+        if text is None:
+            text = _target_env
+        return f'''<button onclick="javascript:{js_inject_prep(js_head+'rapp.selectEnv([%r])'%_target_env)};">{text}</button>'''
+
+    style_of_input_box = "border:2px solid black; width:250px;height:150px;"
+    def add_textarea(k,default, style = style_of_input_box):
+        return f'''
+        <label>{k}</label>
+        <br/>
+        <textarea name="{k}" style="{style}">{default}</textarea>
+        '''
 
 def dict_to_argv(x, prefix='', out=None):
     '''

@@ -10,18 +10,19 @@ class ConfigPrototype(object):
     def __init__(self,fn,is_sorted=False,
     field_width = [20,20] + [5]*30,
     section_ender = None,
-    visdom_port =0,
+    # visdom_port =0,
+    visdom={},
     loglr = -2.,
     **meta_dict):
-        self.visdom = None
-        visdom_port = int(visdom_port)
-        vis = None
-        if visdom_port > 0:
-            import visdom
-            vis = visdom.Visdom(port=visdom_port)
-        self.vis = vis
-        # if visdom_port is not None
-        self.visdom_port = visdom_port
+
+
+        if int(visdom.get('port',0))>0:
+            import visdom as _visdom
+            vis = _visdom.Visdom(**visdom)
+        else:
+            vis = None
+        self.visdom = vis
+
         self.rnd = None
         self.is_sorted = is_sorted
         self._session_name = None
@@ -41,13 +42,17 @@ class ConfigPrototype(object):
         conf = self
         conf.num_epoch = -1
         conf.batch_size = 0
+        # conf.visdom = {}
         for k,v in meta_dict.items():
-            assert hasattr(conf,k)
+            assert hasattr(conf,k), k
             _t = getattr(conf, k).__class__
             setattr(conf, k, _t(v))
         conf.learning_rate = 10**conf.log10_learning_rate
 
         return
+    @property
+    def vis(self): return self.visdom
+
     @property
     def log10_learning_rate(self):
         return self.loglr
