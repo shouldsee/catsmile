@@ -3,3 +3,16 @@ sphinx_rtd_theme
 myst-parser
 #myst_nb
 
+starlette
+uvicorn
+python-multipart
+jinja2
+
+pandasql
+#sqldf
+pandas 
+
+
+visdom
+torch
+pydantic
