@@ -57,7 +57,6 @@ def argv_to_conf(cli_argv):
         setattr(conf,k,eval(k))
 
     return conf
-    # ,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL
 
 import json
 
