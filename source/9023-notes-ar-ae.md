@@ -1,6 +1,6 @@
 #! https://zhuanlan.zhihu.com/p/565663111
 
-# 9023-去噪，自回归，自编码，后验坍塌 (Denoising, Autoregression, Autoencoding, Posterir Collapse)
+# 9023-去噪，自回归，自编码，后验坍塌 (Denoising, Autoregression, Autoencoding, Posterior Collapse)
 
 [CATSMILE-9023](http://catsmile.info/9023-notes-ar-ae.html)
 
@@ -48,8 +48,10 @@ $$\begin{align}
 
 ### 两种解药
 
-模式崩溃的根本原因，可能还是在于优化目标里允许了崩溃的存在。根据dai2020,似乎认为模式崩溃的根源是unidentifiability。一种办法是加入防止崩溃的正则项目，另外一种办法就是直接把后验分布固定成
-不会崩溃的分布(包含了降噪范式)。从近期的发展来看，第二种方法是应用得更为广泛的。这暗合dai2020的想法，也就是说更改后验形式，可能增加了identifiability. 如果这个说法成立，那么VAE的ELBO本身可能就是一个misleading的范式。
+模式崩溃的根本原因，可能还是在于优化目标里允许了崩溃的存在。一种办法是加入防止崩溃的正则项目，另外一种办法就是直接把后验分布固定成
+不会崩溃的分布(包含了降噪范式)。
+
+从近期的发展来看，第二种方法是应用得更为广泛的。这暗合dai2020,认为模式崩溃的根源是unidentifiability的观点，也就是说更改后验形式，可能增加了identifiability. 如果这个说法成立，那么VAE的ELBO本身对于(生成-变分后验)可能就是一个不太能做work的范式(模型空间过于复杂)。这也符合(DDPM是概率空间上的ResNet)这一想法，因为(加噪-去噪)的模型确实对模型参数空间有更强的先验约束。
 
 ### 防崩溃正则项
 
@@ -76,14 +78,28 @@ t=8;口口口口口口口口
 
 我们可以看到，令 $x=z_0$, $p(z_8|z_0)$ 是一个完全确定的分布，且只在序列空间的一点上非零。原则上我们可以考察 $-D_{KL}(p(z_{8:0})||q(z_{8:0}))$ 来优化模型 $q(z_{8:0}|z_8)$ ，而且只需要考虑 $\max E_{p(z_{8:0})}[ \log  q(z_{8:0})]$ 。在这个特例中，在其他的z序列上，$p(z_{8:0})$ 是等于零的。而KL式子的推广，允许我们采用任意的 $p(z_{8:0}|z_0)$ 进行加噪，并恢复出数据。
 
-### 
+### 什么时候停止生成？
 
-停止生成问题？如果按照一个均匀破坏的噪声，那么需要一些步数才能到达
+如果按照一个均匀破坏的噪声，那么需要一些步数才能到达
 无序的序列。问题是，在倒过来生成的时候，我们并不清楚什么时候应该停止生成。如果破坏过程的步数是一定的话，那么生成应该也应该跑相同的步数，但是如果破坏过程的步数取决于句子的长度的话，那生成过程中间有几个态就不太确定了，当然也可以通过增加一些隐藏变量来加以控制。又譬如说，可以在破坏的时候，用spanBert的方式，进行连续性的破坏。这里我们先考虑一个最简单的破坏方式，每次把k个位置替换成随机的token。如果这k个位置恰好是连在一起的k个token，那么模型将需要直接猜出这个组合。
 
-对于任一位置i，如果 $s_i=1$ ,那么这里发射一个随机token，如果 $s_i=0$ ，那么这里发射正确的token $y_i$ .每次加噪音，随机挑选k个token，将 $s_i=0 \rightarrow1$ 。经过 L/k 步破坏， 所有位置都是 $s_i=1$，同时也达到所有token随机的一个场景。这样会得到一个在相空间内比较均匀的一个样本，借助DDPM的联合KL下界，我们只需要计算出相空间里破坏轨迹上的对数降噪概率，就可以约束模型。
+对于任一位置i，如果 $s_i=1$ ,那么这里发射一个随机token，如果 $s_i=0$ ，那么这里发射正确的token $y_i$ .每次加噪音，随机挑选k个token，将 $s_i=0 \rightarrow1$ 。经过 L/k 步破坏， 所有位置都是 $s_i=1$，同时也达到所有token随机的一个场景。这样会得到一个在相空间内比较均匀的一个样本，借助DDPM的联合KL下界，我们只需要计算出相空间里破坏轨迹上的对数降噪概率，就可以约束模型。([TBC，加入对应公式])
 
+经验：实际采样过程中，如果模型是固定的，那采样步数越多，生成出来的句子效果越好。
 
+### 模型例子:
+
+破坏噪音:每次选k个token，替换成随机的token。
+
+恢复:每次预测每个token是否需要被恢复，如果需要恢复，则预测恢复出的目标。
+
+实际实现中，DLM140选择了独立同分布的token替换，这样实现起来比较快，不需要考虑整个句子中只能出现5个mask的约束。
+
+### Thoughts:
+
+从隐变量的角度出发，noise-diffusion是一种显式限定了primitive的操作。这意味着模型必须按照noise所规定的路径进行概念的组合和拆分，而不必自行对概念进行拆分，确实可以说是transformer架构以来最酷的想法了。
+
+### 利用Jensen不等式等号成立条件导出最优生成？（似乎不行）
 
 $$\begin{aligned}
 \\ \nabla_m ELBO &= \int_z \nabla_m \left [q_e(z|x) \log { q(z) q_r(x|z) \over q_e(z|x)} \right ] dz
@@ -102,13 +118,23 @@ $$
 并不能给出最优生成模型的目标。我们只能说，ELBO的优化，同时要求
 生成分布符合破坏分布，又要求生成分布给观测数据尽量大的似然值。
 
-### 模型例子:
 
-破坏噪音:每次选k个token，替换成随机的token。
+### 生成结果例子:DLM142
 
-恢复:每次预测每个token是否需要被恢复，如果需要恢复，则预测恢复出的目标。
+```
+DLM142,D11,E50,Epoch106,Dataset-char100-multi30k
 
+RandomSample:
+g emping on a ball rady hand wearing to spressed wall chow of a bat on font of the grasting over the
 
+homdler water to another men citire at park water in air sidep does standing towards and blow dooff
+
+man in white a teater, and the dow opplays are take a nadis takes is is walking putting treet in pa
+
+white paling are outing bolles stoper top of a wall a down to with a stre ride is reading a putting
+
+men sustion in and with pusing a tree over in acrastives roles watting in his as there to toms read 
+```
 
 ## 参考
 

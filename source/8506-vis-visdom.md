@@ -21,6 +21,7 @@ maxdepth: 4
 - 结论: 
     - [DONE:autosave-branch:加入-cache_type-JPWA] [OLD:在实现自动数据持久化之前,visdom似乎不太适合做MLCA建模管理.这个似乎可以用tensorboard直接补足?]
     - `python3 -m pip install https://github.com/shouldsee/visdom/tarball/autosave`
+    - 其他所有魔改的新功能 `python3 -m pip install https://github.com/shouldsee/visdom/tarball/master`
     - wandb的本地部署在虚拟机比较困难，需要装docker
     - 业务结构反映在数据里就是schemas和data_types，像visdom这种data_type很弱的系统，其对于业务流的耦合也比较弱。
     - dash似乎没有做统一的数据接口，解耦起来会有点困难。
@@ -35,6 +36,7 @@ maxdepth: 4
     - [visdom-github-readme](https://github.com/fossasia/visdom)
 - CHANGLOG:
     - 20220903 加入`-cache_type JPWA` 的持久化模式，避免内存数据丢失
+    - 20220929 加入数据流向对比
 
 ## 简介
 
@@ -105,23 +107,27 @@ visdom的文档似乎比较少，只有[github-readme](https://github.com/fossas
     - dash: TBC?
     - wandb: 基于session的metadata管理机制，比较session-centered
     - tensorboard: TBC?
+    - dash: 不控制模型
 
 - 数据交互，业务脚本和后端
   - visdom: http: plotly-based json
   - dash: 似乎没有固定通信模块，全靠手写?
   - wandb: http?
   - tensorboard: file-based protobuf. 
+  - dash: [TBC]
 
 - 数据持久化
   - visdom: 需要手动实现
   - wandb: 自动持久化
   - tensorboard: 自动持久化
+  - dash： [TBC]
 
 - 文档
   - dash: 有文档
   - visdom: 凄惨的readme.md
   - wandb: 有gitbook
   - tensorboard: 有文档
+  - dash: 很多文档！
 
 - 依赖:
   - visdom: 业务逻辑用tornado控制。用了websocket可能加速啥的。在js端，据称用了plotly进行渲染。
@@ -177,8 +183,31 @@ visdom的文档似乎比较少，只有[github-readme](https://github.com/fossas
         Requires-Dist: wheel (>=0.26)
       ```
       - tensorboard是基于bazel管理依赖的，这个[BUILD](https://github.com/tensorflow/tensorboard/blob/e23de9dfca79048b570389c5b025ad8788197d7a/tensorboard/BUILD)太长我就不贴了。
+    - dash: [TBC]
 
 ## 架构与业务
+
+### 数据流向对比: visdom, tensorboard, dash
+
+What I do like about visdom, is its websocket-based bidirectional information flow, making it much easier to customize a reactive server. 
+
+```
+python-process <--(socket)--> visdom-server <--(websocket)--> react-frontend
+```
+
+In contrast, tensorboard mainly sends unidirectonal data
+
+```
+python-process --(file)--> tensorboard-server 
+```
+
+And dash mainly collects data on a regular interval 
+
+```
+python-process --(pycall)--< dash-server
+```
+
+Not sure about the stability between the three, but I found visdom framework the most flexible and intuitive.
 
 ### 相关依赖
 
@@ -193,10 +222,10 @@ Visdom后端
    启动服务监听端口
 
 业务脚本   
-   建立到visdom后端的连接
-   调用python方法时，向visdom后端进行http调用
-   收到visdom后端callback时，执行callback
-
+   建立到visdom后端的连接，并启动子Thread.(setup_socket()或setup_polling())
+      子线程监听visdom后端callback时，执行callback
+   调用python方法时，向visdom后端进行http调用,更新数据并控制结构
+   
 Visdom前端
    筛选plotWindow
    保存env数据
@@ -259,6 +288,121 @@ layout = dict(title="First Plot", xaxis={'title': 'x1'}, yaxis={'title': 'x2'})
 
 vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 ```
+
+### 流程:业务脚本:建立回调
+
+这里在visdom官方样例的基础上加了一个截取的event例子
+
+```python
+def text_callbacks(viz, env, args):
+    # text window with Callbacks
+    txt = 'This is a write demo notepad. Type below. Delete clears text:<br>'
+    callback_text_window = viz.text(txt, env=env)
+
+
+    def type_callback(event):
+        # from pprint import pprint
+        # pprint(event)
+        '''
+        event = {'eid': 'text_callbacks',
+         'event_type': 'KeyPress',
+         'key': 'd',
+         'key_code': 68,
+         'pane_data': {'command': 'window',
+                       'content': 'This is a write demo notepad. Type below. Delete '
+                                  'clears text:<br>a',
+                       'contentID': '43af9d32-5185-4167-8ef2-52b34b3c84e2',
+                       'height': None,
+                       'i': 1,
+                       'id': 'window_3b1fede0134b74',
+                       'inflate': True,
+                       'title': '',
+                       'type': 'text',
+                       'width': None},
+         'target': 'window_3b1fede0134b74'}
+
+        '''
+        if event['event_type'] == 'KeyPress':
+            curr_txt = event['pane_data']['content']
+            if event['key'] == 'Enter':
+                curr_txt += '<br>'
+            elif event['key'] == 'Backspace':
+                curr_txt = curr_txt[:-1]
+            elif event['key'] == 'Delete':
+                curr_txt = txt
+            elif len(event['key']) == 1:
+                curr_txt += event['key']
+            viz.text(curr_txt, win=callback_text_window, env=env)
+
+    viz.register_event_handler(type_callback, callback_text_window)
+    return callback_text_window
+```
+
+### 流程:业务脚本:自制表单回调交互
+
+利用一些js可以借助react直接使用socket进行通信。
+
+```python
+        win = 'box1'
+        env = 'testdev'
+
+        injected_js = '''
+        const data = new FormData(this.parentElement);
+        const dataValue = Object.fromEntries(data.entries());
+        const msg = {"cmd":"forward_to_vis","data":{"target":"box1","eid":"testdev","event_type":"SubmitForm", data: dataValue}}
+
+        app._reactRootContainer._internalRoot.current.child.stateNode.sendSocketMessage(msg);
+        console.log('injected')
+        '''
+        injected_js = injected_js.replace('\"','\'')
+        injected_js = ';'.join(injected_js.splitlines())
+
+        vis.text(
+        f'''
+        <form action="javascript:void(0);">
+        <input name='f1' type="text" value='init'></input>
+        <input name='f2' type="textarea" value='f2'></input>
+        <button onclick="javascript:{injected_js}">submit</button>
+        </form>
+        '''
+        ,env=env,win=win)
+```
+
+### 原理:回调
+
+react前端捕捉消息并发送回tornado后端。需要魔改的话得用webpack按照`webpack.common.js`重新编译出`py/visdom/static/main.js`
+
+`js/ImagePane.js`
+
+在firefox加载的时候可以通过webpack的map映射回源码的。
+
+
+```js
+  useEffect(() => {
+    const onEvent = (event) => {
+      switch (event.type) {
+        case 'keydown':
+        case 'keypress':
+          event.preventDefault();
+          break;
+        case 'keyup':
+          appApi.sendPaneMessage({
+            event_type: 'KeyPress',
+            key: event.key,
+            key_code: event.keyCode,
+          });
+          break;
+        case 'click':
+          appApi.sendPaneMessage({
+            event_type: 'Click',
+            image_coord: mouseLocation,
+          }); 
+          break;
+      }
+    };
+
+```
+
 
 ### 流程：业务脚本： 其他函数
 
