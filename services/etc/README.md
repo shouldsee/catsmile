@@ -19,9 +19,12 @@ with modified react callbacks
 ```bash
 ### this is a bash function, append to .bashrc 
 
-sstart () 
-{ 
-    supervisord -c /root/catsmile/services/etc/supervisord.toml
+
+sstart(){
+#/init/bin/supervisord -d -c /root/catsmile/markov_lm/supervisor.conf
+#/root/miniconda3/bin/
+supervisord  -c /root/catsmile/services/etc/supervisord.ini # -e debug
 }
+
 ```
 
