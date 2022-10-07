@@ -157,8 +157,8 @@ class DLMPrototype(LanguageModelPrototype):
     def forward(self,item):
         return self._loss(item,'forward')
 
-    def loss(self,item):
-        return self._loss(item, 'loss')
+    def loss(self,item,rng=None):
+        return self._loss(item, 'loss',rng)
 
     @staticmethod
     def sample_logp(lp,dim,return_logp=False, is_log=True):
@@ -6373,7 +6373,7 @@ class DLM130(DLMPrototype):
         target_embed_parent = torch.cat([c*torch.ones((B,n,E),device=self.device),target_embed],dim=1)[:,:-n]
         return target_embed_parent
 
-    def _loss(self,item, ret):
+    def _loss(self,item, ret,rng=None):
         CLS_NAME = self.__class__.__name__
         source = item['source'] ### token sequence
         target = item['target'] ### token seq
@@ -7399,7 +7399,34 @@ RandomSample:
         return xs
 
 
-    def _get_loss(self, zs, encoder_mu,target,target_notnull):
+    def corrupt_target(self,target,target_notnull,generator=None):
+        W = self.W
+        K = self.K
+
+        p_null = self.config.p_null
+        B,T = target.shape
+        D = self.config.depth
+
+        t1_mask     = torch.rand( [B,W+1,T], device=self.device,generator=generator)
+        t1_mask     = (  t1_mask < (p_null * target_notnull.unsqueeze(1)) )
+        t2_mask     = t1_mask[:,1:]
+        t1_mask     = t1_mask[:,:-1]
+        t1_mask[:,0] = 0
+
+        t1_mask_cum = t1_mask.cumsum(dim=1) > 0
+
+        t1_rint     = torch.randint(self.G,[B,W,T], device=self.device,generator=generator)
+        t2_rint     = torch.randint(self.G,[B,W,T], device=self.device,generator=generator)
+        t1 = target.unsqueeze(1) * ~t1_mask_cum + t1_rint * t1_mask_cum
+        t2 = t1 * ~t2_mask + t2_rint* t2_mask
+
+        t2 = t2.reshape((B*W,T))
+        t1 = t1.reshape((B*W,T))
+        recovered = t1
+        corrupted = t2
+        return recovered, corrupted
+
+    def _get_loss(self, zs, encoder_mu,target,target_notnull,generator=None):
         '''
         encoder_mu:      is the noise-free param
         zs:              is the sampled latent
@@ -7421,23 +7448,12 @@ RandomSample:
         B,T = target.shape
         D = self.config.depth
 
-        t1_mask     = torch.rand( [B,W+1,T], device=self.device)
-        t1_mask     = (  t1_mask < (p_null * target_notnull.unsqueeze(1)) )
-        t2_mask     = t1_mask[:,1:]
-        t1_mask     = t1_mask[:,:-1]
-        t1_mask[:,0] = 0
 
-        t1_mask_cum = t1_mask.cumsum(dim=1) > 0
-
-        t1_rint     = torch.randint(self.G,[B,W,T], device=self.device)
-        t2_rint     = torch.randint(self.G,[B,W,T], device=self.device)
-        t1 = target.unsqueeze(1) * ~t1_mask_cum + t1_rint * t1_mask_cum
-        t2 = t1 * ~t2_mask + t2_rint* t2_mask
+        t1, t2 = self.corrupt_target(target,target_notnull,generator)
         # print(t2_mask.sum(2).float().mean().item())
         E = self.embed_dim
 
-        t2 = t2.reshape((B*W,T))
-        t1 = t1.reshape((B*W,T))
+        # return t1,t2
 
         t2_embed = self.embed(t2)
 
@@ -7463,7 +7479,11 @@ RandomSample:
         return locals()
 
 
-    def _loss(self,item, ret):
+    def _loss(self,item, ret, generator= None):
+        # if rng is not None:
+        #     # assert 0
+        #     print(rng)
+        #     torch.set_rng_state(rng)
         CLS_NAME = self.__class__.__name__
         source = item['source'] ### token sequence
         target = item['target'] ### token seq
@@ -7495,7 +7515,7 @@ RandomSample:
             sampled_zs    = encoder_mu
 
 
-        xd = self._get_loss(sampled_zs, encoder_mu, target,target_notnull)
+        xd = self._get_loss(sampled_zs, encoder_mu, target,target_notnull,generator=generator)
         if ret=='debug':
             sampled_zs = xd['sampled_zs']
             locals().update(xd)
@@ -8534,7 +8554,7 @@ class SimpleDenseNetTransformer(nn.Module):
     def grad_loss(self,item):
         return self._loss(item,self.config.grad_loss_name)
 
-    def loss(self,item):
+    def loss(self,item,):
         return self._loss(item,self.loss_name)
 
     def _loss(self,item,loss_name):
