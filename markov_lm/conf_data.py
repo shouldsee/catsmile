@@ -51,7 +51,7 @@ if 1:
                     seql = min(max_len-1, len(v))+1
                     # print(v.split('i'))
                     v = list(v[:max_len-1])
-                    v = ['<bos>'] + v + ['<pad>'] * (max_len - 1 - len(v))
+                    v = ['|B|'] + v + ['|P|'] * (max_len - 1 - len(v))
                     # more = set(v) - self.vocab
                     for vv in v:
                         if not vv in vocab.i2w:
@@ -151,13 +151,13 @@ if 1:
                     char_count += seql
 
                     v = (v).split(self.split)
-                    v = sum([[vv,'<split>'] for vv in v],[])
+                    v = sum([[vv,'|S|'] for vv in v],[])
 
                     v = list(v)
 
                     seql = len(v)+1 + 1
                     tok_count+= seql
-                    v = ['<bos>'] + v + ['<pad>'] * (max_len - 1 - len(v))
+                    v = ['|B|'] + v + ['|P|'] * (max_len - 1 - len(v))
 
                     # print(v)
                     # print(seql)
@@ -184,7 +184,7 @@ if 1:
 
     # class FastaDataset(torch.utils.data.Dataset):
     class FastaDataset(CharDataset):
-        PROTEIN_VOCAB  = ['<mask>','<pad>','<bos>','<eos>'] + list(string.ascii_uppercase)
+        PROTEIN_VOCAB  = ['|M|','|P|','|B|','|E|'] + list(string.ascii_uppercase)
         SKIP = 2
 
         def __init__(self, device, url, root, max_len, test_fold=5):

@@ -6569,6 +6569,7 @@ class DLM127(DLM117):
         y = x.matmul(self.embed.weight.T.tanh()*self.config.beta)
         return y
 
+import numpy as np
 class U(object):
     '''
     Utility class
@@ -6578,6 +6579,8 @@ class U(object):
         if isinstance(v,torch.Tensor):
             return v.detach().cpu().numpy()
         elif isinstance(v, list):
+            return v
+        elif isinstance(v,np.ndarray):
             return v
         else:
             raise NotImplementedError(f"Not impl for {v!r}")
@@ -7421,12 +7424,27 @@ RandomSample:
         t2 = t1 * ~t2_mask + t2_rint* t2_mask
 
         t2 = t2.reshape((B*W,T))
+        '''
+        Predict the original
+        '''
+        if self.config.beta>0.5:
+            t1 = target.unsqueeze(1).repeat((1,W,1))
+        else:
+            pass
         t1 = t1.reshape((B*W,T))
         recovered = t1
         corrupted = t2
         return recovered, corrupted
 
-    def _get_loss(self, zs, encoder_mu,target,target_notnull,generator=None):
+    def add_target_notnull(self,item):
+        target_len = item['target_len']
+        target  = item['target']
+        xT  =  torch.arange(target.size(1),device=self.device)[None,:]
+        target_notnull = (xT<target_len[:,None]) & (xT>=2)
+        item['target_notnull'] = target_notnull
+        return item
+
+    def _get_loss(self, ret, encoder_mu,target,target_notnull,generator=None):
         '''
         encoder_mu:      is the noise-free param
         zs:              is the sampled latent
@@ -7448,8 +7466,8 @@ RandomSample:
         B,T = target.shape
         D = self.config.depth
 
-
-        t1, t2 = self.corrupt_target(target,target_notnull,generator)
+        # target_notnull = item['target_notnull']
+        t1, t2 = self.corrupt_target(target, target_notnull, generator)
         # print(t2_mask.sum(2).float().mean().item())
         E = self.embed_dim
 
@@ -7465,6 +7483,7 @@ RandomSample:
         else:
             pass
 
+        ### lps for logp_s
         lps = torch.gather(logp,index=t1.unsqueeze(-1),dim=-1).squeeze(-1)
         lps = lps.reshape((B,W,T))
         logp_sum_byt = (lps*target_notnull.unsqueeze(1)).sum(-1)
@@ -7476,7 +7495,36 @@ RandomSample:
 
         recovered = zs.reshape((B,W,T,E))[:,0]
         sampled_zs =  t2_embed.reshape((B,W,T,E))[:,0] -  self.embed(t1).reshape((B,W,T,E))[:,0]
-        return locals()
+        loss_per_loc = -lps
+
+
+        att = torch.zeros((B,T,1),device = self.device)
+        xd = locals()
+        if ret=='debug':
+            return xd
+            # sampled_zs = xd['sampled_zs']
+            # locals().update(xd)
+            # return locals()
+
+        # ### normalise by average token count, but sum by batchsize
+        # # lossVal = lossVal/ (source_notnull.sum() / B)
+        # self.debug = 0
+        # if self.debug:
+        #     print(f'''{xd['lp_prior'].mean().item():.3f}, {xd['lp_decode'].mean().item():.3f}, {xd['lp_encode'].mean().item():.3f}''')
+
+        elif ret=='forward':
+            return xd['logp_sum'].unsqueeze(-1),att
+        elif ret in 'loss'.split():
+            return -xd['logp_sum']
+        elif ret=='grad_loss':
+            return -xd['logp_sum_grad']
+        elif ret=='loss_per_loc':
+            return xd['loss_per_loc']
+        elif ret=='masked_loss_per_loc':
+            return xd['loss_per_loc']*target_notnull[:,None,:]
+        else:
+            raise NotImplementedError(f'''{ret} for ._loss()''')
+        # return locals()
 
 
     def _loss(self,item, ret, generator= None):
@@ -7484,6 +7532,8 @@ RandomSample:
         #     # assert 0
         #     print(rng)
         #     torch.set_rng_state(rng)
+        item = self.add_target_notnull(item)
+
         CLS_NAME = self.__class__.__name__
         source = item['source'] ### token sequence
         target = item['target'] ### token seq
@@ -7497,13 +7547,10 @@ RandomSample:
         E = self.config.embed_dim
         N = W = self.config.window_size
         K = self.config.kernel_size
-        target_len = item['target_len']
-        xT  =  torch.arange(target.size(1),device=self.device)[None,:]
-        target_notnull = (xT<target_len[:,None]) & (xT>=2)
 
-        if (item['has_start_token'].__class__==int
-            and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
-            target_notnull[:,0] = False
+        # if (item['has_start_token'].__class__==int
+        #     and item['has_start_token']==1) or  item['has_start_token'].ravel()[0]==1:
+        #     target_notnull[:,0] = False
 
         if 1:
             '''
@@ -7515,30 +7562,8 @@ RandomSample:
             sampled_zs    = encoder_mu
 
 
-        xd = self._get_loss(sampled_zs, encoder_mu, target,target_notnull,generator=generator)
-        if ret=='debug':
-            sampled_zs = xd['sampled_zs']
-            locals().update(xd)
-            return locals()
-
-
-        att = torch.zeros((B,T,1),device = self.device)
-        ### normalise by average token count, but sum by batchsize
-        # lossVal = lossVal/ (source_notnull.sum() / B)
-        self.debug = 0
-        if self.debug:
-            print(f'''{xd['lp_prior'].mean().item():.3f}, {xd['lp_decode'].mean().item():.3f}, {xd['lp_encode'].mean().item():.3f}''')
-
-        if ret=='forward':
-            return xd['logp_sum'].unsqueeze(-1),att
-        elif ret in 'loss'.split():
-            return -xd['logp_sum']
-        elif ret=='grad_loss':
-            return -xd['logp_sum_grad']
-        elif ret=='loss_per_loc':
-            return xd['loss_per_loc'],target_notnull
-        else:
-            raise NotImplementedError(f'''{ret} for ._loss()''')
+        xd = self._get_loss(ret, None, target, item['target_notnull'],generator=generator)
+        return xd
 
         # return None
 

@@ -200,8 +200,9 @@ def get_model_test_loss(conf):
 BREAKING CHANGE conf_main_loop
 '''
 # def conf_main_loop(conf,  CKPT,  STRICT_LOAD,  BLACKLIST,  SAVE_INTERVAL,ret='train'):
-def conf_main_loop(conf, ret='train'):
-
+def conf_main_loop(conf, ret='train', stdout=sys.stdout):
+    def pcbk(s):
+        stdout.write(f'{s}\n')
     '''
     A shared main loop for gradient descent
     '''
@@ -291,7 +292,7 @@ def conf_main_loop(conf, ret='train'):
         dataset.train()
         model.zero_grad()
         conf.callback_start(epoch,None,None)
-        for tri,item in enumerate(tqdm(conf.dataloader)):
+        for tri,item in enumerate(tqdm(conf.dataloader,file=stdout)):
             item            = conf.data_input_transform(item)
             grad_loss       = conf.grad_loss(item).mean()
             loss            = conf.loss(item).mean()
@@ -332,15 +333,15 @@ def conf_main_loop(conf, ret='train'):
             conf.callback_checkpoint(conf, conf.model, None)
             # , target_filename)
             # loss = cross_entropy(x,y)
-
+        # assert 0,pcbk
 
 
 
         loss_train_mean = (loss_train_sum/(1+tri))
         # loss_test_mean = loss_test_sum/(1+tsi)
-        print(f'Epoch: {epoch}')
-        print(f'ModelClassName: {conf._session_name}')
-        print(f'Training Loss: {loss_train_mean}')
-        print(f'Testing Loss: {loss_test_mean}')
+        pcbk(f'Epoch: {epoch}')
+        pcbk(f'ModelClassName: {conf._session_name}')
+        pcbk(f'Training Loss: {loss_train_mean}')
+        pcbk(f'Testing Loss: {loss_test_mean}')
 
         train_losses.append(loss_train_mean)
