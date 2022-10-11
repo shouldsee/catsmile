@@ -31,6 +31,11 @@ maxdepth: 4
 - 展望方向:
     - 用wandb做model-session-management
     - [TBC,用sphinx对visdom加入文档]
+    - [TBC,更改visdom的搜索框接受GET参数，并允许键盘操作搜索跳转]
+    - [TBC,更改regiser_event_handler为并行运行?或者在应用层并行?要思考清楚并行如何调度，和如何数据通信]
+    - [TBC,加入shell显示?其实对多个stdout分层差不多就够]
+    - [TBC,确保多个按钮不要在表单层产生冲突]
+    - [TBC,按照序列长度标准化损失]
 - 相关篇目
 - 主要参考:
     - [visdom-github-readme](https://github.com/fossasia/visdom)

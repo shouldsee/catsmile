@@ -394,6 +394,9 @@ white paling are outing bolles stoper top of a wall a down to with a stre ride i
 men sustion in and with pusing a tree over in acrastives roles watting in his as there to toms read 
 ```
 
+![Compare loss if predicting last step](./9022-p10-DLM142-compare-loss.png)
+
+
 ### Refs:
 
 ### [TBC,Transformer为啥这么慢??]
