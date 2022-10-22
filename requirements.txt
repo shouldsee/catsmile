@@ -1,6 +1,12 @@
 sphinx
 sphinx_rtd_theme
 myst-parser
+jupyter-book==0.12.1
+jinja2 
+MarkupSafe==2.0 
+sphinx_rtd_theme
+matplotlib
+numpy
 #myst_nb
 
 starlette

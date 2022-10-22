@@ -347,6 +347,56 @@ rand_log(pplpt):190.90234375
 - DLM142: CNN-based reverse diffusion with tanh.
    - 经过测试，DLM142在loglr=-4时可以加深到11层，取得比较好的ELBO。
 
+- 目标: 借助于扩散范式寻找最适合表达复合性的结构。
+- 结论:
+    - 深层CNN可以较好地描述(字->词)结构
+    - 加入增加对于候选图连接的选择模块，可以提高模型效果。
+- 方向:
+    - 参数量 `60*60*5*12=216k=0.22M`
+    - [TBC]目前还不具备插入和删除字符的能力。加入插入和删除的噪音。
+        - 没写
+    - [TBC,CRUCIAL]加入对比不同模型的界面，更加系统地扩展ablation study.
+        - 没写。**比较不同模型擅长的样本，理解哪些样本对于模型是冲突的，而加深模型如何化解了冲突**
+        - what's the improvment? 理解模型为什么更加好了，在哪些情境下更好了，是重中之重！
+        - 第一步，测试不同模型对同一测试集的效果。
+        - 同样的模型训练更久，平均损失下降了，但是灾难case变多了
+
+    - [TBC]测试不同噪音等级(noise-level)对于拟合的影响，是否单独拟合低噪音更有效果？
+        - 试验了，增加低噪音权重，对提升整体似然没有明显效果，但是对于提升低噪音似然比较有效，
+        可能可以分区间进行拟合，可以考虑在不同噪音等级用不同的模型，并且用一个先验选择器观察选择不同的模型偏好的噪音区间。
+    - [TBC]测试不同的skip机制，看放松相空间是否有益处
+        - 用DLM143试了，没啥显著效果，模型还是用单一来标记是否跳过。改变激活方式和判断方法会有一点加速，但是不太明显。
+    - [TBC]对于中文这种字符不好切分的语言，无法在字-词层面观察演生现象？
+        - 没啥想法
+    - [TBC]架构尝试: 加入tfm实现。
+        - 写了个DLM144,效果不好，复现tfm不是很简单
+        - 验证注意力对于超距作用应该还是相对简单的。
+    - [DONE] 对比字符级别Transformer
+        - 结果:没有比较合适的transformer-based character-level model做对比
+        - <https://github.com/nadavbh12/Character-Level-Language-Modeling-with-Deeper-Self-Attention-pytorch/>
+        - OMFG这个模型的架构也太臃肿了吧！接到DLM147里面要降低到batch25,E32,Depth3才能跑起来。。。。
+
+![加入残差项后，DLM142效果明显变好。第一个尖峰为取消残差项，第二个尖峰为加入残差项。](./9022-p9-DLM142-RES.png)
+
+
+```
+DLM142,D11,E50,Epoch106,Dataset-char100-multi30k
+
+RandomSample:
+g emping on a ball rady hand wearing to spressed wall chow of a bat on font of the grasting over the
+
+homdler water to another men citire at park water in air sidep does standing towards and blow dooff
+
+man in white a teater, and the dow opplays are take a nadis takes is is walking putting treet in pa
+
+white paling are outing bolles stoper top of a wall a down to with a stre ride is reading a putting
+
+men sustion in and with pusing a tree over in acrastives roles watting in his as there to toms read 
+```
+
+![Compare loss if predicting last step](./9022-p10-DLM142-compare-loss.png)
+
+
 ### Refs:
 
 ### [TBC,Transformer为啥这么慢??]
