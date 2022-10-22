@@ -90,7 +90,7 @@ def prepare_run():
 	'''))
 
 	### loads environ from bash file
-	def run(ctx):
+	def run(ctx,TARGET=TARGET):
 		xd = toml.loads(open(TARGET,'r').read())
 		for line in example.strip().splitlines():
 			k = line.split('=',1)
