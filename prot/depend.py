@@ -85,6 +85,7 @@ def prepare_run():
 
 	RWC(check_write_2, TARGET, (f'''
 	set -o allexport;
+	set -e;
 	source $PWD/gromacs-tmpi/bin/GMXRC.bash;
 	{SEXE} -c "import toml,os;toml.dump(dict(os.environ), open('{TARGET}','w'))"
 	'''))
