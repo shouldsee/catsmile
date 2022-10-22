@@ -1,9 +1,25 @@
 '''
-This script build an environment as adapted from GROMACS
+Last Updated: 2022-10-22
+Author: shouldsee <shouldsee@qq.com>
+
+This script build an environment, including
+  - a gromacs installation, with gmxapi
+  - a nglview installation
+
+This script depends on
+  - bash
+  - markov_lm.util_check
+  - apt
+  - git
+  - python3.7
+
+It is meant to mix dependency with runtime code in the same script,
+ so as to bootstrap an environment from different machine states
 '''
 from markov_lm.util_check import (
 	# lazy_wget,
 	# lazy_apt_install,
+	is_pypack_installed,
 	sjoin,
 	is_root,
 	test_is_root,
@@ -12,7 +28,9 @@ from markov_lm.util_check import (
 	# RWC,
 	check_write_1,
 	check_write_2,
+	check_write_single_target,
 	check_write_always,
+	check_write_pypack,
 	DefaultWriter,
 	)
 # from markov_lm.util_check import run_node_with_control as RWC
@@ -31,41 +49,41 @@ def prepare_run():
 	ctl = Controller()
 	# Controller = Controller
 	RWC = ctl.register_node
+	GROMACS_DGMX_GPU='CUDA'
 	NCORE = 4
+
 	ret = ctl.lazy_wget( "https://files.rcsb.org/download/1PGB.pdb")
 
-	ctl.lazy_apt_install('libopenmpi-dev libfftw3-dev')
+	ctl.lazy_apt_install('libopenmpi-dev libfftw3-dev grace')
+	TARGETS = ['mpi4py']
+	RWC(check_write_pypack, TARGETS,run = f'''
+	### [shouldsee] is this required before compiling GROMACS???
 
-	RWC(run = f'''
-	# Set up a Python virtual environment in which to install gmxapi.
-	#python3 -m venv $HOME/pygmx
-	#. $HOME/pygmx/bin/activate
-	#pip install --upgrade pip setuptools wheel
-
-	MPICC=`which mpicc` MPICXX=`which mpic++` {SEXE} -m pip install --upgrade mpi4py
+	MPICC=`which mpicc` MPICXX=`which mpic++` {SEXE} -m pip install --upgrade {sjoin(TARGETS)}
 	''')
 
 	ctl.lazy_wget('ftp://ftp.gromacs.org/pub/gromacs/gromacs-2022.tar.gz')
 
-	RWC(run='''tar xvf gromacs-2022.tar.gz''')
+	TARGET = 'gromacs-2022.tar.gz'
+	RWC(check_write_1, TARGET+'.done', run=f'''tar xvf {TARGET}''')
 	'gromacs-tmpi'
-
 	TARGET = f'{os.getcwd()}/gromacs-tmpi'
-
+	CFLAGS = f'../gromacs-2022 -DCMAKE_INSTALL_PREFIX=$TARGET -DGMX_THREAD_MPI=ON \
+	   -DGMX_GPU={GROMACS_DGMX_GPU} \
+		-DCMAKE_C_COMPILER=`which mpicc` -DCMAKE_CXX_COMPILER=`which mpic++`'
 	RWC(check_write_1, TARGET+'.done', (f'''
 	TARGET={TARGET}
 	set -e
 	# Build and install thread-MPI GROMACS to your home directory.
 	# Make sure the compiler toolchain matches that of mpi4py as best we can.
 	mkdir -p build && pushd build
-	 cmake --trace ../gromacs-2022 -DCMAKE_INSTALL_PREFIX=$TARGET -DGMX_THREAD_MPI=ON \
-		 -DCMAKE_C_COMPILER=`which mpicc` -DCMAKE_CXX_COMPILER=`which mpic++`
+	 cmake --trace {CFLAGS}
 	 make -j{NCORE} install
 	popd
-	'''))
+	'''), name ='gromacs',ctx=TARGET)
 
 	### CMake 3.16.3 or higher is required
-	if s('cmake --version').decode()< 'cmake version 3.16.3':
+	if s('cmake --version')< 'cmake version 3.16.3':
 		print('''
 		[WARN] use with caution
 		''')
@@ -74,12 +92,10 @@ def prepare_run():
 		build=1
 		## don't modify from here
 		limit=3.20
-		result=$(echo "$version >= $limit" | bc -l)
-		os=$([ "$result" == 1 ] && echo "linux" || echo "Linux")
-		mkdir ~/temp
-		cd ~/temp
+		os="linux"
+		mkdir -p ./temp; cd ./temp
 		wget https://cmake.org/files/v$version/cmake-$version.$build-$os-x86_64.sh
-		sudo mkdir /opt/cmake
+		sudo mkdir -p /opt/cmake
 		sudo sh cmake-$version.$build-$os-x86_64.sh --prefix=/opt/cmake
 		sudo ln -sf /opt/cmake/*/bin/cmake `which cmake`
 		''')
@@ -124,29 +140,17 @@ def prepare_run():
 	RWC(run=run)
 
 
-	# Build and install the latest gmxapi Python package.
-
-	import importlib.util
-	def is_pypack_installed(package_name_list,):
-		# package_name = 'pandas'
-		ret = True
-		for package_name in package_name_list:
-			spec = importlib.util.find_spec(package_name)
-			ret = ret & (spec is not None)
-		return ret
-		# return spec is not None
-
 	TARGET= 'gmxapi nglview ipywidgets'.split()
 	RWC([is_pypack_installed,DefaultWriter],TARGET, f'''
 	{SEXE} -m pip install --upgrade {sjoin(TARGET)}
 	''')
 
-	TARGET='nglview-js-widgets.js'
-	import pkgutil
-	def run(ctx):
-		data = pkgutil.get_data('nglview', 'static/index.js')
-		with open(ctx,'wb') as f:
-			f.write(data)
+	# TARGET='nglview-js-widgets.js'
+	# import pkgutil
+	# def run(ctx):
+	# 	data = pkgutil.get_data('nglview', 'static/index.js')
+	# 	with open(ctx,'wb') as f:
+	# 		f.write(data)
 	RWC(check_write_2, './node_modules/ngl/dist/ngl.js', 'npm install ngl',name='init_ngl')
 	return ctl
 ctl = prepare_run()

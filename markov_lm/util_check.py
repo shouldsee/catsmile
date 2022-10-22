@@ -5,12 +5,15 @@ import shutil
 import subprocess
 import sys
 import toml
+import importlib.util
 
 SEXE = sys.executable
 from collections import OrderedDict,namedtuple
 
-def s(cmd,shell=True):
+def s(cmd,shell=True,raw=False):
     ret= subprocess.check_output(cmd,shell=shell,executable='/bin/bash')
+    if not raw:
+        ret = ret.decode()
     return ret
 
 def is_root():
@@ -36,6 +39,16 @@ DefaultWriter = (lambda cctx:1)
 DefaultChecker = (lambda cctx:False)
 check_write_always= (DefaultChecker, DefaultWriter)
 check_write_2 = (lambda cctx:os.path.exists(cctx)), DefaultWriter
+check_write_single_target = check_write_2
+
+def is_pypack_installed(package_name_list,):
+	# package_name = 'pandas'
+	ret = True
+	for package_name in package_name_list:
+		spec = importlib.util.find_spec(package_name)
+		ret = ret & (spec is not None)
+	return ret
+check_write_pypack = (is_pypack_installed, DefaultWriter)
 
 def sjoin(x,sep=' '):
     return sep.join(x)
@@ -70,14 +83,9 @@ class Controller(object):
         t1 = time.time()
         k = repr(run)[:30]
         dt = t1-t0
-        self.stats[k] = (k, int(dt*10**3), int(dt *10**6) //1000)
+        self.stats[k] = (k, int(dt*10**3), int(dt *10**6) % 1000)
 
 
-    RWC = run_node_with_control
-    # def register_node(self,*a):
-    #     if len(a)==1:
-    #         a = (check_write_always,None,a[0])
-    #     return self._register_node(*a)
     def pprint_stats(self):
         pprint(self.stats)
     def register_node(self, control=check_write_always,
@@ -88,6 +96,8 @@ class Controller(object):
         self.state[name]= node = ControllerNode(control, check_ctx, run, ctx, name)
         if run_now:
             self.run_node_with_control(*node)
+    # RWC = run_node_with_control
+    RWC = register_node
 
     def run(self):
         rets = []
@@ -113,12 +123,13 @@ class Controller(object):
             PACK = PACK.split()
 
 
-        ret = s(f'''apt list --installed {sjoin(PACK)}''').splitlines()
-        if len(ret) - 1 >= len(PACK):
+        ret = s(f'dpkg -s {sjoin(PACK)} | grep Package:').splitlines()
+        # ret = s(f'''apt list --installed {sjoin(PACK)}''').splitlines()
+        if len(ret) >= len(PACK):
             print(f'[SKIP]lazy_apt_install({PACK})')
         else:
 #            test_is_root()
-            s(f'''sudo apt install -y {sjoin(PACK)}''')
+            s(f'''{"sudo" if not is_root() else ''} apt install -y {sjoin(PACK)}''')
         return
 
 ctrl = Controller()

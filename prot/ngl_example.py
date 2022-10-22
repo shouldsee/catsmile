@@ -1,7 +1,8 @@
 from prot.depend import ctl; ctl.build()
 #loadFile = "rcsb://1crn"
-loadFile = 'https://files.rcsb.org/download/1PGB.pdb'
-
+# loadFile = 'https://files.rcsb.org/download/1PGB.pdb'
+loadFile = '/prot/1PGB.pdb'
+loadFile = '/prot/1PGB_solv_ions.gro'
 HEADER_JS = ''
 HEADER_JS += f'''
 loadFile = {loadFile!r}
