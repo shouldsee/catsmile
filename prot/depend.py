@@ -53,6 +53,7 @@ def prepare_run():
 
 	RWC(check_write_1, TARGET+'.done', (f'''
 	TARGET={TARGET}
+	set -e
 	# Build and install thread-MPI GROMACS to your home directory.
 	# Make sure the compiler toolchain matches that of mpi4py as best we can.
 	mkdir -p build && pushd build
