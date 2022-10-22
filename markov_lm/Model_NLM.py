@@ -161,7 +161,8 @@ class DLMPrototype(LanguageModelPrototype):
         return self._loss(item, 'loss',rng)
 
     @staticmethod
-    def sample_logp(lp,dim,return_logp=False, is_log=True):
+    def sample_logp(lp,dim,return_logp=False, is_log=True,n = 1):
+        # assert dim==-1,"Not impl for dim=%d"%dim
         if is_log:
             xp = lp.softmax(dim)
         else:
@@ -172,12 +173,16 @@ class DLMPrototype(LanguageModelPrototype):
         '''
         # _,idx = (torch.rand( xp.shape, device=xp.device) < xp.cumsum(dim)).max(dim) ### [A critical bug!!!]
 
-        _,idx = (torch.rand( xp.shape[:-1] + (1,), device=xp.device) < xp.cumsum(dim)).max(dim)
-        lp = torch.gather( lp, index=idx.unsqueeze(dim),dim=dim).squeeze(dim)
+        _,idx = (torch.rand( xp.shape[:-1] + (1,n), device=xp.device) < xp.cumsum(-1).unsqueeze(-1)).max(-2)
+        lp = torch.gather( lp.unsqueeze(-1).expand( *((-1,)*len(lp.shape)+(n,)) ), index=idx.unsqueeze(-2),dim=-2).squeeze(-2)
+
+        if n == 1:
+            lp = lp.squeeze(-1)
+            idx = idx.squeeze(-1)
         rand_sampled_output = idx #.clip(dataset.tgt_vocab.offset,None)
         # import pdb; pdb.set_trace()
         if return_logp:
-            return lp,rand_sampled_output
+            return lp, rand_sampled_output
         else:
             return rand_sampled_output
 
@@ -6832,7 +6837,7 @@ class DLM131(DLM128):
                 encoder_mu = self.rnn_enc( self.shift_pad_left(target_embed,1), h0)[0]
                 sampled_zs = encoder_mu
 
-            elif CLS_NAME in 'DLM140 DLM141 DLM142 DLM143 DLM144'.split():
+            elif CLS_NAME in 'DLM140 DLM141'.split():
                 encoder_mu= target_embed
                 sampled_zs = encoder_mu
             else:
@@ -7312,7 +7317,6 @@ class DLM135(DLM131):
 
 
 class DLM137(DLM136):
-    pass
     @staticmethod
     def lat_init(self,encoder_mu,**kw):
         return torch.tensor(0*encoder_mu,device=self.device,requires_grad=True)
@@ -7332,6 +7336,7 @@ class DLM140(DLM128):
         self.rnn_dec = nn.GRU(input_size = E, hidden_size=E, batch_first= True, num_layers=D, )
         x = nn.Linear(E,2).to(self.device)
         self.is_kept   =  x
+        self.is_predict_source = (self.config.beta>0.5)
         # nn.Parameter(x.weight.T[None,None])
         self.W = 20
         self.K = 5
@@ -7378,7 +7383,7 @@ class DLM140(DLM128):
         key = 'random_sample'
         with torch.no_grad():
             val0 = model.sample(*item['target'].shape, item=item)
-        if val is not None:
+        if val0 is not None:
             val = val0.unsqueeze(-1)
             vis.heatmap(U.N(torch.cat(list(val[:3]),dim=1)),env=env,opts=dict(title=key),win=key)
             arr = U.N(val0[:5]).clip(0, conf.dataset.vocab.__len__()-1)
@@ -7391,14 +7396,21 @@ RandomSample:
             ''',
             env=env,win=key + '_text')
         # key = 'debug'
-    def sample(self, B,T, item=None):
 
+    def _sample_step(self, xs, ):
+        ys,logp,_ = self.decode(self.embed(xs))
+        if logp.shape.__len__()==4:
+            logp = logp.logsumexp(0)
+        lp, xs = self.sample_logp(logp, dim=-1,return_logp=True)
+        return xs
+
+    def sample(self, B,T, item=None):
+        ### randomly init the tokens
         xs = torch.randint(self.G,[B,T], device=self.device)
         for k in range(self.W*4):
-            ys,logp = self.decode(self.embed(xs))
-            lp, xs = self.sample_logp(logp, dim=-1,return_logp=True)
+            ### improving the token
+            xs = self._sample_step(xs)
             # import pdb; pdb.set_trace()
-        # return item['target']
         return xs
 
 
@@ -7427,7 +7439,9 @@ RandomSample:
         '''
         Predict the original
         '''
-        if self.config.beta>0.5:
+
+        if self.is_predict_source:
+            # t1 = target.unsqueeze(1).repeat((1,W,1)).reshape((B*W,T))
             t1 = target.unsqueeze(1).repeat((1,W,1))
         else:
             pass
@@ -7458,60 +7472,104 @@ RandomSample:
         每次固定只perturb k个位置，这个其实不是很poisson，或者不是条件独立的。
         如果poisson一点，那其实每个位置被corrupt的概率均等，采样起来比较方便。
         '''
+        cname = self.__class__.__name__
 
         W = self.W
         K = self.K
+        E = self.embed_dim
+
 
         p_null = self.config.p_null
         B,T = target.shape
         D = self.config.depth
 
-        # target_notnull = item['target_notnull']
+
         t1, t2 = self.corrupt_target(target, target_notnull, generator)
-        # print(t2_mask.sum(2).float().mean().item())
-        E = self.embed_dim
-
-        # return t1,t2
-
         t2_embed = self.embed(t2)
+        zs,logps,decode_dict  = self.decode(t2_embed)
 
-        zs,logp  = self.decode(t2_embed)
+        if logps.shape.__len__() == 3:
+            logps = logps.unsqueeze(0)
+        # att = logps.log_softmax(0)
+        # logp = logps.logsumexp(0)
 
-        self.PREDICT_SOURCE=0
-        if self.PREDICT_SOURCE:
-            t1 = target.unsqueeze(1).repeat((1,W,1)).reshape((B*W,T))
+        if cname in 'DLM150'.split():
+            logp = logps.logsumexp(0)
+            n = 5
+            _logMC, tm = self.sample_logp(logp, dim=-1,return_logp=True, n=n)
+            # sshape = (n*B*W,T,-1)
+            tm = tm.transpose(-1,0).reshape( (n*B*W,T,) )
+
+            _, logp  = self.decode(self.embed(tm))
+            logp = logp.reshape( (n,B*W,T,-1) )
+            # assert 0, logp.shape
+            lps   = torch.gather(logp,index=t1.unsqueeze(-1).unsqueeze(0).expand(*( (n,)+ (-1,)*(len(logp.shape)-1) ) ),dim=-1).squeeze(-1)
+            lps   = lps.reshape((n,B*W,T))
+            _logMC = _logMC.reshape( (n,B*W,T,) )
+            ### lps is log(O|M), _log
+            _logMCM = _logMC.mean(-1)#.log_softmax(0)
+
+            if 1:
+                'REINFORCE trick'
+                reward = (lps.mean(-1).exp())
+                lgrad = ( reward.detach() * _logMCM )  + reward
+            else:
+                lgrad =  (lps.mean(-1).exp() )
+
+            # logp_sum      = (lps*target_notnull.unsqueeze(1)).sum(-1)
+            # logp_sum      = logp_sum.mean(-1)
+            logp_sum_grad = lgrad.reshape((n,B,W)).mean(0).mean(-1) * T
+            logp_sum      = logp_sum_grad
+            loss_per_loc  = -lps.reshape((n,B,W,T)).mean(0)
+
+            # del logp
         else:
+            # logp = logps.logsumexp(0)
+            # lps = torch.gather(logp,index=t1.unsqueeze(-1),dim=-1).squeeze(-1)
+            ### (D,BW,T,G)
+            D2 = logps.shape[0]
+            lpsa = torch.gather(logps,index=t1.unsqueeze(-1).unsqueeze(0).repeat((D2,1,1,1)),dim=-1).squeeze(-1)
+
+            ###  (D,BW,T)
+            ###  (BW,D,T) transposed
+            #### (B,W,D,T,) reshaped
+            lpsa = lpsa.transpose(0,1).reshape((B,W,D2,T))
+
+            lps  = lpsa.logsumexp(2)
+            lps           = lps.reshape((B,W,T))
+
+            logp_sum_byt  = (lps*target_notnull.unsqueeze(1)).sum(-1)
+            logp_sum      = logp_sum_byt.mean(-1)
+            logp_sum_grad = logp_sum
+
             pass
 
-        ### lps for logp_s
-        lps = torch.gather(logp,index=t1.unsqueeze(-1),dim=-1).squeeze(-1)
-        lps = lps.reshape((B,W,T))
-        logp_sum_byt = (lps*target_notnull.unsqueeze(1)).sum(-1)
-        logp_sum     = logp_sum_byt.mean(-1)
-        logp_sum_grad = logp_sum
+        if 1:
+            #
 
-        encoder_mu_0 = self.embed(target)
-        encoder_mu   = t2_embed.reshape((B,W,T,E))[:,0]
+            ### lps for logp_s
 
-        recovered = zs.reshape((B,W,T,E))[:,0]
-        sampled_zs =  t2_embed.reshape((B,W,T,E))[:,0] -  self.embed(t1).reshape((B,W,T,E))[:,0]
-        loss_per_loc = -lps
+            encoder_mu_0  = self.embed(target)
+            encoder_mu    = t2_embed.reshape((B,W,T,E))[:,0]
+
+            recovered     = zs.reshape((B,W,T,E))[:,0]
+            sampled_zs    =  t2_embed.reshape((B,W,T,E))[:,0] -  self.embed(t1).reshape((B,W,T,E))[:,0]
+            loss_per_loc  = -lps
 
 
-        att = torch.zeros((B,T,1),device = self.device)
-        xd = locals()
-        if ret=='debug':
-            return xd
-            # sampled_zs = xd['sampled_zs']
-            # locals().update(xd)
-            # return locals()
 
         # ### normalise by average token count, but sum by batchsize
         # # lossVal = lossVal/ (source_notnull.sum() / B)
         # self.debug = 0
+        att = torch.zeros((B,T,1),device = self.device)
+        masked_loss_per_loc = loss_per_loc *target_notnull[:,None,:]
+
+        xd = locals()
+
         # if self.debug:
         #     print(f'''{xd['lp_prior'].mean().item():.3f}, {xd['lp_decode'].mean().item():.3f}, {xd['lp_encode'].mean().item():.3f}''')
-
+        if ret=='debug':
+            return xd
         elif ret=='forward':
             return xd['logp_sum'].unsqueeze(-1),att
         elif ret in 'loss'.split():
@@ -7521,10 +7579,10 @@ RandomSample:
         elif ret=='loss_per_loc':
             return xd['loss_per_loc']
         elif ret=='masked_loss_per_loc':
-            return xd['loss_per_loc']*target_notnull[:,None,:]
+            return xd[ret]
         else:
             raise NotImplementedError(f'''{ret} for ._loss()''')
-        # return locals()
+
 
 
     def _loss(self,item, ret, generator= None):
@@ -7565,10 +7623,52 @@ RandomSample:
         xd = self._get_loss(ret, None, target, item['target_notnull'],generator=generator)
         return xd
 
-        # return None
+    @staticmethod
+    def get_debug_data(item,confs):
+
+        conf1 = confs[0]
+        # dataset = conf1.dataset
+        generator = torch.Generator(device=conf1.device)
+        # rng = generator.get_state()
+        # with torch.no_grad():
+        seed = generator.seed()
+        loss_per_loc = []
+        debug_dicts  = []
+        for i, conf in enumerate(confs):
+            model = conf.model
+            generator = generator.manual_seed(seed)
+            item = model.add_target_notnull(item)
+            T = item['target'].shape[-1]
+            t1, t2 = model.corrupt_target(item['target'], item['target_notnull'],generator)
+            generator = generator.manual_seed(seed)
+            xd = model._loss(item,'debug', generator = generator )
+            loss_per_loc += [xd['masked_loss_per_loc'].reshape((-1,T))]
+            debug_dicts+= [xd]
+
+        # loss1,loss2 = map((lambda x:) ,[conf1,conf2])
+        # loss1,loss2 = map((lambda x:x.model._loss(item,'loss', generator )) ,[conf1,conf2])
+        # mat = loss_sum = U.N(torch.stack(loss,dim=-1).sum(2).mean(1))
+        mat = loss_sum = U.N(torch.stack(loss_per_loc,dim=-1).sum(1))
+        wordize = np.vectorize(conf1.dataset.tgt_wordize)
+        G = conf1.dataset.graph_dim
+
+        # T = t1.shape[-1]
+        t1 = t1.reshape((-1,T))
+        t2 = t2.reshape((-1,T))
+
+        xw1 = wordize(U.N(t1).clip(0,G-1))
+        xw2 = wordize(U.N(t2).clip(0,G-1))
 
 
+        import collections
+        cls = collections.namedtuple('_fret','loss_sum loss_per_loc t1 t2 xw1 xw2 debug_dicts')
 
+        return cls(
+            loss_sum = U.N(loss_sum),
+            loss_per_loc = list(map(U.N,loss_per_loc)), t1 = U.N(t1), t2=U.N( t2 ),
+            xw1=xw1,xw2=xw2,
+            debug_dicts = debug_dicts,
+            )
 
 class DLM141(DLM140):
     '''
@@ -7605,21 +7705,8 @@ class DLM141(DLM140):
             # for k in range(3):
                 # zs = zs + layer(zs. relu())
             zs = zs + layer(zs).tanh()
-                #.relu()
-        #
-        # zs = zs + self.conv_layer(zs).relu()
-        # zs = zs.relu()
-        # zs = self.conv_layer_2(zs)
-        # zs = zs.relu()
-        # zs = self.convt_layer(zs)
-        # zs = zs.relu()
-        # zs = self.convt_layer_2(zs)
 
         zs = zs.transpose(1,2)
-        # zs,_ = self.rnn_enc(t2_embed,h0)
-        # zs,_ = self.rnn_dec(zs.flip([2,]),h0)
-        # zs = zs.flip([2,])
-
 
         is_kept_lp = self.is_kept(zs).log_softmax(-1)
 
@@ -7629,7 +7716,7 @@ class DLM141(DLM140):
         x = torch.stack([logp_repl,logp_kept],dim=2)
         logp = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
 
-        return zs,logp
+        return zs,logp,locals()
 
 
 
@@ -7655,6 +7742,7 @@ class DLM142(DLM140):
 
     def decode(self, t2_embed):
         D = self.config.depth
+        assert len(t2_embed.shape)==3,t2_embed.shape
         (BW, T, E)= t2_embed.shape
         h0 = torch.ones((D,BW,E),device=self.device)
         zs = t2_embed
@@ -7669,23 +7757,673 @@ class DLM142(DLM140):
             # zs = 0.5*zs + 0.5* layer(zs).tanh()
             zs = (zs + layer(zs)).tanh()
             # zs = (zs + layer(zs)).clip(-1, 1)
-
+        ### (BW,T,E)
         zs = zs.transpose(1,2)
-        # zs = zs.flip([2,])
-
-
+        ### (BW,T,2)
         is_kept_lp = self.is_kept(zs).log_softmax(-1)
-
-        logp_repl = self.unembed(zs).log_softmax(-1)
+        logp_repl  = self.unembed(zs).log_softmax(-1)
 
         self.USE_RESIDUAL=1
         if self.USE_RESIDUAL:
             logp_kept = self.unembed(t2_embed).log_softmax(-1)
             x = torch.stack([logp_repl,logp_kept],dim=2)
-            logp = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
+            assert 0,x.shape
+            logp = (is_kept_lp.unsqueeze(2) + x).logsumexp(2)
         else:
             logp = logp_repl
-        return zs,logp
+        return zs,logp,locals()
+
+import numpy as np
+_U = U
+class DLM152(DLM140):
+    '''
+    Systematically test the usefulness of a layer-alignment variable
+    '''
+    U = _U
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        E = self.config.embed_dim
+        D = self.config.depth
+        self.D = D
+        self.conv_layer_list = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)])
+        if hasattr(self,'rnn_dec'): del self.rnn_dec
+        if hasattr(self,'rnn_enc'): del self.rnn_enc
+
+        x = nn.Linear(E,2).to(self.device)
+        self.is_kept   =  x
+        # self.dbd = {}
+        # nn.Parameter(x.weight.T[None,None])
+        return
+
+    @staticmethod
+    def callback_after_test_all(conf, model,  item):
+
+
+        from markov_lm.util_plotly import plotly_heatmap_tracks
+        # super()
+        vis = conf.vis;  env = conf._session_name;
+        if vis is None: return;
+        DLM140.callback_after_test_all(conf,model,item)
+
+        key = 'test'
+        nelem = 0
+        # ZMIN,ZMAX = (0.,10.)
+        ZMIN,ZMAX = (None,None)
+        ZMIN = -10
+        YMAX = 60
+
+        xd = model.get_debug_data(item,[conf])
+
+        '''
+        Need to visualise the attention matrix.
+        for each corrupted sentences
+        '''
+
+
+        # wordize = np.vectorize( conf.dataset.tgt_wordize )
+        # G = conf.dataset.graph_dim
+        #
+        # target = model.U.N(item['target'][:20])
+        # wtarget = wordize( target.clip(0,G-1))
+
+        ### (B,W,D,T)
+        T = item['target'].shape[-1]
+        D = model.config.depth
+        lpsa = xd.debug_dicts[0]['lpsa']
+        B,W,D,T = lpsa.shape
+        xa = model.U.N(lpsa.reshape((-1,D,T)))
+
+        pxa = model.U.N(torch.softmax(torch.tensor(xa),dim=1))
+
+        for (key,ZMIN,xaa) in [('log_prob',-10,xa), ('att',0,pxa)]:
+            # .softmax(1)
+            # ZMIN = 0
+
+            sep = xd.xw1.copy()
+            sep[:] = '-'
+            tz = []
+            tz += [[sep, xaa[:,0]*0 + ZMIN], ]
+            tz += [[xd.xw2, xaa[:,0]*0 + ZMIN], ]
+            for idd in range(xaa.shape[1]):
+                tz += [[xd.xw1, xaa[:,idd]], ]
+            # tz += [[xd.xw1, xa[:,1]], ]
+            # tz += [[xd.xw1, xa[:,2]], ]
+            # tz += [[xd.xw1, xa[:,3]], ]
+            # # tz = [[xd.xw1[:YMAX], xd.loss_per_loc[0][:YMAX]]]
+
+
+            # tz = [[wtarget, target*0.,  ]]
+            # self._loss()
+
+            title = f'{key} {nelem}'
+            # assert 0,(tz[0][0][:5][:5])
+            # assert 0,(target.shape,target.dtype)
+            fig = plotly_heatmap_tracks(tz, ZMIN=ZMIN,ZMAX=ZMAX,YMAX=YMAX,title = title)
+            vis.plotlyplot(fig, env=env,win=key)
+
+    def decode(self, t2_embed):
+        D = self.config.depth
+        assert len(t2_embed.shape)==3,t2_embed.shape
+        (BW, T, E)= t2_embed.shape
+        zs = t2_embed
+        zs = zs.transpose(1,2)
+
+        # for k in range(2):
+        hh = torch.zeros((D+2,BW,E, T),device=self.device)
+        # output = torch.
+        hh[0] = zs
+        hh[1] = (zs*0).detach()+1
+        for xd, layer in enumerate(self.conv_layer_list):
+            # zs = zs + layer(zs. relu())
+            '''
+            Important to stabilise the numbers over deep layers
+            '''
+            # zs = 0.5*zs + 0.5* layer(zs).tanh()
+            zs = (zs + layer(zs)).tanh()
+            hh[xd+2] = zs
+            # zs = (zs + layer(zs)).clip(-1, 1)
+
+        zs = zs.transpose(1,2)
+        hh = hh.transpose(-2,-1)
+
+
+        self.USE_RESIDUAL=2
+        if self.USE_RESIDUAL==1:
+            is_kept_lp = self.is_kept(zs).log_softmax(-1)
+            logp_repl  = self.unembed(zs).log_softmax(-1)
+            logp_kept = self.unembed(t2_embed).log_softmax(-1)
+            x = torch.stack([logp_repl,logp_kept],dim=2)
+
+            logps = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
+        elif self.USE_RESIDUAL==2:
+            loghh = self.unembed(hh).log_softmax(-1)
+            prior = torch.ones([hh.shape[0],1,1,1],device=self.device).log_softmax(0)
+            logps = (prior + loghh)
+            #.logsumexp(0)
+        else:
+            logp_repl  = self.unembed(zs).log_softmax(-1)
+
+            logps = logp_repl
+
+        return zs,logps,locals()
+
+
+class DLM153(DLM152):
+    '''
+    Systematically test the usefulness of a layer-alignment variable
+    '''
+    U = _U
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        E = self.config.embed_dim
+        D = self.config.depth
+        self.D = D
+        self.conv_layer_list = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)])
+        if hasattr(self,'rnn_dec'): del self.rnn_dec
+        if hasattr(self,'rnn_enc'): del self.rnn_enc
+        T = self.config.window_size
+        self.prior = nn.Parameter( torch.ones([D+2,1,T,1],device=self.device) )
+
+        x = nn.Linear(E,2).to(self.device)
+        self.is_kept   =  x
+        # self.dbd = {}
+        # nn.Parameter(x.weight.T[None,None])
+        return
+
+    @staticmethod
+    def callback_after_test_all(conf, model,  item):
+
+
+        from markov_lm.util_plotly import plotly_heatmap_tracks
+        self = model
+        # super()
+        vis = conf.vis;  env = conf._session_name;
+        if vis is None: return;
+        DLM152.callback_after_test_all(conf,model,item)
+
+        key = 'prior'
+        title = key
+        # prior
+        nelem = 0
+        # ZMIN,ZMAX = (0.,10.)
+        ZMIN,ZMAX = (None,None)
+        # ZMIN = -10
+        YMAX = 60
+
+        # xd = model.get_debug_data(item,[conf])
+
+        '''
+        Need to visualise the attention matrix.
+        for each corrupted sentences
+        '''
+        tz = [(None, x.squeeze(-1)) for x in model.U.N(model.prior.softmax(0))]
+        fig = plotly_heatmap_tracks(tz, ZMIN=ZMIN,ZMAX=ZMAX,YMAX=YMAX,title = title)
+        vis.plotlyplot(fig, env=env,win=key)
+
+
+
+
+    def decode(self, t2_embed):
+        D = self.config.depth
+        assert len(t2_embed.shape)==3,t2_embed.shape
+        (BW, T, E)= t2_embed.shape
+        zs = t2_embed
+        zs = zs.transpose(1,2)
+
+        # for k in range(2):
+        hh = torch.zeros((D+2,BW,E, T),device=self.device)
+        # output = torch.
+        self.config.hyp = 2
+        if self.config.hyp == 0:
+            self.config.offset =offset = 0
+
+        if self.config.hyp == 1:
+            hh[0] = zs
+            self.config.offset =offset = 1
+        elif  self.config.hyp == 2:
+            # hh[0] = zs
+            hh[1] = (zs*0).detach()+1
+            self.config.offset =offset = 2
+        else:
+            raise NotImplementedError(f'self.config.hyp={self.config.hyp}')
+        for xd, layer in enumerate(self.conv_layer_list):
+            # zs = zs + layer(zs. relu())
+            '''
+            Important to stabilise the numbers over deep layers
+            '''
+            # zs = 0.5*zs + 0.5* layer(zs).tanh()
+            zs = (zs + layer(zs)).tanh()
+            hh[xd+offset] = zs
+            # zs = (zs + layer(zs)).clip(-1, 1)
+
+        zs = zs.transpose(1,2)
+        hh = hh.transpose(-2,-1)
+
+
+        self.USE_RESIDUAL=2
+        if self.USE_RESIDUAL==1:
+            is_kept_lp = self.is_kept(zs).log_softmax(-1)
+            logp_repl  = self.unembed(zs).log_softmax(-1)
+            logp_kept = self.unembed(t2_embed).log_softmax(-1)
+            x = torch.stack([logp_repl,logp_kept],dim=2)
+
+            logps = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
+        elif self.USE_RESIDUAL==2:
+            loghh = self.unembed(hh).log_softmax(-1)
+            prior = self.prior.log_softmax(0)[:hh.shape[0]]
+            logps = (prior + loghh)
+            #.logsumexp(0)
+        else:
+            logp_repl  = self.unembed(zs).log_softmax(-1)
+
+            logps = logp_repl
+
+        return zs,logps,locals()
+
+class DLM155(DLM152):
+    '''
+    Systematically test the usefulness of a layer-alignment variable
+    '''
+    U = _U
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        E = self.config.embed_dim
+        D = self.config.depth
+        T = self.config.n_step
+        K = self.config.kernel_size
+        self.D = D
+        self.conv_layer_list = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)])
+        if hasattr(self,'rnn_dec'): del self.rnn_dec
+        if hasattr(self,'rnn_enc'): del self.rnn_enc
+        self.dense_layer_list   = nn.ModuleList([nn.Linear(E,E) for _ in range(K)])
+        # self.dense_layer_list_2 = nn.ModuleList([nn.Linear(E,E) for _ in range(K)])
+        self.prior = nn.Parameter( torch.ones([K+2,1,T,1],device=self.device) )
+
+        x = nn.Linear(E,2).to(self.device)
+        self.is_kept   =  x
+        return
+
+    @staticmethod
+    def callback_after_test_all(conf, model,  item):
+
+
+        from markov_lm.util_plotly import plotly_heatmap_tracks
+        self = model
+        # super()
+        vis = conf.vis;  env = conf._session_name;
+        if vis is None: return;
+        DLM152.callback_after_test_all(conf,model,item)
+
+        key = 'prior'
+        title = key
+        # prior
+        nelem = 0
+        # ZMIN,ZMAX = (0.,10.)
+        ZMIN,ZMAX = (0,1)
+        # ZMIN = -10
+        YMAX = 60
+
+        # xd = model.get_debug_data(item,[conf])
+
+        '''
+        Need to visualise the attention matrix.
+        for each corrupted sentences
+        '''
+        tz = [(None, x.squeeze(-1)) for x in model.U.N(model.prior.softmax(0))]
+        fig = plotly_heatmap_tracks(tz, ZMIN=ZMIN,ZMAX=ZMAX,YMAX=YMAX,title = title)
+        vis.plotlyplot(fig, env=env,win=key)
+
+
+
+
+    def decode(self, t2_embed):
+        D = self.config.depth
+        assert len(t2_embed.shape)==3,t2_embed.shape
+        (BW, T, E)= t2_embed.shape
+        zs = t2_embed
+        zs = zs.transpose(1,2)
+
+        # for k in range(2):
+        K = self.config.kernel_size
+        hh = torch.zeros((K+2,BW,E, T),device=self.device)
+        for i in range(1):
+            # for xd, layer in enumerate(self.conv_layer_list):
+            for xd, layer in enumerate(self.conv_layer_list[:]):
+                # zs = zs + layer(zs. relu())
+                '''
+                Important to stabilise the numbers over deep layers
+                '''
+                # zs = 0.5*zs + 0.5* layer(zs).tanh()
+                zs = (zs + layer(zs)).tanh()
+        # prior_mask
+
+        self.config.offset =offset = 0
+        # offset = 0
+        zs = zs.transpose(1,2)
+        hh = hh.transpose(-2,-1)
+        prior = self.prior.clone()
+        for xd, layer in enumerate(self.dense_layer_list):
+            zs1 = (zs + layer(zs)).tanh()
+            hh[xd+offset] = zs1
+            prior[xd+offset] += 100.
+            # layer
+        '''
+        DLM155D7E50, Ep67L49, Ep10L89
+        '''
+            # zs = (zs + layer(zs)).clip(-1, 1)
+
+
+        CLS_NAME = self.__class__.__name__
+        # self.USE_RESIDUAL=2
+        # if self.USE_RESIDUAL==2:
+
+        loghh = self.unembed(hh).log_softmax(-1)
+        if CLS_NAME in 'DLM155'.split():
+            # prior =
+            prior = prior.log_softmax(0)[:hh.shape[0]]
+        elif CLS_NAME in 'DLM156'.split():
+            ### (K+2,BW,T ,G)
+            prior = prior + self.dense_layer_list_switch(zs).permute((2,0,1)).unsqueeze(-1)
+            prior = prior.log_softmax(0)[:hh.shape[0]]
+
+        else:
+            raise NotImplementedError(CLS_NAME)
+        logps = (prior + loghh)
+        return zs,logps,locals()
+
+
+class DLM158(DLM152):
+    '''
+    Systematically test the usefulness of a layer-alignment variable
+    '''
+    U = _U
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        E = self.config.embed_dim
+        D = self.config.depth
+        T = self.config.n_step
+        K = self.config.kernel_size
+        self.D = D
+        self.conv_layer_list = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)])
+        if hasattr(self,'rnn_dec'): del self.rnn_dec
+        if hasattr(self,'rnn_enc'): del self.rnn_enc
+        # self.dense_layer_list   = nn.ModuleList([nn.Linear(E,E) for _ in range(K)])
+        # self.dense_layer_list_2 = nn.ModuleList([nn.Linear(E,E) for _ in range(K)])
+        self.prior = nn.Parameter( torch.ones([K+2,1,T,1],device=self.device) )
+
+        x = nn.Linear(E,2).to(self.device)
+        self.is_kept   =  x
+        return
+
+    @staticmethod
+    def callback_after_test_all(conf, model,  item):
+
+
+        from markov_lm.util_plotly import plotly_heatmap_tracks
+        self = model
+        # super()
+        vis = conf.vis;  env = conf._session_name;
+        if vis is None: return;
+        DLM152.callback_after_test_all(conf,model,item)
+
+        key = 'prior'
+        title = key
+        # prior
+        nelem = 0
+        # ZMIN,ZMAX = (0.,10.)
+        ZMIN,ZMAX = (0,1)
+        # ZMIN = -10
+        YMAX = 60
+
+        # xd = model.get_debug_data(item,[conf])
+
+        '''
+        Need to visualise the attention matrix.
+        for each corrupted sentences
+        '''
+        tz = [(None, x.squeeze(-1)) for x in model.U.N(model.prior.softmax(0))]
+        fig = plotly_heatmap_tracks(tz, ZMIN=ZMIN,ZMAX=ZMAX,YMAX=YMAX,title = title)
+        vis.plotlyplot(fig, env=env,win=key)
+
+
+
+
+    def decode(self, t2_embed):
+        D = self.config.depth
+        assert len(t2_embed.shape)==3,t2_embed.shape
+        (BW, T, E)= t2_embed.shape
+        zs = t2_embed
+        zs = zs.transpose(1,2)
+
+        # for k in range(2):
+        K = self.config.kernel_size
+        hh = torch.zeros((K+2,BW,E, T),device=self.device)
+        # for xd, layer in enumerate(self.conv_layer_list):
+        self.config.offset = offset =0
+        for xd, layer in enumerate(self.conv_layer_list[:]):
+            '''
+            Important to stabilise the numbers over deep layers
+            '''
+            zs = (zs + layer(zs)).tanh()
+
+        zs = zs.transpose(1,2)
+        hh = hh.transpose(-2,-1)
+        prior = self.prior.clone()
+
+        hh = torch.stack(
+            [torch.roll(zs,-ik-K//2,1) for ik in range(K//2*2-1)], dim=0)
+
+        # for xd, layer in enumerate(self.dense_layer_list):
+        #     zs1 = (zs + layer(zs)).tanh()
+        #     hh[xd+offset] = zs1
+        #     prior[xd+offset] += 100.
+            # layer
+        '''
+        DLM155D7E50, Ep67L49, Ep10L89
+        '''
+
+        CLS_NAME = self.__class__.__name__
+        # self.USE_RESIDUAL=2
+        # if self.USE_RESIDUAL==2:
+
+        loghh = self.unembed(hh).log_softmax(-1)
+        prior = prior.log_softmax(0)[:hh.shape[0]]
+        logps = (prior + loghh)
+        return zs,logps,locals()
+
+class DLM156(DLM155):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        E = self.config.embed_dim
+        D = self.config.depth
+        T = self.config.n_step
+        K = self.config.kernel_size
+        self.D = D
+        # self.dense_layer_list_2   = nn.ModuleList([nn.Linear(E,E) for _ in range(K)])
+        self.dense_layer_list_switch   = nn.Linear(E,K+2)
+        # nn.ModuleList([nn.Linear(E,) for _ in range(K)])
+class DLM157(DLM155):
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        E = self.config.embed_dim
+        D = self.config.depth
+        T = self.config.n_step
+        K = self.config.kernel_size
+        self.D = D
+        # self.dense_layer_list_2   = nn.ModuleList([nn.Linear(E,E) for _ in range(K)])
+        self.conv_layer_list_list = nn.ModuleList( [nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)]) for _ in range(K)])
+        self.dense_layer_list_switch   = nn.Linear(E,K+2)
+        # self.dense_layer_list_switch   = nn.Linear(E,K+2)
+        # nn.ModuleList([nn.Linear(E,) for _ in range(K)])
+    def conv_func(self, zs, layer_list):
+        zs = zs.transpose(1,2)
+        for xd, layer in enumerate(layer_list):
+            # zs = zs + layer(zs. relu())
+            '''
+            Important to stabilise the numbers over deep layers
+            '''
+            # zs = 0.5*zs + 0.5* layer(zs).tanh()
+            zs = (zs + layer(zs)).tanh()
+        zs = zs.transpose(1,2)
+        return zs
+
+
+    def decode(self, t2_embed):
+        D = self.config.depth
+        assert len(t2_embed.shape)==3,t2_embed.shape
+        (BW, T, E)= t2_embed.shape
+        zs = t2_embed
+
+        # for k in range(2):
+        K = self.config.kernel_size
+        # prior_mask
+        hh = torch.ones((K+2,BW,T,E),device=self.device)
+        # self.offset = offset = 1
+        self.config.offset = offset = 1
+        for ik,conv_layer_list in enumerate(self.conv_layer_list_list):
+            zs1 = self.conv_func(zs,conv_layer_list)
+            if ik==0:
+                prior = self.dense_layer_list_switch(zs).permute((2,0,1)).unsqueeze(-1)
+                continue
+            else:
+                zs1 = self.conv_func(zs,conv_layer_list)
+                hh[offset+ik]= zs1
+
+
+        # hh = hh.transpose(-2,-1)
+        '''
+        DLM155D7E50,  Ep10L50.3 Ep20L47.1
+        '''
+            # zs = (zs + layer(zs)).clip(-1, 1)
+
+
+        CLS_NAME = self.__class__.__name__
+
+        loghh = self.unembed(hh).log_softmax(-1)
+        prior = prior.log_softmax(0)[:hh.shape[0]]
+        logps = (prior + loghh)
+        return zs,logps,locals()
+
+class DLM154(DLM152):
+    '''
+    Systematically test the usefulness of a layer-alignment variable
+    '''
+    U = _U
+
+    def __init__(self,device,config,_=None):
+        super().__init__(device,config)
+        E = self.config.embed_dim
+        D = self.config.depth
+        self.D = D
+        self.conv_layer_list = nn.ModuleList([nn.Conv1d(E,E,kernel_size = 5, padding='same') for _ in range(D)])
+        if hasattr(self,'rnn_dec'): del self.rnn_dec
+        if hasattr(self,'rnn_enc'): del self.rnn_enc
+        T = self.config.window_size
+        self.prior = nn.Parameter( torch.ones([D+2,1,T,1],device=self.device) )
+
+        x = nn.Linear(E,2).to(self.device)
+        self.is_kept   =  x
+        # self.dbd = {}
+        # nn.Parameter(x.weight.T[None,None])
+        return
+
+    @staticmethod
+    def callback_after_test_all(conf, model,  item):
+
+
+        from markov_lm.util_plotly import plotly_heatmap_tracks
+        self = model
+        # super()
+        vis = conf.vis;  env = conf._session_name;
+        if vis is None: return;
+        DLM152.callback_after_test_all(conf,model,item)
+
+        key = 'prior'
+        title = key
+        # prior
+        nelem = 0
+        # ZMIN,ZMAX = (0.,10.)
+        ZMIN,ZMAX = (None,None)
+        # ZMIN = -10
+        YMAX = 20
+
+        # xd = model.get_debug_data(item,[conf])
+
+        '''
+        Need to visualise the attention matrix.
+        for each corrupted sentences
+        '''
+        tz = [(None, x.squeeze(-1)) for x in model.U.N(model.prior.softmax(0))]
+        fig = plotly_heatmap_tracks(tz, ZMIN=ZMIN,ZMAX=ZMAX,YMAX=YMAX,title = title)
+        vis.plotlyplot(fig, env=env,win=key)
+
+
+
+
+    def decode(self, t2_embed):
+        D = self.config.depth
+        assert len(t2_embed.shape)==3,t2_embed.shape
+        (BW, T, E)= t2_embed.shape
+        zs = t2_embed
+        zs = zs.transpose(1,2)
+
+        # for k in range(2):
+        hh = torch.zeros((D+2,BW,E, T),device=self.device)
+        # output = torch.
+        self.config.hyp = 2
+        if self.config.hyp == 0:
+            self.config.offset =offset = 0
+
+        if self.config.hyp == 1:
+            hh[0] = zs
+            self.config.offset =offset = 1
+        elif  self.config.hyp == 2:
+            # hh[0] = zs
+            hh[1] = (zs*0).detach()+1
+            self.config.offset =offset = 2
+        else:
+            raise NotImplementedError(f'self.config.hyp={self.config.hyp}')
+
+        zs0 = zs
+        for xd, layer in enumerate(self.conv_layer_list):
+            # zs = zs + layer(zs. relu())
+            '''
+            Important to stabilise the numbers over deep layers
+            '''
+            # zs = 0.5*zs + 0.5* layer(zs).tanh()
+            # zs0 = (zs + layer(zs0)).tanh()
+            zs = (layer(zs0)).tanh()
+            # zs = zs0 + (layer(zs0)).tanh()
+            hh[xd+offset] = zs
+            # zs = (zs + layer(zs)).clip(-1, 1)
+
+        zs = zs.transpose(1,2)
+        hh = hh.transpose(-2,-1)
+
+
+        loghh = self.unembed(hh).log_softmax(-1)
+        prior = self.prior.log_softmax(0)[:hh.shape[0]]
+        logps = (prior + loghh)
+
+        return zs,logps,locals()
+
+
+
+
+class DLM150(DLM142):
+    '''
+    DLM142 provide the .__init__ and the .decode
+
+    This is an experimental class to try reinforce on diffusion
+    '''
+    pass
+
+
+
 
 import  markov_lm.external.clm_transformer_model
 class DLM147(DLM140):
@@ -7740,7 +8478,7 @@ class DLM147(DLM140):
             logp = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
         else:
             logp = logp_repl
-        return zs,logp
+        return zs,logp,locals()
 
 
     pass
@@ -7798,7 +8536,7 @@ class DLM143(DLM140):
         else:
             logp = logp_repl
 
-        return zs,logp
+        return zs,logp,locals()
 
 
 class CustomTransformer(nn.Module):
@@ -7879,7 +8617,7 @@ class DLM144(DLM140):
         else:
             logp = logp_repl
 
-        return zs,logp
+        return zs,logp,locals()
 
 
 
@@ -7979,7 +8717,7 @@ class DLM145(DLM140):
 
         t2_embed = self.embed(t2)
 
-        zs,logp  = self.decode(t2_embed)
+        zs,logps,_  = self.decode(t2_embed)
 
         self.PREDICT_SOURCE=0
         if self.PREDICT_SOURCE:
@@ -8063,7 +8801,7 @@ class DLM146(DLM140):
             logp = (is_kept_lp.unsqueeze(-1) + x).logsumexp(2)
         else:
             logp = logp_repl
-        return zs,logp
+        return zs,logp,locals()
 
 
 

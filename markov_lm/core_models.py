@@ -13,6 +13,7 @@ from markov_lm.util_base import dset
 from markov_lm.util_base import toml_to_argv, dict_to_argv
 from markov_lm.util_base import js_inject_prep, vis_html_jump_button, add_textarea, rapp
 
+from markov_lm.util_plotly import plotly_heatmap_tracks
 
 import plotly.graph_objects as go
 class InterfaceDev(object):
@@ -48,7 +49,6 @@ class EventData(BaseModel):
     EventDataType : Literal['EventData']
 class KeyPress(BaseModel):
     pass
-
 
 
 
@@ -164,6 +164,7 @@ if 1:
                 from markov_lm.util_base import toml_to_argv, dict_to_argv
                 from markov_lm.nlp.train import conf_main_loop,argv_to_conf
                 import plotly.graph_objects as go
+                # import plotly.express as px
 
                 conf1 = conf_main_loop(argv_to_conf(dict_to_argv(self.model_session_config_1)),'load')
                 conf2 = conf_main_loop(argv_to_conf(dict_to_argv(self.model_session_config_2)),'load')
@@ -201,112 +202,50 @@ if 1:
 
 
 
-                def get_data(item=item):
-                    generator = torch.Generator(device=conf1.device)
-                    # rng = generator.get_state()
-                    # with torch.no_grad():
-                    seed = generator.seed()
-                    loss = []
-                    for i, conf in enumerate([conf1,conf2]):
-                        model = conf.model
-                        generator = generator.manual_seed(seed)
-                        item = model.add_target_notnull(item)
-                        T = item['target'].shape[-1]
-                        t1, t2 = model.corrupt_target(item['target'], item['target_notnull'],generator)
-                        generator = generator.manual_seed(seed)
-                        loss += [model._loss(item,'masked_loss_per_loc', generator = generator ).reshape((-1,T))]
-
-                    # loss1,loss2 = map((lambda x:) ,[conf1,conf2])
-                    # loss1,loss2 = map((lambda x:x.model._loss(item,'loss', generator )) ,[conf1,conf2])
-                    # mat = loss_sum = U.N(torch.stack(loss,dim=-1).sum(2).mean(1))
-                    mat = loss_sum = U.N(torch.stack(loss,dim=-1).sum(1))
-                    wordize = np.vectorize(dataset.tgt_wordize)
-                    G = conf1.dataset.graph_dim
-
-                    # T = t1.shape[-1]
-                    t1 = t1.reshape((-1,T))
-                    t2 = t2.reshape((-1,T))
-
-                    xw1 = wordize(U.N(t1).clip(0,G-1))
-                    xw2 = wordize(U.N(t2).clip(0,G-1))
-                    # loss1 = U.N(loss1)
-                    # loss2 = U.N(loss2)
-                    import collections
-                    cls = collections.namedtuple('_fret','loss_sum loss t1 t2 xw1 xw2')
-
-                    return cls(
-                        loss_sum = U.N(loss_sum),
-                        loss = list(map(U.N,loss)), t1 = U.N(t1), t2=U.N( t2 ),
-                        xw1=xw1,xw2=xw2,
-                        )
+                # def get_data(item,confs):
+                #     conf1 = confs[0]
+                #     generator = torch.Generator(device=conf1.device)
+                #     # rng = generator.get_state()
+                #     # with torch.no_grad():
+                #     seed = generator.seed()
+                #     loss = []
+                #     for i, conf in enumerate(confs):
+                #         model = conf.model
+                #         generator = generator.manual_seed(seed)
+                #         item = model.add_target_notnull(item)
+                #         T = item['target'].shape[-1]
+                #         t1, t2 = model.corrupt_target(item['target'], item['target_notnull'],generator)
+                #         generator = generator.manual_seed(seed)
+                #         loss += [model._loss(item,'masked_loss_per_loc', generator = generator ).reshape((-1,T))]
+                #
+                #     # loss1,loss2 = map((lambda x:) ,[conf1,conf2])
+                #     # loss1,loss2 = map((lambda x:x.model._loss(item,'loss', generator )) ,[conf1,conf2])
+                #     # mat = loss_sum = U.N(torch.stack(loss,dim=-1).sum(2).mean(1))
+                #     mat = loss_sum = U.N(torch.stack(loss,dim=-1).sum(1))
+                #     wordize = np.vectorize(dataset.tgt_wordize)
+                #     G = conf1.dataset.graph_dim
+                #
+                #     # T = t1.shape[-1]
+                #     t1 = t1.reshape((-1,T))
+                #     t2 = t2.reshape((-1,T))
+                #
+                #     xw1 = wordize(U.N(t1).clip(0,G-1))
+                #     xw2 = wordize(U.N(t2).clip(0,G-1))
+                #     # loss1 = U.N(loss1)
+                #     # loss2 = U.N(loss2)
+                #     import collections
+                #     cls = collections.namedtuple('_fret','loss_sum loss t1 t2 xw1 xw2')
+                #
+                #     return cls(
+                #         loss_sum = U.N(loss_sum),
+                #         loss = list(map(U.N,loss)), t1 = U.N(t1), t2=U.N( t2 ),
+                #         xw1=xw1,xw2=xw2,
+                #         )
                     # 1 = loss1,loss2=loss2)
-                xd = get_data()
+                xd = conf1.model.get_debug_data(item,[conf1,conf2])
 
-                xdiff = xd.loss_sum[:,1] - xd.loss_sum[:,0]
-
-                if 1:
-                    key = 'very Negative xdiff'
-                    target = item['target']
-                    # xdiff = xdloss[]
-                    # loss2 - loss1
-                    # sel =  xdiff < -1
-                    DIFF_BELOW = -20
-                    sel =  (xd.loss[1] - xd.loss[0]).sum(-1) < DIFF_BELOW
-
-
-                    text = xd.xw2
-                    t0 = xd.xw1
-                    t1 = xd.xw2
-                    t2 = xd.xw2
-                    t3 = t2.copy()
-                    t3[:] = '-'
-
-                    B = len(text)
-                    z0 = (xd.xw2!=xd.xw1)
-                    z1 = (xd.loss[0])
-                    z2 = (xd.loss[1])
-                    z3 = z2*0
-                    z0 = z0*(z1.max()+z2.max())/2.
-
-                    ZMIN,ZMAX=0,1
-                    YMAX = 30
-
-                    z    = np.stack([z0,z1,z2,z3], 1)
-                    text = np.stack([t0,t1,t2,t3], 1)
-                    z    = z[sel]
-                    text = text[sel]
-
-                    BB   = z.shape[0]*z.shape[1]
-                    z    = z.reshape((BB,-1))
-                    text = text.reshape((BB,-1))
-
-                    z = z.clip(ZMIN,ZMAX)
-
-                    if YMAX>=0:
-                        z = z[:YMAX]
-                        text = text[:YMAX]
-
-                    # text = np.tile(text[:,None],(1,3,1)).reshape((3*BB,-1))
-
-                    # z  =[sel]
-
-                    # z = z[sel]
-                    # text = text[sel]
-
-                    title = f'{key} {sel.shape} {z.shape} {text.shape}'
-                    key
-
-                    if 1:
-                        fig = go.Figure(data=go.Heatmap(
-                                            z=z,
-                                            text=text,
-                                            xgap=1,
-                                            ygap=1,
-                                            texttemplate="%{text}",
-                                            textfont={"size":10}))
-                        # title = f'{key}, len:{len(x)}'
-                        fig['layout'].update(title=title)
-                        vis.plotlyplot(fig, env=env,win=key)
+                # xdiff = xd.loss_sum[:,1] - xd.loss_sum[:,0]
+                loss_diff = (xd.loss_per_loc[1] - xd.loss_per_loc[0]).sum(-1)
 
                 key = 'test_loss_scatter'
                 mat = xd.loss_sum
@@ -315,12 +254,48 @@ if 1:
                 MIN = 0
                 vis.scatter( mat, env=env, win = key,opts=dict(title=key,xtickmin=MIN,xtickmax=MAX, ytickmin=MIN,ytickmax=MAX,markersize=5,textlabels= list(range(len(mat)))))
 
+
                 key ='test_loss_boxplot'
                 vis.boxplot( mat, env=env, win = key,opts=dict(title=key))
                 # ,xtickmin=MIN,xtickmax=MAX, ytickmin=MIN,ytickmax=MAX))
 
                 key =f'test_loss_diff_histogram'
-                vis.histogram( mat.T[1] - mat.T[0], env=env, win = key,opts=dict(title=key+f' ts:{datetime.now().isoformat()}'))
+                vis.histogram( loss_diff, env=env, win = key,opts=dict(title=key+f' ts:{datetime.now().isoformat()}'))
+
+
+
+                if 1:
+                    key = 'very Negative xdiff'
+                    target = item['target']
+                    # xdiff = xdloss[]
+                    # loss2 - loss1
+                    # sel =  xdiff < -1
+                    DIFF_BELOW = -20
+                    DIFF_BELOW = -30
+
+
+
+                    ZMIN,ZMAX=0,5
+                    YMAX = 30
+
+                    sel =  loss_diff < DIFF_BELOW
+                    nelem = sel.sum()
+
+                    text = xd.xw2
+                    tz = []
+                    tz += [[xd.xw1, xd.loss_per_loc[0]*0]]
+                    tz += [[xd.xw2, (xd.xw2!=xd.xw1) *ZMAX]]
+                    tz += [[xd.xw2, (xd.loss_per_loc[0])]]
+                    tz += [[xd.xw2, (xd.loss_per_loc[1])]]
+                    tz += [[xd.xw2.copy(), xd.loss_per_loc[0]*0]]
+                    tz[-1][0][:] = '-'
+
+                    B = len(text)
+
+                    title = f'{key} {sel.shape} {nelem} {text.shape}'
+                    fig = plotly_heatmap_tracks(tz, ZMIN=ZMIN,ZMAX=ZMAX,YMAX=YMAX,title = title)
+                    vis.plotlyplot(fig, env=env,win=key)
+
 
 
 
