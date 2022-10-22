@@ -129,6 +129,8 @@ RWC = run_node_with_control
 
 class ShellCaller(object):
     def __init__(self,cmd):
+        if 'set -e' not in cmd:
+            cmd = 'set -e; ' + cmd
         self.cmd = cmd
     def __repr__(self):
         return f'ShellCaller(cmd="{self.cmd[:30]}")'
