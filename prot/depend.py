@@ -8,6 +8,7 @@ from markov_lm.util_check import (
 	is_root,
 	test_is_root,
 	SEXE,
+	s,
 	# RWC,
 	check_write_1,
 	check_write_2,
@@ -64,7 +65,7 @@ def prepare_run():
 	'''))
 
 	### CMake 3.16.3 or higher is required
-	if s('cmake --version')< 'cmake version 3.24.1':
+	if s('cmake --version').decode()< 'cmake version 3.16.3':
 		print('''
 		[WARN] use with caution
 		''')
