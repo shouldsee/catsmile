@@ -11,11 +11,12 @@ from markov_lm.util_check import (
 	# RWC,
 	check_write_1,
 	check_write_2,
+	check_write_always,
 	DefaultWriter,
 	)
 # from markov_lm.util_check import run_node_with_control as RWC
 from markov_lm.util_check import Controller
-from markov_lm.util_check import ShellCaller as sc
+# from markov_lm.util_check import ShellCaller as sc
 
 import os,sys,toml
 import toml
@@ -23,6 +24,7 @@ import toml
 def main():
 	# ctl = prepare_run()
 	ctl.run()
+	ctl.pprint_stats()
 
 def prepare_run():
 	ctl = Controller()
@@ -33,23 +35,23 @@ def prepare_run():
 
 	ctl.lazy_apt_install('libopenmpi-dev libfftw3-dev')
 
-	sc(f'''
+	RWC(run = f'''
 	# Set up a Python virtual environment in which to install gmxapi.
 	#python3 -m venv $HOME/pygmx
 	#. $HOME/pygmx/bin/activate
 	#pip install --upgrade pip setuptools wheel
 
 	MPICC=`which mpicc` MPICXX=`which mpic++` {SEXE} -m pip install --upgrade mpi4py
-	''')()
+	''')
 
 	ctl.lazy_wget('ftp://ftp.gromacs.org/pub/gromacs/gromacs-2022.tar.gz')
 
-	sc('''tar xvf gromacs-2022.tar.gz''')()
+	RWC(run='''tar xvf gromacs-2022.tar.gz''')
 	'gromacs-tmpi'
 
 	TARGET = f'{os.getcwd()}/gromacs-tmpi'
 
-	RWC(check_write_1, TARGET+'.done', sc(f'''
+	RWC(check_write_1, TARGET+'.done', (f'''
 	TARGET={TARGET}
 	# Build and install thread-MPI GROMACS to your home directory.
 	# Make sure the compiler toolchain matches that of mpi4py as best we can.
@@ -81,22 +83,24 @@ def prepare_run():
 	# Activate the GROMACS installation.
 	TARGET = 'genv.toml'
 
-	RWC(check_write_2, TARGET, sc(f'''
+	RWC(check_write_2, TARGET, (f'''
 	set -o allexport;
 	source $PWD/gromacs-tmpi/bin/GMXRC.bash;
 	{SEXE} -c "import toml,os;toml.dump(dict(os.environ), open('{TARGET}','w'))"
 	'''))
 
 	### loads environ from bash file
-	xd = toml.loads(open(TARGET,'r').read())
-	for line in example.strip().splitlines():
-		k = line.split('=',1)
-		if len(k)!=2:
-			continue
+	def run():
+		xd = toml.loads(open(TARGET,'r').read())
+		for line in example.strip().splitlines():
+			k = line.split('=',1)
+			if len(k)!=2:
+				continue
 
-		k =k[0].strip()
-		if k:
-			os.environ[k] = xd[k]
+			k =k[0].strip()
+			if k:
+				os.environ[k] = xd[k]
+	RWC(run=run)
 
 
 	# Build and install the latest gmxapi Python package.
