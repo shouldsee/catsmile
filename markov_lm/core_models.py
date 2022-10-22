@@ -5,7 +5,7 @@ import logging
 import json,toml
 
 from datetime import datetime
-from typing import List, Optional, Union,Literal
+from typing import List, Optional, Union,Literal, ClassVar
 from pydantic import BaseModel,validator
 from pydantic import Field
 
@@ -13,6 +13,27 @@ from markov_lm.util_base import dset
 from markov_lm.util_base import toml_to_argv, dict_to_argv
 from markov_lm.util_base import js_inject_prep, vis_html_jump_button, add_textarea, rapp
 
+from markov_lm.util_plotly import plotly_heatmap_tracks
+
+import plotly.graph_objects as go
+class InterfaceDev(object):
+    @classmethod
+    def bind_visdom(cls, vis):
+        z = [[1, 20, 30],
+          [20, 1, 60],
+          [30, 60, 1]]
+        text = [['one', 'twenty', 'thirty'],
+              ['twenty', 'one', 'sixty'],
+              ['thirty', 'sixty', 'one']]
+        fig = go.Figure(data=go.Heatmap(
+                            z=z,
+                            text=text,
+                            texttemplate="%{text}",
+                            textfont={"size":20}))
+
+        # fig.show()
+        # print(fig)
+        vis.plotlyplot(fig, env='testdev',win='array')
 
 class PaneData(BaseModel):
     command: str
@@ -31,37 +52,270 @@ class KeyPress(BaseModel):
 
 
 
-def interface_bind(I, vis):
-    '''
-    Needs to implement two
-    '''
-
-    '''
-    Create a frontend window
-      - This allows frontend to send data back to server
-    '''
-    I.init_vis_form(vis)
-
-    '''
-    register backend callback
-       - this performs computation given the message
-       - and renders to output
-    '''
-    callback = I.make_callback(vis)
-    vis.register_event_handler(callback, I.callback_target)
-    return 0
-
 if 1:
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+
+    # import
+    # create console handler and set level to debug
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+    logger.addHandler(ch)
+    # logging.setLevel(logging.DEBUG)
     '''
     Interace = (frontend_form + EventData_spec+ backend_callback)
-
     '''
 
+
+    class CallbackPrototype(BaseModel):
+        # name: str
+        @classmethod
+        def on_recv(self, msg, pmsg, vis):
+            # _dp = logging.debug
+            _dp = print
+            _dp(f'[before_on_recv]{self}{pmsg}')
+            _dp(pmsg.json(indent=2))
+            # get_event_initor(msg['target'])(msg, pmsg, vis)
+            assert isinstance(msg,MarkovComapreEventData),repr(msg)
+            assert isinstance(pmsg,VisdomCallbackMessage),repr(pmsg)
+            self._on_recv(msg, pmsg, vis)
+            _dp(f'[after_on_recv]{self}{pmsg}')
+        @classmethod
+        def _on_recv(cbk, msg, pmsg, vis):
+            self = msg
+            env = self.target_env
+
+            vis.text(f'''
+            <h2>controller</h2>
+            <b>{vis_html_jump_button(self.origin_env)}</b>
+            <br/>
+            Last Message from {pmsg.eid!r}
+            <br/>
+            <label>msg.json()</label>
+            <br/>
+            <textarea>{pmsg.json(indent=2)}</textare>
+            ''',win='controller',env=env)
+            # raise NotImplementedError(cbk)
+
+    class CallbackTrain(CallbackPrototype):
+        name: ClassVar = 'train'
+        # @staticmethod
+        @classmethod
+        def _on_recv(cls, msg, pmsg, vis):
+            # assert hasattr(pmsg,'event_data'), f'Unexpected callback {pmsg!r}'
+            super()._on_recv(msg,pmsg,vis)
+            self = msg
+            env = self.target_env
+
+            vis.text(f'''
+            <h2>controller2</h2>
+            <b>received {cls!r} Message!!!</b>
+            <b>{vis_html_jump_button(self.origin_env)}</b>
+            <br/>
+            Last Message from {pmsg.eid!r}
+            <br/>
+            <label>msg.json()</label>
+            <br/>
+            <textarea>{pmsg.json(indent=2)}</textarea>
+            ''',win='controller2',env=env)
+            # return 0
+            # self = msg
+            # env = self.target_env
+            msg.vis_add_form_with_callback(vis, msg.target_env, cls.name)
+            # __name__)
+            if 1:
+                win = f'controller-{cls.name}'
+                # buf =''
+
+                # pmsg.json(indent=2)}</textare>
+                # ''',win='controller2',env=env)
+                from markov_lm.util_base import toml_to_argv, dict_to_argv
+                from markov_lm.nlp.train import conf_main_loop,argv_to_conf
+                # import plotly.graph_objects as go
+                buf = ['']
+                # buf[] +=
+                class stdout(object):
+                    @staticmethod
+                    def write(v):
+                        buf[0] = f'{v}\n' + buf[0][:200]
+                        vis.text(f'''
+                        <h2>{win}</h2>
+                        <textarea style="height:400px; width: 500px;">{buf[0]}</textarea>''',win=win,env=env)
+                stdout.write(f'\n[{datetime.now().isoformat()}]{cls}.Started')
+                conf1 = conf_main_loop(argv_to_conf(dict_to_argv(self.model_session_config_1)),'train', stdout)
+                # buf += f'\n[{datetime.now().isoformat()}]{cls}.Ended'
+
+    class CallbackCompare(CallbackPrototype):
+        name: ClassVar = 'compare'
+        # name = 'compare'
+        # @staticmethod
+        @classmethod
+        def _on_recv(cbk, msg, pmsg, vis):
+            # assert hasattr(pmsg,'event_data'), f'Unexpected callback {pmsg!r}'
+            super()._on_recv(msg,pmsg,vis)
+            self = msg
+            env = self.target_env
+            msg.vis_add_form_with_callback(vis, msg.target_env, cbk.__name__)
+            if 1:
+                from markov_lm.Model_NLM import U
+                import pandas as pd
+                import numpy as np
+                import torch
+                from markov_lm.util_base import toml_to_argv, dict_to_argv
+                from markov_lm.nlp.train import conf_main_loop,argv_to_conf
+                import plotly.graph_objects as go
+                # import plotly.express as px
+
+                conf1 = conf_main_loop(argv_to_conf(dict_to_argv(self.model_session_config_1)),'load')
+                conf2 = conf_main_loop(argv_to_conf(dict_to_argv(self.model_session_config_2)),'load')
+
+                dataset = conf1.dataset
+                dataloader = conf1.dataloader
+                # vis = conf1.vis
+
+
+                dataset.test()
+                item = next(iter(dataloader))
+                # rng = torch.get_rng_state().numpy()
+
+                from jinja2 import Environment, BaseLoader
+                def jr(template, data):
+                    rtemplate = Environment(loader=BaseLoader).from_string(template)
+                    data = rtemplate.render(**data)
+                    return data
+                def jr_table(tab,):
+                    template = '''
+                    <table border=1 style="{{BORDER_STYLE}}">
+                    <tbody>
+                    {% for tabrow in tab %}
+                        <tr>
+                        {% for tabrowcol in tabrow %}
+                            <td style="{{BORDER_STYLE}}">{{tabrowcol}}</td>
+                        {% endfor %}
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                    </table>
+                    '''
+                    buf = jr(template, dict(tab=tab,BORDER_STYLE = 'border:0.5px solid grey; text-align:center; padding: 2px;'))
+                    return buf
+
+
+
+                # def get_data(item,confs):
+                #     conf1 = confs[0]
+                #     generator = torch.Generator(device=conf1.device)
+                #     # rng = generator.get_state()
+                #     # with torch.no_grad():
+                #     seed = generator.seed()
+                #     loss = []
+                #     for i, conf in enumerate(confs):
+                #         model = conf.model
+                #         generator = generator.manual_seed(seed)
+                #         item = model.add_target_notnull(item)
+                #         T = item['target'].shape[-1]
+                #         t1, t2 = model.corrupt_target(item['target'], item['target_notnull'],generator)
+                #         generator = generator.manual_seed(seed)
+                #         loss += [model._loss(item,'masked_loss_per_loc', generator = generator ).reshape((-1,T))]
+                #
+                #     # loss1,loss2 = map((lambda x:) ,[conf1,conf2])
+                #     # loss1,loss2 = map((lambda x:x.model._loss(item,'loss', generator )) ,[conf1,conf2])
+                #     # mat = loss_sum = U.N(torch.stack(loss,dim=-1).sum(2).mean(1))
+                #     mat = loss_sum = U.N(torch.stack(loss,dim=-1).sum(1))
+                #     wordize = np.vectorize(dataset.tgt_wordize)
+                #     G = conf1.dataset.graph_dim
+                #
+                #     # T = t1.shape[-1]
+                #     t1 = t1.reshape((-1,T))
+                #     t2 = t2.reshape((-1,T))
+                #
+                #     xw1 = wordize(U.N(t1).clip(0,G-1))
+                #     xw2 = wordize(U.N(t2).clip(0,G-1))
+                #     # loss1 = U.N(loss1)
+                #     # loss2 = U.N(loss2)
+                #     import collections
+                #     cls = collections.namedtuple('_fret','loss_sum loss t1 t2 xw1 xw2')
+                #
+                #     return cls(
+                #         loss_sum = U.N(loss_sum),
+                #         loss = list(map(U.N,loss)), t1 = U.N(t1), t2=U.N( t2 ),
+                #         xw1=xw1,xw2=xw2,
+                #         )
+                    # 1 = loss1,loss2=loss2)
+                xd = conf1.model.get_debug_data(item,[conf1,conf2])
+
+                # xdiff = xd.loss_sum[:,1] - xd.loss_sum[:,0]
+                loss_diff = (xd.loss_per_loc[1] - xd.loss_per_loc[0]).sum(-1)
+
+                key = 'test_loss_scatter'
+                mat = xd.loss_sum
+                x,y = mat.T
+                MAX = int(mat.max())
+                MIN = 0
+                vis.scatter( mat, env=env, win = key,opts=dict(title=key,xtickmin=MIN,xtickmax=MAX, ytickmin=MIN,ytickmax=MAX,markersize=5,textlabels= list(range(len(mat)))))
+
+
+                key ='test_loss_boxplot'
+                vis.boxplot( mat, env=env, win = key,opts=dict(title=key))
+                # ,xtickmin=MIN,xtickmax=MAX, ytickmin=MIN,ytickmax=MAX))
+
+                key =f'test_loss_diff_histogram'
+                vis.histogram( loss_diff, env=env, win = key,opts=dict(title=key+f' ts:{datetime.now().isoformat()}'))
+
+
+
+                if 1:
+                    key = 'very Negative xdiff'
+                    target = item['target']
+                    # xdiff = xdloss[]
+                    # loss2 - loss1
+                    # sel =  xdiff < -1
+                    DIFF_BELOW = -20
+                    DIFF_BELOW = -30
+
+
+
+                    ZMIN,ZMAX=0,5
+                    YMAX = 30
+
+                    sel =  loss_diff < DIFF_BELOW
+                    nelem = sel.sum()
+
+                    text = xd.xw2
+                    tz = []
+                    tz += [[xd.xw1, xd.loss_per_loc[0]*0]]
+                    tz += [[xd.xw2, (xd.xw2!=xd.xw1) *ZMAX]]
+                    tz += [[xd.xw2, (xd.loss_per_loc[0])]]
+                    tz += [[xd.xw2, (xd.loss_per_loc[1])]]
+                    tz += [[xd.xw2.copy(), xd.loss_per_loc[0]*0]]
+                    tz[-1][0][:] = '-'
+
+                    B = len(text)
+
+                    title = f'{key} {sel.shape} {nelem} {text.shape}'
+                    fig = plotly_heatmap_tracks(tz, ZMIN=ZMIN,ZMAX=ZMAX,YMAX=YMAX,title = title)
+                    vis.plotlyplot(fig, env=env,win=key)
+
+
+
+
+                # vis.text(jr_table(x), win=key,env=env)
+                # loss2 + margin < loss1
+                key ='Evaluation Dialogue'
+                html_buffer = ''''<input></input>'''
+                vis.text(html_buffer,win=key,env=env)
+
+            # 'compare train'.split())
     class MarkovComapreEventData(BaseModel):
-        EventDataType: Literal['MarkovComapreEventData']
+        EventDataType: Literal['MarkovComapreEventData']='MarkovComapreEventData'
+        # EventDataType: 'MarkovComapreEventData'
         model_session_config_1: dict
         model_session_config_2: dict
         target_env: str
+        origin_env: str='testdev'
+        # callback_list: list = 'compare train'.split()
+        callback_list: ClassVar  = [CallbackCompare,CallbackTrain]
+        # 'compare train'.split()
 
         @validator("model_session_config_1","model_session_config_2",pre=True)
         def parse_toml(cls,v):
@@ -78,169 +332,89 @@ if 1:
          "model_session_config_2": "        loglr = -4\n        LOAD = \"100_\"\n\n        [model]\n        embed_dim=60\n        model_name = \"DLM142\"\n        kernel_size = 3\n        window_size = 1\n        depth = 12\n        p_null = 0.05\n        "}
          }
         '''
-        def on_recv(self, msg, vis):
-            logging.debug(f'[before_on_recv]{self}')
-            self._on_recv(msg, vis)
-            logging.debug(f'[after_on_recv]{self}')
-        def _on_recv(self, msg, vis):
-            # pcli_argv_1 =
-            env = self.target_env
-
-            from markov_lm.Model_NLM import U
-            from markov_lm.util_base import toml_to_argv, dict_to_argv
-            import pandas as pd
-            import numpy as np
-            import torch
-            from markov_lm.nlp.train import conf_main_loop,argv_to_conf
-
-
-            _target_env = msg.eid
-            vis.text(f'''
-            <h2>controller</h2>
-            {vis_html_jump_button(msg.eid,'Go Back To:'+msg.eid)}
-            <br/>
-            <label>msg.json()</label>
-            <br/>
-            <textarea>{msg.json(indent=2)}</textare>
-            ''',win='controller',env=env)
-
-
-            conf1 = conf_main_loop(argv_to_conf(dict_to_argv(self.model_session_config_1)),'load')
-            conf2 = conf_main_loop(argv_to_conf(dict_to_argv(self.model_session_config_2)),'load')
-
-            dataset = conf1.dataset
-            dataloader = conf1.dataloader
-            # vis = conf1.vis
-
-
-            dataset.test()
-            item = next(iter(dataloader))
-            loss1,loss2 = map((lambda x:x.model.loss(item)),[conf1,conf2])
-
-            key = 'test_loss_scatter'
-            mat = U.N(torch.stack([loss1,loss2],dim=-1))
-            x,y = mat.T
-            MAX = int(mat.max())
-            MIN = 0
-            vis.scatter( mat, env=env, win = key,opts=dict(title=key,xtickmin=MIN,xtickmax=MAX, ytickmin=MIN,ytickmax=MAX,markersize=5,textlabels= list(range(len(mat)))))
-            # vis.scatter( mat, env=env, win = key,opts=dict(title=key))
-            # key = hist1
-
-            key ='test_loss_boxplot'
-            vis.boxplot( mat, env=env, win = key,opts=dict(title=key))
-            # ,xtickmin=MIN,xtickmax=MAX, ytickmin=MIN,ytickmax=MAX))
-
-            key ='test_loss_diff_histogram'
-            vis.histogram( mat.T[1] - mat.T[0], env=env, win = key,opts=dict(title=key))
-
-
-            target = item['target']
-            xdiff = loss2 - loss1
-            xsel = target[ xdiff < -7]
-
-            x = np.vectorize(dataset.tgt_wordize)(U.N(xsel))
-            # x = [''.join(xx) for xx in x]
-            df = pd.DataFrame( x )
-            key = 'very Negative xdiff'
-            vis.text(df.to_html(), win=key,env=env)
-            # loss2 + margin < loss1
-            key ='Evaluation Dialogue'
-            html_buffer = ''''<input></input>'''
-            vis.text(html_buffer,win=key,env=env)
-
-
-    cls = MarkovComapreEventData
-    cls._example_value =  cls(**json.loads(cls._example)['event_data'])
 
 
 
-    # import logging
-    # from markov_lm.core_models import VisdomCallbackMessage, MarkovComapreEventData
-    class InterfaceCompare(object):
-        '''
-        创建前端表单来接受socket请求
-        '''
-        # @staticmethod
-        target_win = win = 'box1'
-        target_env = env = 'testdev'
-        callback_target= f'{env}/{win}'
-        @classmethod
-        def bind_visdom(self, vis):
-            return interface_bind(self, vis)
-        @classmethod
-        def init_vis_form(self, vis):
-            from markov_lm.util_base import toml_to_argv, dict_to_argv
-            target_env = env = self.env
-            target_win = win = self.win
-
-            str_assignment = '''
-            const _v = {}
+        def vis_add_form_with_callback(self, vis, env, win, ):
+            callback_list = self.callback_list
+            # del callback_target
             '''
-            str_assignment += f'''
-            _v.target= '{self.callback_target}';
-            '''
-            injected_js =  str_assignment + '''
-
-            const data = new FormData(this.parentElement);
-            const dataValue = Object.fromEntries(data.entries());
-            const msg = {"cmd":"forward_to_vis","data":{"target": _v.target,"eid":"testdev","event_type":"SubmitForm", event_data: dataValue}}
-            console.log(msg);
-
-            %s.sendSocketMessage(msg);
-            console.log('injected')
-            '''%rapp
-            injected_js = js_inject_prep(injected_js)
-
-
-            default_model1 = '''
-            loglr = -4
-            LOAD = "100_"
-
-            [model]
-            embed_dim=60
-            model_name = "DLM142"
-            kernel_size = 3
-            window_size = 1
-            depth = 12
-            p_null = 0.05
+            Create a form that would sends this message back
+            to visdom to trigger a backend callback
             '''
 
+            msg = self
+            def get_js_cbk(callback_target,env=env,rapp=rapp, ):
+                str_assignment = '''
+                const _v = {}
+                '''
 
-            # x1 = dict_to_argv(toml.loads(default_model1))
-            x1 = toml_to_argv(default_model1)
+                str_assignment += f'''
+                _v.target= '{callback_target}';
+                _v.env = '{env}'
+                '''
+                js_cbk1 =  str_assignment + '''
 
-            k  = 'target_env'
-            vd = 'compare0003'
+                const data = new FormData(this.parentElement);
+                const dataValue = Object.fromEntries(data.entries());
+                const msg = {"cmd":"forward_to_vis","data":{"target": _v.target, "eid":_v.env, "event_type":"SubmitForm", event_data: dataValue}}
+                console.log(msg);
+
+                %s.sendSocketMessage(msg);
+                console.log('injected')
+                '''%rapp
+                return js_inject_prep(js_cbk1)
+                # return js_cbk1
+
+
+
             style = 'border:2px solid black;'
 
-            v = f'<input type="text" name="{k}" value="{vd}" style="{style}"></input>'
-            v += add_textarea('model_session_config_1', default_model1)
-            v += '<br/>'
-            v += add_textarea('model_session_config_2', default_model1)
+            v = ''
+            k = 'EventDataType'
+            v += f'''<input type='hidden' name="{k}" value="{msg.__dict__[k]}" />'''
+
+            k = 'target_env'
+            v += f'<input type="text" name="{k}" value="{msg.__dict__[k]}" style="{style}"></input>'
+
             v += '<br/>'
 
-            xx1 = toml.loads(default_model1)
+            k = 'model_session_config_1'
+            v += add_textarea(k, toml.dumps(msg.__dict__[k]))
+            v += '<br/>'
+
+            k = 'model_session_config_2'
+            v += add_textarea(k, toml.dumps(msg.__dict__[k]))
+            v += '<br/>'
+
+            # xx1 = toml.loads(default_model1)
 
             k = 'EventDataType'
             vd = 'MarkovComapreEventData'
-
+            css = 'border: 0px solid black;'
+            btns = ''
+            for cbk in callback_list:
+                btns += f'<button onclick="javascript:{get_js_cbk(cbk.name)}" style="height:40px; font-size:30px; ">{cbk.name}</button>'
+                btns +='<br/>'
             win_out = vis.text(
             f'''
-            <form action="javascript:void(0);">
-            <input type='hidden' name="{k}" value="{vd}" />
-            <button onclick="javascript:{injected_js}">submit</button>
-            <br/>
-            {v}
-            </form>
+            <div class="visext-window" style="{css}">
+                <form action="javascript:void(0);">
+                {btns}
+                <br/>
+                {v}
+                </form>
+            </div>
             '''
             ,env=env,win=win)
             return win,win_out
 
-
-
-        @classmethod
-        def make_callback(self, vis):
-            def _callback(event,env = self.env, win='reply_win', vis=vis):
+        @staticmethod
+        def make_callback( iface_recv, vis, env):
+            '''
+            Return a callback to be executed on receiving the message
+            '''
+            def _on_recv( event,  win='reply_win', vis=vis):
                 '''
                 event = {'eid': 'text_callbacks',
                  'event_type': 'KeyPress',
@@ -265,59 +439,142 @@ if 1:
                 logging.info(f'[callbackMsgRecv]{msg!r}')
                 if isinstance( msg.event_data, MarkovComapreEventData):
                     # import pdb; pdb.set_trace()
+                    env = msg.eid
                     hb = f'''
-        [{datetime.now().isoformat()}] Callback recved: {repr(msg)[:50]}
-        <u><b>{vis_html_jump_button(msg.event_data.target_env,'Click To see result:'+msg.event_data.target_env)}</b></u>
+                    [{datetime.now().isoformat()}] Callback recved: {repr(msg)[:50]}
+                    <u><b>{vis_html_jump_button(msg.event_data.target_env,'Click To see result:'+msg.event_data.target_env)}</b></u>
 
-        <div><textarea style="width:100%;">{(msg.event_data.json())}</textarea></div>
-        <br/>
-        <br/>
-        Calculating....
+                    <div><textarea>{(msg.event_data.json())}</textarea></div>
+                    <br/>
+                    <br/>
+                    Calculating....
 
                     '''
-
                     vis.text(hb, win=win, env=env)
 
                     import time
                     t0 = time.time()
-                    msg.event_data.on_recv(msg,vis)
+                    iface_recv(msg.event_data, msg, vis)
+                    # msg.event_data.on_recv(msg,vis)
                     hb += f'''
-        <br/>
-        <br/>
+                    <br/>
+                    <br/>
 
-        [{datetime.now().isoformat()}] Finished calculation! time:{time.time()-t0:.2f}s
+                    [{datetime.now().isoformat()}] Finished calculation! time:{time.time()-t0:.2f}s
                     '''
 
                     vis.text(hb, win=win, env=env)
                 else:
-                    print(msg)
+                    raise NotImplementedError(f'Not Implemented for {msg.event_data!r}')
+                    # print(msg)
 
-                # BaseMessage()
-            return _callback
+            return _on_recv
+
+    cls = MarkovComapreEventData
+    cls._example_value =  cls(**json.loads(cls._example)['event_data'])
 
 
-class VisdomCallbackMessage(BaseModel):
-    eid: str
-    event_type: str
-    target: str
-    pane_data: Optional[PaneData]  ### intermediaste
-    event_data: Union[EventData, MarkovComapreEventData] = Field(default={},discriminator='EventDataType')
 
-ExampleBaseMessage = {'eid': 'text_callbacks',
- 'event_type': 'KeyPress',
- 'key': 'd',
- 'key_code': 68,
- 'pane_data': {'command': 'window',
-               'content': 'This is a write demo notepad. Type below. Delete '
-                          'clears text:<br>a',
-               'contentID': '43af9d32-5185-4167-8ef2-52b34b3c84e2',
-               'height': None,
-               'i': 1,
-               'id': 'window_3b1fede0134b74',
-               'inflate': True,
-               'title': '',
-               'type': 'text',
-               'width': None},
- 'target': 'window_3b1fede0134b74'}
 
-xx = VisdomCallbackMessage(**ExampleBaseMessage)
+    class VisdomCallbackMessage(BaseModel):
+        eid: str
+        event_type: str
+        target: str
+        pane_data: Optional[PaneData]  ### intermediaste
+        event_data: Union[EventData, MarkovComapreEventData] = Field(default={},discriminator='EventDataType')
+
+    ExampleBaseMessage = {'eid': 'text_callbacks',
+     'event_type': 'KeyPress',
+     'key': 'd',
+     'key_code': 68,
+     'pane_data': {'command': 'window',
+                   'content': 'This is a write demo notepad. Type below. Delete '
+                              'clears text:<br>a',
+                   'contentID': '43af9d32-5185-4167-8ef2-52b34b3c84e2',
+                   'height': None,
+                   'i': 1,
+                   'id': 'window_3b1fede0134b74',
+                   'inflate': True,
+                   'title': '',
+                   'type': 'text',
+                   'width': None},
+     'target': 'window_3b1fede0134b74'}
+
+    xx = VisdomCallbackMessage(**ExampleBaseMessage)
+
+
+    # import logging
+    # from markov_lm.core_models import VisdomCallbackMessage, MarkovComapreEventData
+    class InterfaceCompare(object):
+        '''
+        创建前端表单来接受socket请求
+        '''
+        # @staticmethod
+        target_win = win = 'box1'
+        target_env = env = 'testdev'
+        # callback_target= f'{env}/{win}'
+        callback_target= f'compare'
+        # callback_target = 'compare train'.split()
+        # @classmethod
+        # def bind_visdom(self, vis):
+            # return interface_bind(self, vis)
+        @classmethod
+        def bind_visdom(I, vis, env='testdev'):
+            '''
+            Needs to implement two
+            '''
+
+            '''
+            Create a frontend window
+              - This allows frontend to send data back to server
+            '''
+            I.init_vis_form(vis, env, I.__class__.__name__)
+
+            '''
+            register backend callback
+               - this performs computation given the message
+               - and renders to output
+            '''
+            for cbk in MarkovComapreEventData.callback_list:
+                callback = MarkovComapreEventData.make_callback(cbk.on_recv, vis, env)
+                vis.register_event_handler(callback, cbk.name)
+            # vis.register_event_handler(callback, 'compare')
+            return 0
+
+        @classmethod
+        def init_vis_form_default(self, vis, env=None, win=None):
+            if env is None:
+                env = self.env
+            if win is None:
+                win = self.win
+            self.init_vis_form(vis, env, win)
+
+        @classmethod
+        def init_vis_form(self, vis, env, win):
+            from markov_lm.util_base import toml_to_argv, dict_to_argv
+            target_env = env
+            target_win = win
+
+
+            default_model1 = '''
+            loglr = -4
+            LOAD = "100_"
+            batch_size = 100
+
+            [model]
+            embed_dim=60
+            model_name = "DLM142"
+            kernel_size = 3
+            window_size = 1
+            depth = 12
+            p_null = 0.05
+            '''
+            k  = 'target_env'
+            vd = 'compare0003'
+            form_target_env = vd
+            msg = MarkovComapreEventData(
+                target_env = form_target_env,
+                model_session_config_1=default_model1,
+                model_session_config_2=default_model1)
+
+            msg.vis_add_form_with_callback(vis, env, win)

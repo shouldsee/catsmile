@@ -61,6 +61,12 @@ def argv_to_conf(cli_argv):
 import json
 
 
+
+
+from markov_lm.core_models import InterfaceDev
+
+
+
 def main():
     if '--server' in sys.argv:
         '''
@@ -79,10 +85,21 @@ def main():
         import visdom
         vis = visdom.Visdom(**meta_dict['visdom'])#port=9002,base_url='/visdom')
 
-        _ = InterfaceCompare.bind_visdom(vis)
+        out = []
+        iface_list = [InterfaceCompare]
+        # if '--dev' in sys.argv:
+        iface_list+=[InterfaceDev]
+
+        for iface in iface_list:
+            print(f'[BindingInterface]{iface}')
+            ret = iface.bind_visdom(vis)
+            out.append((iface,ret))
 
         input('Wating for callback')
         sys.exit(0)
+
+
+
 
     else:
         # conf,  CKPT, STRICT_LOAD, BLACKLIST,SAVE_INTERVAL =
