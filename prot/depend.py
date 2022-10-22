@@ -90,15 +90,17 @@ def prepare_run():
 	'''))
 
 	### loads environ from bash file
-	xd = toml.loads(open(TARGET,'r').read())
-	for line in example.strip().splitlines():
-		k = line.split('=',1)
-		if len(k)!=2:
-			continue
+	def run():
+		xd = toml.loads(open(TARGET,'r').read())
+		for line in example.strip().splitlines():
+			k = line.split('=',1)
+			if len(k)!=2:
+				continue
 
-		k =k[0].strip()
-		if k:
-			os.environ[k] = xd[k]
+			k =k[0].strip()
+			if k:
+				os.environ[k] = xd[k]
+	RWC(run=run)
 
 
 	# Build and install the latest gmxapi Python package.
