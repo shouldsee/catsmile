@@ -16,3 +16,4 @@ pandas
 visdom
 torch
 pydantic
+jinja2
