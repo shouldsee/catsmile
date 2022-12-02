@@ -336,6 +336,7 @@ if 1:
 
 
         def vis_add_form_with_callback(self, vis, env, win, ):
+            print(f'[addFormCallback]{env}/{win}/ {vis}')
             callback_list = self.callback_list
             # del callback_target
             '''
@@ -380,11 +381,12 @@ if 1:
             v += '<br/>'
 
             k = 'model_session_config_1'
-            v += add_textarea(k, toml.dumps(msg.__dict__[k]))
+            textarea_style= "border:2px solid black; width:90%; height: 300px;"
+            v += add_textarea(k, toml.dumps(msg.__dict__[k]),textarea_style)
             v += '<br/>'
 
             k = 'model_session_config_2'
-            v += add_textarea(k, toml.dumps(msg.__dict__[k]))
+            v += add_textarea(k, toml.dumps(msg.__dict__[k]),textarea_style)
             v += '<br/>'
 
             # xx1 = toml.loads(default_model1)
@@ -396,17 +398,56 @@ if 1:
             for cbk in callback_list:
                 btns += f'<button onclick="javascript:{get_js_cbk(cbk.name)}" style="height:40px; font-size:30px; ">{cbk.name}</button>'
                 btns +='<br/>'
-            win_out = vis.text(
-            f'''
-            <div class="visext-window" style="{css}">
+
+            text = f'''
                 <form action="javascript:void(0);">
                 {btns}
                 <br/>
                 {v}
                 </form>
-            </div>
             '''
-            ,env=env,win=win)
+            win_out = vis.text(text
+            ,env=env,win=win,opts=dict(height=800,width=400))
+            from visdom import _assert_opts,_title2str
+            # from pprint import pprint
+            # if 1:
+            #     endpoint = 'events'
+            #     # endpoint = 'update'
+            #     # opts = {}
+            #     # opts = {'width':300,'height':200}
+            #     # opts = {} if opts is None else opts
+            #     # _title2str(opts)
+            #     # _assert_opts(opts)
+            #     # pprint(opts)
+
+
+            #     opts = {'width':300,'height':200}
+
+            #     # append = False
+            #     # if append:
+            #     #     endpoint = 'update'
+            #     # else:
+            #     #     endpoint = 'events'
+            #     # extra = {'opts':{'width':300,'height':200}}
+            #     # extra = {'width':300,'height':200}
+            #     # extra ={}
+            #     msg = {
+            #     'data': [
+            #         {'content':text,
+            #         'type':'text',
+            #         }
+            #     ],
+            #     'win': win,
+            #     'eid': env,
+            #     'opts': opts,
+            #     } 
+            #     # msg.update(extra)
+            #     import json
+            #     print(json.dumps(msg))
+            #     x = vis._send(msg, endpoint=endpoint)
+            #     # import pdb;pdb.set_trace()
+            #     win_out = x
+            # # assert 0,win_out
             return win,win_out
 
         @staticmethod
