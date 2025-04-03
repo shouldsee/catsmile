@@ -1,2 +1,2 @@
-[CATSMILE](http://117.50.179.158/): A CATalogue of Statistical Machine Learning Error Functions
+[CATSMILE](http://www.catsmile.com.cn/): A CATalogue of Statistical Machine Learning Error Functions
 
